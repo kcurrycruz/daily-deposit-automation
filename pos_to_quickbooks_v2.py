@@ -14,13 +14,29 @@ from datetime import date, datetime
 from pathlib import Path
 
 
+def get_project_root() -> Path:
+    """Return the writable app root in source and PyInstaller builds."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+PROJECT_ROOT = get_project_root()
+QB_IMPORT_DIR = PROJECT_ROOT / "output" / "qb_imports"
+SUMMARY_DIR = PROJECT_ROOT / "output" / "summaries"
+LOG_DIR = PROJECT_ROOT / "logs"
+
+for _folder in (QB_IMPORT_DIR, SUMMARY_DIR, LOG_DIR):
+    _folder.mkdir(parents=True, exist_ok=True)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 
 CONFIG = {
     "pos_export_folder": r"C:\POS_Reports\Daily",
-    "output_folder":     r"S:\Finance & Payroll Forms\Finance Work Files\Daily Deposit\HWFC_Deposit\QB_Imports",
+    "output_folder":     r"S:\Finance Forms Public\QB_Imports",
     "company_name":      "HWFC",
     # Base path for Excel SubDept Sales Total Reports
     # Script will look in: base_excel_path / FY{year} / {Month} /
@@ -139,12 +155,7 @@ CC_TYPE_MAP = {
 #  LOGGING
 # ═══════════════════════════════════════════════════════════════
 
-output_dir = Path(CONFIG["output_folder"])
-if not output_dir.exists():
-    try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        pass
+output_dir = QB_IMPORT_DIR
 
 # Log to console only — no file needed
 logging.basicConfig(
@@ -1338,6 +1349,13 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     else:
         status_lines.append("  ⚠ ISSUES FOUND — Review before importing into QuickBooks!")
 
+    status_path = LOG_DIR / "last_run_status.txt"
+    try:
+        status_path.write_text("\n".join(status_lines), encoding="utf-8")
+        log.info(f"  Status → {status_path}")
+    except Exception as e:
+        log.warning(f"  Could not write status file: {e}")
+
     lines.append(
         f"TRNS\tDEPOSIT\t{date_str}\t{deposit_acct}\t\t{trns_amt:.2f}\tDeposit\t"
     )
@@ -1364,7 +1382,7 @@ def write_excel_summary(sales, discounts, cc, report_date: date) -> Path:
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
 
-    xlsx_path = output_dir / f"deposit_summary_{report_date.strftime('%Y%m%d')}.xlsx"
+    xlsx_path = SUMMARY_DIR / f"deposit_summary_{report_date.strftime('%Y%m%d')}.xlsx"
     wb = openpyxl.Workbook()
 
     def fill_sheet(ws, data: dict, title: str):

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+build/*
+!build/.gitkeep
+dist/
+output/qb_imports/*
+!output/qb_imports/.gitkeep
+output/summaries/*
+!output/summaries/.gitkeep
+logs/*
+!logs/.gitkeep

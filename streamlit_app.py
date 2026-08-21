@@ -1,5 +1,5 @@
 """
-HWFC Daily Deposit - Streamlit UI
+HWFC Daily Deposit - Streamlit UI v2
 Honest Weight Food Co-op
 
 Drop-in replacement for streamlit_app.py.
@@ -36,7 +36,21 @@ import streamlit as st
 # ---------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent
-ENGINE_PATH = ROOT / "pos_to_quickbooks_v2.py"
+
+def resolve_engine_path() -> Path:
+    """Find the deposit engine in the repo root, including known Codespaces filenames."""
+    candidates = [
+        ROOT / "pos_to_quickbooks_v2.py",
+        ROOT / "pos_to_quickbooks_v2_CODESPACES_CONTENT_DETECTION.py",
+        ROOT / "pos_to_quickbooks_v2_CODESPACES_HASH_FINAL_FIX.py",
+        ROOT / "pos_to_quickbooks_v2_CODESPACES_ROLLBACK_STABLE.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+ENGINE_PATH = resolve_engine_path()
 INPUT_DIR = ROOT / "input" / "daily_reports"
 QB_IMPORT_DIR = ROOT / "output" / "qb_imports"
 LOG_DIR = ROOT / "logs"
@@ -60,26 +74,26 @@ st.markdown(
     """
     <style>
     :root {
-        --hwfc-cream: #F6F1E7;
-        --hwfc-paper: #FFFDF8;
-        --hwfc-forest: #2F5233;
-        --hwfc-leaf: #5F7E4A;
-        --hwfc-sage: #DDE7D5;
+        --hwfc-cream: #0E1117;
+        --hwfc-paper: #161B22;
+        --hwfc-forest: #315F3A;
+        --hwfc-leaf: #78A85B;
+        --hwfc-sage: #243126;
         --hwfc-gold: #C7952B;
         --hwfc-clay: #A95F3B;
-        --hwfc-brown: #5D4938;
-        --hwfc-ink: #2C3028;
-        --hwfc-muted: #6F756A;
-        --hwfc-green-soft: #E8F1E3;
-        --hwfc-red-soft: #F8E8E3;
-        --hwfc-yellow-soft: #FAF2D6;
-        --hwfc-border: #DDD5C7;
+        --hwfc-brown: #D6C5A8;
+        --hwfc-ink: #F4F1E8;
+        --hwfc-muted: #A7B0A3;
+        --hwfc-green-soft: #16251A;
+        --hwfc-red-soft: #2A1717;
+        --hwfc-yellow-soft: #2B2515;
+        --hwfc-border: #30363D;
     }
 
     .stApp {
         background:
-            radial-gradient(circle at 8% 4%, rgba(95,126,74,.10), transparent 22rem),
-            linear-gradient(180deg, #F8F4EC 0%, #F3EEE4 100%);
+            radial-gradient(circle at 8% 4%, rgba(120,168,91,.10), transparent 22rem),
+            linear-gradient(180deg, #0E1117 0%, #0B0F14 100%);
         color: var(--hwfc-ink);
     }
 
@@ -90,7 +104,7 @@ st.markdown(
     }
 
     h1, h2, h3 {
-        color: var(--hwfc-forest);
+        color: #F4F1E8;
         letter-spacing: -0.02em;
     }
 
@@ -151,10 +165,10 @@ st.markdown(
     .hwfc-step {
         border: 1px solid var(--hwfc-border);
         border-radius: 999px;
-        background: rgba(255,253,248,.88);
+        background: #161B22;
         padding: 9px 12px;
         text-align: center;
-        color: var(--hwfc-brown);
+        color: #D6C5A8;
         font-size: .82rem;
         font-weight: 700;
     }
@@ -183,24 +197,24 @@ st.markdown(
 
     .hwfc-result.good {
         background: var(--hwfc-green-soft);
-        border-color: #B9CFAE;
+        border-color: #315F3A;
     }
 
     .hwfc-result.warn {
         background: var(--hwfc-yellow-soft);
-        border-color: #E2CC80;
+        border-color: #8D7427;
     }
 
     .hwfc-result.bad {
         background: var(--hwfc-red-soft);
-        border-color: #DCAFA0;
+        border-color: #8D3A33;
     }
 
     .hwfc-result-title {
         font-size: 1.18rem;
         font-weight: 850;
         margin-bottom: 2px;
-        color: var(--hwfc-forest);
+        color: #EAF4E7;
     }
 
     .hwfc-result-sub {
@@ -209,12 +223,12 @@ st.markdown(
     }
 
     .hwfc-card {
-        background: rgba(255,253,248,.92);
+        background: #161B22;
         border: 1px solid var(--hwfc-border);
         border-radius: 16px;
         padding: 16px 18px;
         min-height: 118px;
-        box-shadow: 0 6px 18px rgba(78, 66, 48, .06);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, .18);
     }
 
     .hwfc-card-label {
@@ -230,7 +244,7 @@ st.markdown(
         font-family: Georgia, 'Times New Roman', serif;
         font-size: 1.58rem;
         font-weight: 700;
-        color: var(--hwfc-forest);
+        color: #EAF4E7;
         line-height: 1.05;
     }
 
@@ -253,10 +267,10 @@ st.markdown(
     .hwfc-equation {
         padding: 16px 18px;
         border-radius: 14px;
-        background: #F1EADC;
-        border: 1px solid #D9CDB8;
+        background: #161B22;
+        border: 1px solid #30363D;
         font-family: Georgia, 'Times New Roman', serif;
-        color: var(--hwfc-brown);
+        color: #D6C5A8;
         margin: 10px 0 14px;
     }
 
@@ -269,8 +283,8 @@ st.markdown(
     }
 
     div[data-testid="stFileUploader"] {
-        background: rgba(255,253,248,.82);
-        border: 1px dashed #B7AA94;
+        background: #161B22;
+        border: 1px dashed #49604B;
         border-radius: 14px;
         padding: 4px 12px;
     }
@@ -278,6 +292,23 @@ st.markdown(
     div[data-testid="stDateInput"] > div,
     div[data-testid="stFileUploader"] section {
         border-radius: 12px;
+    }
+
+    div[data-baseweb="input"],
+    div[data-baseweb="select"],
+    div[data-testid="stFileUploader"] section,
+    div[data-testid="stExpander"] details {
+        background: #161B22 !important;
+        color: #F4F1E8 !important;
+        border-color: #30363D !important;
+    }
+
+    label, p, span, .stMarkdown, .stCaption {
+        color: #E8ECE7;
+    }
+
+    div[data-testid="stAlert"] {
+        color: #F4F1E8;
     }
 
     .stButton > button,
@@ -712,8 +743,9 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
 def run_engine(uploaded_file, deposit_date: date) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
-            f"Deposit engine not found at {ENGINE_PATH.name}. "
-            "Keep streamlit_app.py beside pos_to_quickbooks_v2.py."
+            "Deposit engine is missing from this Streamlit repository. "
+            "Upload pos_to_quickbooks_v2.py into the SAME GitHub folder as streamlit_app.py, "
+            "commit it, and let Streamlit redeploy."
         )
 
     ext = Path(uploaded_file.name).suffix.lower()

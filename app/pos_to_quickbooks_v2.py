@@ -1261,6 +1261,14 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     ebt_food = bs_data.get("ebt_food", 0.0)
     bs_ebt   = round(abs(ebt_cash) + abs(ebt_food), 2) or None
 
+    charity_bs_amt = round(abs(bs_data.get("charity", 0.0)), 2)
+    pass_through_amt = round(abs(pass_through_total or 0.0), 2)
+    charity_combined = round(charity_bs_amt + pass_through_amt, 2)
+    log.info(
+        f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + "
+        f"HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}"
+    )
+
     MANUAL_LINES = [
         # Member shares
         ("6100000 · Member Shares (Paid-In Equity)",  "",                    "Member Shares - Paid", bs("subscription") if bs("subscription") else None),
@@ -1278,7 +1286,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
         ("1311100 · Inventory - Bottles Deposit",      "",                    "Bottle Return",      -bs("bottle_return") if bs("bottle_return") else None),
         # Charitable donations — from BS sheet
-        ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)", round((bs("charity") or 0.0) + (pass_through_total or 0.0), 2) or None),
+        ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)",
+         charity_combined or None),
         ("4160000 · Charitable Donations Payable",     "",                    "Dust Bunnies", dust_bunnies_total if dust_bunnies_total else None),
         # BS code 207 — Nickel Round Up/Down
         ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round"), "Admin"),

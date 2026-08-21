@@ -1121,9 +1121,11 @@ def find_todays_files(deposit_date=None):
 # ═══════════════════════════════════════════════════════════════
 
 def spl(date_str, acct, name, amount, memo, class_name=""):
-    """Build one SPL line. amount=None leaves the amount blank for manual entry."""
+    """Build one SPL line. amount=None leaves the amount blank for manual entry.
+    CLASS is intentionally left blank for all imported lines.
+    """
     amt_str = f"{amount:.2f}" if amount is not None else ""
-    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t{class_name}"
+    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
 
 
 def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0) -> Path:
@@ -1316,7 +1318,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         # Charitable donations — from BS sheet
         ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)", charity_combined or None),
         # BS code 207 — Nickel Round Up/Down
-        ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round"), "Admin"),
+        ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round")),
         # Gift cards & food bucks
         ("4160500 · Gift Cards - Sold - Old/Vantiv",   "",                    "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks",    "",                    "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
@@ -1352,14 +1354,13 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     for entry in MANUAL_LINES:
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
-        class_name = entry[4] if len(entry) > 4 else ""
         if amt is not None and amt != 0:
             # QB flips sign — put -amt in IIF so QB displays amt correctly
             iif_amt = -amt
             spl_total += iif_amt
         else:
             iif_amt = None
-        spls.append(spl(date_str, acct, name, iif_amt, memo, class_name))
+        spls.append(spl(date_str, acct, name, iif_amt, memo))
 
     # ── MISC TBA PURCHASES — non-zero misc sub-depts at the bottom ──
     if misc_tba_lines:

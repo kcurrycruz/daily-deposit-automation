@@ -855,11 +855,11 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
 
 def find_todays_files(deposit_date=None):
     folder = Path(CONFIG["pos_export_folder"])
-    today  = date.today()
+    selected_date = deposit_date or date.today()
     date_patterns = [
-        today.strftime("%Y-%m-%d"), today.strftime("%m-%d-%Y"),
-        today.strftime("%m%d%Y"),   today.strftime("%Y%m%d"),
-        today.strftime("%m%d%y"),
+        selected_date.strftime("%Y-%m-%d"), selected_date.strftime("%m-%d-%Y"),
+        selected_date.strftime("%m%d%Y"),   selected_date.strftime("%Y%m%d"),
+        selected_date.strftime("%m%d%y"),
     ]
 
     all_files = list(folder.glob("*.csv")) + list(folder.glob("*.xlsx"))
@@ -867,11 +867,11 @@ def find_todays_files(deposit_date=None):
         f for f in all_files
         if not f.name.startswith("~$")   # skip Excel temp/lock files
         and (any(p in f.name for p in date_patterns)
-             or datetime.fromtimestamp(f.stat().st_mtime).date() == today)
+             or datetime.fromtimestamp(f.stat().st_mtime).date() == selected_date)
     ]
 
     if not todays:
-        log.warning(f"No CSV files found in {folder} for {today} — will try network Excel path only.")
+        log.warning(f"No CSV files found in {folder} for {selected_date} — will try network Excel path only.")
 
     sms_files, cc_file, coupon_files, excel_files = [], None, [], []
     for f in todays:
@@ -899,7 +899,7 @@ def find_todays_files(deposit_date=None):
     for f in list(folder.glob("*.xlsx")):
         if f.name.startswith("~$"):
             continue
-        if any(p in f.name for p in date_patterns) or            datetime.fromtimestamp(f.stat().st_mtime).date() == today:
+        if any(p in f.name for p in date_patterns) or            datetime.fromtimestamp(f.stat().st_mtime).date() == selected_date:
             excel_files.append(f)
             log.info(f"  Excel report    : {f.name}")
 
@@ -908,7 +908,7 @@ def find_todays_files(deposit_date=None):
         base = Path(CONFIG["base_excel_path"])
 
         # FY2026 = July 2025 - June 2026
-        deposit_date = deposit_date or (today - timedelta(days=1))
+        deposit_date = selected_date
 
         fy_year = deposit_date.year + 1 if deposit_date.month >= 7 else deposit_date.year
         fy_folder = base / f"FY {fy_year}"
@@ -1259,8 +1259,10 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info(f"")
 
     # ── HASH SALES 6 — Refunded Discounts + Pass Through Donations ──
+    # Compare the script-calculated total against the actual Hash Sales 6
+    # value read from the Excel report.
     script_hash  = round(abs(refunded_discounts) + abs(pass_through_total), 2)
-    excel_hash   = round(abs(refunded_discounts) + abs(pass_through_total), 2)
+    excel_hash   = round(abs(hash_sales_total), 2)
     hash_diff    = round(abs(excel_hash - script_hash), 2)
     log.info(f"  ─────────────────────────────────────────")
     log.info(f"  HASH SALES 6 CHECK")
@@ -1270,7 +1272,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     log.info(f"  ─────────────────────────────────────────")
     log.info(f"  Script Total:        ${script_hash:>10,.2f}")
     log.info(f"  Hash Sales 6 Total:  ${excel_hash:>10,.2f}")
-    if hash_diff < 0.02:
+    if hash_sales_total == 0.0:
+        log.warning(f"  RESULT: ⚠ NO HASH SALES 6 TOTAL FOUND IN EXCEL — verify manually")
+    elif hash_diff < 0.02:
         log.info(f"  RESULT: ✓ MATCH — OK to import!")
     else:
         log.info(f"  Difference:          ${hash_diff:>10,.2f}")
@@ -1335,6 +1339,14 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         else:
             status_lines.append(f"  DISCOUNTS: ⚠ MISMATCH  Script=${disc_spl:,.2f}  Excel=${excel_discount_total:,.2f}  (off by ${disc_diff:,.2f})")
 
+    if hash_sales_total != 0.0:
+        if hash_diff < 0.02:
+            status_lines.append(f"  HASH SALES: ✓ MATCH   ${script_hash:,.2f}")
+        else:
+            status_lines.append(f"  HASH SALES: ⚠ MISMATCH  Script=${script_hash:,.2f}  Excel=${excel_hash:,.2f}  (off by ${hash_diff:,.2f})")
+    else:
+        status_lines.append("  HASH SALES: ⚠ NO EXCEL TOTAL FOUND")
+
     status_lines.append("")
     status_lines.append(f"  IIF file: {iif_path}")
     status_lines.append(f"  QB import: File → Utilities → Import → IIF Files")
@@ -1343,6 +1355,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     overall_ok = all([
         abs(excel_sales_total - net_sales_check) < 0.02 if excel_sales_total else True,
         abs(excel_discount_total - round(sum(abs(v) for v in discounts.values()), 2)) < 0.02 if excel_discount_total else True,
+        hash_diff < 0.02 if hash_sales_total else False,
     ])
     if overall_ok:
         status_lines.append("  ✓ ALL CHECKS PASSED — Safe to import into QuickBooks!")

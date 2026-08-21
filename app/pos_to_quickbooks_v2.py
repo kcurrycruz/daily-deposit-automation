@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 def get_project_root() -> Path:
-    """Return repository/app root for source runs or executable root if frozen."""
+    """Return repository root for Codespaces/source runs."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
@@ -525,14 +525,12 @@ def parse_excel_report(filepath: Path) -> tuple:
                 try:
                     p1_val = float(val_p1)
                     if "refunded" in val_o1:
-                        refunded_discounts = p1_val
-                        log.info(f"    Refunded Discounts (O1/P1): ${p1_val:.2f}")
+                        log.info(f"    Refunded Discounts found in O1/P1 (${p1_val:.2f}) — HASH tab is authoritative")
                     elif "hash" in val_o1:
                         hash_sales_total = p1_val
                         log.info(f"    Hash Sales (O1/P1): ${p1_val:.2f}")
                     elif "pass through" in val_o1 or "donation" in val_o1:
-                        pass_through_total = p1_val
-                        log.info(f"    Pass Through (O1/P1): ${p1_val:.2f}")
+                        log.info(f"    Pass Through found in O1/P1 (${p1_val:.2f}) — HASH tab is authoritative")
                     elif "dust" in val_o1:
                         dust_bunnies_total = p1_val
                         log.info(f"    Dust Bunnies (O1/P1): ${p1_val:.2f}")
@@ -562,14 +560,12 @@ def parse_excel_report(filepath: Path) -> tuple:
                 try:
                     p2_val = float(val_p2)
                     if "refunded" in val_o2:
-                        refunded_discounts = p2_val
-                        log.info(f"    Refunded Discounts (O2/P2): ${p2_val:.2f}")
+                        log.info(f"    Refunded Discounts found in O2/P2 (${p2_val:.2f}) — HASH tab is authoritative")
                     elif "hash" in val_o2:
                         hash_sales_total = p2_val
                         log.info(f"    Hash Sales (O2/P2): ${p2_val:.2f}")
                     elif "pass through" in val_o2 or "donation" in val_o2:
-                        pass_through_total = p2_val
-                        log.info(f"    Pass Through (O2/P2): ${p2_val:.2f}")
+                        log.info(f"    Pass Through found in O2/P2 (${p2_val:.2f}) — HASH tab is authoritative")
                     elif "dust" in val_o2:
                         dust_bunnies_total = p2_val
                         log.info(f"    Dust Bunnies (O2/P2): ${p2_val:.2f}")
@@ -595,14 +591,12 @@ def parse_excel_report(filepath: Path) -> tuple:
                         dust_bunnies_total = p3_val
                         log.info(f"    Dust Bunnies (O3/P3): ${p3_val:.2f}")
                     elif "refunded" in val_o3:
-                        refunded_discounts = p3_val
-                        log.info(f"    Refunded Discounts (O3/P3): ${p3_val:.2f}")
+                        log.info(f"    Refunded Discounts found in O3/P3 (${p3_val:.2f}) — HASH tab is authoritative")
                     elif "hash" in val_o3:
                         hash_sales_total = p3_val
                         log.info(f"    Hash Sales (O3/P3): ${p3_val:.2f}")
                     elif "pass through" in val_o3 or "donation" in val_o3:
-                        pass_through_total = p3_val
-                        log.info(f"    Pass Through (O3/P3): ${p3_val:.2f}")
+                        log.info(f"    Pass Through found in O3/P3 (${p3_val:.2f}) — HASH tab is authoritative")
                 except (ValueError, TypeError):
                     pass
             continue
@@ -648,6 +642,134 @@ def parse_excel_report(filepath: Path) -> tuple:
 
     log.info(f"  Excel: {len(sales)} accounts mapped, {len(misc_lines)} misc TBA lines")
     return sales, misc_lines, milk_bottle_return, store_coupons_amt, owner_apprec_amt, sales_total_xl, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total
+
+
+
+def parse_hash_sheet(filepath: Path, report_date) -> tuple:
+    """
+    Read the daily HASH worksheet.
+
+    Sheet-name matching is flexible:
+      1. Prefer a sheet containing both the report date and "hash"
+      2. Otherwise use any sheet whose name contains "hash"
+      3. Otherwise scan sheets for HASH-row descriptions
+
+    Recognized rows:
+      - Refunded Discounts
+      - Pass Through Donations
+      - Paid-Ins
+
+    Returns:
+      (refunded_discounts, pass_through_total, paid_in_total)
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+
+    # Common date forms that may appear in worksheet names:
+    # 082026 hash, 82026 hash, 08-20-26 hash, etc.
+    date_tokens = {
+        report_date.strftime("%m%d%y").lower(),
+        f"{report_date.month}{report_date.strftime('%d%y')}".lower(),
+        report_date.strftime("%m-%d-%y").lower(),
+        report_date.strftime("%m_%d_%y").lower(),
+    }
+
+    hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
+
+    # Prefer a date-matched hash tab when available.
+    ws = None
+    found_tab = None
+    for sheet in hash_candidates:
+        low = sheet.lower().replace(" ", "")
+        if any(tok.replace(" ", "") in low for tok in date_tokens):
+            ws = wb[sheet]
+            found_tab = sheet
+            break
+
+    # Otherwise use any sheet containing "hash".
+    if ws is None and hash_candidates:
+        found_tab = hash_candidates[0]
+        ws = wb[found_tab]
+
+    # Final fallback: inspect sheet contents for the expected HASH descriptions.
+    if ws is None:
+        target_phrases = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
+        for sheet in wb.sheetnames:
+            candidate = wb[sheet]
+            found = False
+            for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
+                joined = " ".join(str(v or "") for v in row).lower()
+                if any(p in joined for p in target_phrases):
+                    found = True
+                    break
+            if found:
+                ws = candidate
+                found_tab = sheet
+                break
+
+    if ws is None:
+        log.warning(f"  No HASH sheet found in {filepath.name}")
+        return 0.0, 0.0, 0.0
+
+    log.info(f"  Reading HASH sheet: '{found_tab}'")
+
+    refunded_discounts = 0.0
+    pass_through_total = 0.0
+    paid_in_total = 0.0
+
+    def numeric_values(row):
+        vals = []
+        for idx, v in enumerate(row):
+            if v is None:
+                continue
+            try:
+                # Ignore integer ID/code fields toward the left side of the report.
+                num = float(v)
+            except (TypeError, ValueError):
+                continue
+            vals.append((idx, num))
+        return vals
+
+    for row in ws.iter_rows(values_only=True):
+        joined = " ".join(str(v or "") for v in row).strip()
+        low = joined.lower()
+
+        row_type = None
+        if "refunded discount" in low:
+            row_type = "refunded"
+        elif "pass through" in low and "donation" in low:
+            row_type = "pass_through"
+        elif "paid-ins" in low or "paid ins" in low or "paid-in" in low:
+            row_type = "paid_in"
+
+        if row_type is None:
+            continue
+
+        nums = numeric_values(row)
+        if not nums:
+            continue
+
+        # HASH report amount is normally toward the right side of the row.
+        # Prefer the rightmost non-zero numeric value. This avoids depending
+        # on a fixed Excel column if the report layout shifts slightly.
+        nonzero = [(idx, num) for idx, num in nums if abs(num) > 0.000001]
+        if not nonzero:
+            amount = 0.0
+        else:
+            amount = nonzero[-1][1]
+
+        if row_type == "refunded":
+            refunded_discounts = round(amount, 2)
+            log.info(f"    HASH Refunded Discounts: ${refunded_discounts:,.2f}")
+        elif row_type == "pass_through":
+            pass_through_total = round(amount, 2)
+            log.info(f"    HASH Pass Through Donations: ${pass_through_total:,.2f}")
+        elif row_type == "paid_in":
+            paid_in_total = round(amount, 2)
+            log.info(f"    HASH Paid-Ins: ${paid_in_total:,.2f}")
+
+    return refunded_discounts, pass_through_total, paid_in_total
 
 
 def parse_excel_discounts(filepath: Path, report_date) -> dict:
@@ -814,6 +936,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         "bottle_return":    0.0,
         "charity":          0.0,
         "prepaid_increase": 0.0,
+        "penny_round":      0.0,
         "visa_mc":          0.0,
         "amex":             0.0,
         "discover":         0.0,
@@ -851,6 +974,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 39:   bs["bottle_sales"]      = to_float(amt)
         if code == 40:   bs["milk_bottle_fee"]    = to_float(amt)
         if code == 205:  bs["charity"]            = to_float(amt)
+        if code == 207:  bs["penny_round"]        = to_float(amt)
         if code == 208:  bs["prepaid_increase"]   = to_float(amt)
         # Revenue rows (PkUp = what was actually collected)
         if code == 910:  bs["milk_bottle_return"] = to_float(amt)
@@ -880,16 +1004,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
 
 
 def find_todays_files(deposit_date=None):
-    """
-    Cloud/Codespaces file finder.
-
-    All source files must be uploaded into INPUT_DIR:
-      input/daily_reports/
-
-    The selected deposit date is used to prefer matching filenames.
-    If a single Excel workbook exists and no filename matches, the newest
-    Excel workbook is used as a fallback.
-    """
+    """Find uploaded daily files inside input/daily_reports."""
     folder = Path(CONFIG["pos_export_folder"])
     selected_date = deposit_date or date.today()
 
@@ -907,19 +1022,13 @@ def find_todays_files(deposit_date=None):
         if f.is_file() and not f.name.startswith("~$")
     ]
 
-    dated_files = [
-        f for f in all_files
-        if any(p in f.name for p in date_patterns)
-    ]
-
-    # Prefer date-matched files. If names do not contain dates, use all uploaded
-    # files so the user does not have to rename exports every day.
+    dated_files = [f for f in all_files if any(p in f.name for p in date_patterns)]
     candidates = dated_files if dated_files else all_files
 
     if not candidates:
         raise FileNotFoundError(
             f"No input files found in {folder}. "
-            "Upload the day's Excel/CSV files into input/daily_reports and run again."
+            "Upload the day's files into input/daily_reports and run again."
         )
 
     sms_files, cc_file, coupon_files, excel_files = [], None, [], []
@@ -957,13 +1066,10 @@ def find_todays_files(deposit_date=None):
         else:
             log.info(f"  CSV not recognized: {f.name}")
 
-    # If multiple Excel files are present, prefer date-matched names.
     if len(excel_files) > 1:
         dated_excel = [f for f in excel_files if any(p in f.name for p in date_patterns)]
-        if dated_excel:
-            excel_files = dated_excel
-        else:
-            excel_files = [max(excel_files, key=lambda p: p.stat().st_mtime)]
+        excel_files = dated_excel or [max(excel_files, key=lambda p: p.stat().st_mtime)]
+        if not dated_excel:
             log.info(f"  Multiple Excel files found; using newest: {excel_files[0].name}")
 
     if not sms_files:
@@ -978,13 +1084,13 @@ def find_todays_files(deposit_date=None):
 #  Banking → Make Deposits → 1120200 · NBT Bank - Operating Account
 # ═══════════════════════════════════════════════════════════════
 
-def spl(date_str, acct, name, amount, memo):
+def spl(date_str, acct, name, amount, memo, class_name=""):
     """Build one SPL line. amount=None leaves the amount blank for manual entry."""
     amt_str = f"{amount:.2f}" if amount is not None else ""
-    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
+    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t{class_name}"
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0) -> Path:
     date_str     = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path     = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1164,6 +1270,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         # Charitable donations — from BS sheet
         ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)", round((bs("charity") or 0.0) + (pass_through_total or 0.0), 2) or None),
         ("4160000 · Charitable Donations Payable",     "",                    "Dust Bunnies", dust_bunnies_total if dust_bunnies_total else None),
+        # BS code 207 — Nickel Round Up/Down
+        ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round"), "Admin"),
         # Gift cards & food bucks
         ("4160500 · Gift Cards - Sold - Old/Vantiv",   "",                    "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks",    "",                    "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
@@ -1182,7 +1290,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         # Outreach
         ("8506000 · Outreach - Donations",             "",                    "", -bs("donation") if bs("donation") else None),
         # Paid in/out labels
-        ("4444 · TBA Purchases",                       "",                    "PAID IN:"),
+        ("4444 · TBA Purchases",                       "",                    "PAID IN:", paid_in_total if paid_in_total else None),
         ("4444 · TBA Purchases",                       "",                    "PAID OUT:"),
         # Credit cards — negative in QB, so pass negative amounts
         # (manual loop does iif_amt = -amt, so negative amt → positive IIF → QB shows negative)
@@ -1199,13 +1307,14 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     for entry in MANUAL_LINES:
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
+        class_name = entry[4] if len(entry) > 4 else ""
         if amt is not None and amt != 0:
             # QB flips sign — put -amt in IIF so QB displays amt correctly
             iif_amt = -amt
-            spl_total += iif_amt  # include in balance calculation
+            spl_total += iif_amt
         else:
             iif_amt = None
-        spls.append(spl(date_str, acct, name, iif_amt, memo))
+        spls.append(spl(date_str, acct, name, iif_amt, memo, class_name))
 
     # ── MISC TBA PURCHASES — non-zero misc sub-depts at the bottom ──
     if misc_tba_lines:
@@ -1473,19 +1582,11 @@ def main():
     try:
         today = date.today()
 
-        parser = argparse.ArgumentParser(
-            description="HWFC Daily Deposit Automation"
-        )
-        parser.add_argument(
-            "--date",
-            dest="deposit_date",
-            help="Deposit date in MM/DD/YY or MM/DD/YYYY format. Defaults to yesterday."
-        )
-        parser.add_argument(
-            "--auto",
-            action="store_true",
-            help="Use yesterday without prompting."
-        )
+        parser = argparse.ArgumentParser(description="HWFC Daily Deposit Automation")
+        parser.add_argument("--date", dest="deposit_date",
+                            help="Deposit date in MM/DD/YY or MM/DD/YYYY format")
+        parser.add_argument("--auto", action="store_true",
+                            help="Use yesterday without prompting")
         args, _unknown = parser.parse_known_args()
 
         if args.deposit_date:
@@ -1498,8 +1599,7 @@ def main():
                     continue
             if parsed is None:
                 raise ValueError(
-                    f"Could not parse date '{args.deposit_date}'. "
-                    "Use MM/DD/YY, for example 08/20/26."
+                    f"Could not parse date '{args.deposit_date}'. Use MM/DD/YY, for example 08/20/26."
                 )
             yesterday = parsed
             log.info(f"  Using requested date: {yesterday.strftime('%B %d, %Y')}")
@@ -1527,6 +1627,7 @@ def main():
         refunded_discounts   = 0.0
         hash_sales_total     = 0.0
         refunded_discounts   = 0.0
+        paid_in_total        = 0.0
         bs_data            = {}
 
         if excel_files:
@@ -1548,8 +1649,19 @@ def main():
             # Also read BS sheet
             for f in excel_files:
                 bs_data = parse_bs_sheet(f, yesterday)
+
+            # HASH tab is authoritative for Refunded Discounts,
+            # Pass Through Donations, and Paid-Ins.
+            refunded_discounts = 0.0
+            pass_through_total = 0.0
+            paid_in_total = 0.0
+            for f in excel_files:
+                hash_refunded, hash_pass_through, hash_paid_in = parse_hash_sheet(f, yesterday)
+                refunded_discounts += hash_refunded
+                pass_through_total += hash_pass_through
+                paid_in_total += hash_paid_in
         else:
-            log.warning("  No Excel report found in input/daily_reports — falling back to CSV files")
+            log.warning("  No Excel report found — falling back to SMS CSV files")
 
         # Read discounts from Excel file if available, else fall back to SMS CSV
         excel_discount_total = 0.0
@@ -1587,7 +1699,7 @@ def main():
             log.error("Nothing mapped. Check files and try again.")
             sys.exit(1)
 
-        iif_path  = generate_iif(sales, discounts, cc, yesterday, owner_local_amt, per_dept_coupons, milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines, excel_sales_total, excel_discount_total, bs_data, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total)
+        iif_path  = generate_iif(sales, discounts, cc, yesterday, owner_local_amt, per_dept_coupons, milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines, excel_sales_total, excel_discount_total, bs_data, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total, paid_in_total)
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)
         except Exception as e:

@@ -460,6 +460,111 @@ MISC_SUBDEPTS = {
 }
 
 
+
+def _sheet_preview(ws, max_rows=25) -> str:
+    """Return a lower-case text preview of the top of a worksheet."""
+    parts = []
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, max_rows), values_only=True):
+        parts.extend(str(v).strip() for v in row if v is not None)
+    return " ".join(parts).lower()
+
+
+def detect_workbook_sheets(wb) -> dict:
+    """
+    Identify workbook tabs by CONTENT first, not worksheet name.
+
+    Returns keys:
+      sales, discounts, bs, hash
+
+    Names are only used as a weak fallback when content detection is
+    inconclusive. This allows tabs to be named Sheet1, Report, Daily, etc.
+    """
+    detected = {"sales": None, "discounts": None, "bs": None, "hash": None}
+
+    previews = {name: _sheet_preview(wb[name]) for name in wb.sheetnames}
+
+    # SALES
+    for name, preview in previews.items():
+        markers = [
+            "subdept sales report",
+            "sub-department",
+            "sub department",
+            "subdept",
+        ]
+        if sum(m in preview for m in markers) >= 2:
+            detected["sales"] = name
+            break
+
+    # DISCOUNTS
+    for name, preview in previews.items():
+        if name == detected["sales"]:
+            continue
+        discount_markers = [
+            "member discounts",
+            "shopper level",
+            "discounts by shopper level",
+            "senior",
+            "owner",
+        ]
+        if (
+            "member discounts" in preview
+            or "discounts by shopper level" in preview
+            or sum(m in preview for m in discount_markers) >= 3
+        ):
+            detected["discounts"] = name
+            break
+
+    # HASH
+    for name, preview in previews.items():
+        if name in detected.values():
+            continue
+        hash_markers = [
+            "refunded discounts",
+            "pass through donations",
+            "paid-ins",
+            "paid ins",
+        ]
+        if sum(m in preview for m in hash_markers) >= 2:
+            detected["hash"] = name
+            break
+
+    # BS
+    for name, preview in previews.items():
+        if name in detected.values():
+            continue
+        bs_markers = [
+            "taxes",
+            "sales tax",
+            "charity",
+            "visa",
+            "mastercard",
+            "amex",
+            "discover",
+            "debit",
+            "cash",
+            "bottle",
+            "nickel round",
+            "prepaid",
+        ]
+        if sum(m in preview for m in bs_markers) >= 4:
+            detected["bs"] = name
+            break
+
+    # Weak name fallback only if content detection missed something.
+    for name in wb.sheetnames:
+        low = name.lower()
+        if detected["discounts"] is None and "discount" in low:
+            detected["discounts"] = name
+        if detected["hash"] is None and "hash" in low:
+            detected["hash"] = name
+        if detected["bs"] is None and (" bs" in f" {low}" or "balance" in low):
+            detected["bs"] = name
+        if detected["sales"] is None and ("subdept" in low or "sales report" in low):
+            detected["sales"] = name
+
+    return detected
+
+
 def parse_excel_report(filepath: Path) -> tuple:
     """
     Read the SubDept Sales Report Excel file.
@@ -483,12 +588,16 @@ def parse_excel_report(filepath: Path) -> tuple:
             ) from e
         raise
 
-    if 'SubDept Sales Report' not in wb.sheetnames:
-        log.error(f"  Sheet 'SubDept Sales Report' not found in {filepath.name}")
-        log.error(f"  Available sheets: {wb.sheetnames}")
-        return {}, [], 0.0, 0.0, 0.0
+    detected = detect_workbook_sheets(wb)
+    sales_sheet = detected.get("sales")
 
-    ws = wb['SubDept Sales Report']
+    if sales_sheet is None:
+        log.error(f"  Could not identify the sales sheet in {filepath.name}")
+        log.error(f"  Available sheets: {wb.sheetnames}")
+        return {}, [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+    ws = wb[sales_sheet]
+    log.info(f"  Detected sales sheet: '{sales_sheet}'")
     sales              = {}
     misc_lines         = []
     milk_bottle_return = 0.0
@@ -663,37 +772,15 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     import openpyxl
 
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-
-    # Prefer any worksheet containing "hash".
-    hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
-    ws = wb[hash_candidates[0]] if hash_candidates else None
-    found_tab = hash_candidates[0] if hash_candidates else None
-
-    # Fallback: scan for the known subdept descriptions/codes.
-    if ws is None:
-        for sheet in wb.sheetnames:
-            candidate = wb[sheet]
-            found_known_row = False
-            for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
-                joined = " ".join(str(v or "") for v in row).lower()
-                if (
-                    "refunded discounts" in joined
-                    or "pass through donations" in joined
-                    or "paid-ins" in joined
-                    or "paid ins" in joined
-                ):
-                    found_known_row = True
-                    break
-            if found_known_row:
-                ws = candidate
-                found_tab = sheet
-                break
+    detected = detect_workbook_sheets(wb)
+    found_tab = detected.get("hash")
+    ws = wb[found_tab] if found_tab else None
 
     if ws is None:
-        log.warning(f"  No HASH sheet found in {filepath.name}")
+        log.warning(f"  Could not identify a HASH sheet in {filepath.name}")
         return 0.0, 0.0, 0.0
 
-    log.info(f"  Reading HASH sheet: '{found_tab}'")
+    log.info(f"  Detected HASH sheet: '{found_tab}'")
 
     # Find the Amount header anywhere in the top section.
     amount_col = None
@@ -828,26 +915,12 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
     ]
 
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = None
-    found_tab = None
-
-    for candidate in tab_candidates:
-        if candidate in wb.sheetnames:
-            ws = wb[candidate]
-            found_tab = candidate
-            break
-
-    # Fallback: find any sheet ending in " discounts"
-    if ws is None:
-        for sheet in wb.sheetnames:
-            if sheet.lower().endswith(" discounts") or sheet.lower().endswith("discounts"):
-                ws = wb[sheet]
-                found_tab = sheet
-                break
+    detected = detect_workbook_sheets(wb)
+    found_tab = detected.get("discounts")
+    ws = wb[found_tab] if found_tab else None
 
     if ws is None:
-        log.warning(f"  No discounts sheet found in {filepath.name}")
-        log.warning(f"  Tried: {tab_candidates}")
+        log.warning(f"  Could not identify a discounts sheet in {filepath.name}")
         log.warning(f"  Available: {wb.sheetnames}")
         return {}
 
@@ -946,23 +1019,15 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
     ]
 
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = None
-    for candidate in tab_candidates:
-        if candidate in wb.sheetnames:
-            ws = wb[candidate]
-            log.info(f"  Reading BS sheet: '{candidate}'")
-            break
+    detected = detect_workbook_sheets(wb)
+    found_tab = detected.get("bs")
+    ws = wb[found_tab] if found_tab else None
 
     if ws is None:
-        for sheet in wb.sheetnames:
-            if sheet.upper().endswith(" BS"):
-                ws = wb[sheet]
-                log.info(f"  Reading BS sheet: '{sheet}'")
-                break
-
-    if ws is None:
-        log.warning(f"  No BS sheet found in {filepath.name}")
+        log.warning(f"  Could not identify a BS sheet in {filepath.name}")
         return {}
+
+    log.info(f"  Detected BS sheet: '{found_tab}'")
 
     bs = {
         "sales_tax":        0.0,
@@ -1677,6 +1742,22 @@ def main():
         bs_data            = {}
 
         if excel_files:
+            # Log the detected worksheet roles before processing.
+            try:
+                import openpyxl
+                for f in excel_files:
+                    _wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+                    _det = detect_workbook_sheets(_wb)
+                    log.info(
+                        "  Worksheet detection: "
+                        f"sales='{_det.get('sales')}', "
+                        f"discounts='{_det.get('discounts')}', "
+                        f"bs='{_det.get('bs')}', "
+                        f"hash='{_det.get('hash')}'"
+                    )
+            except Exception as e:
+                log.warning(f"  Could not preview worksheet detection: {e}")
+
             for f in excel_files:
                 xl_sales, xl_misc, mb_ret, sc_amt, oa_amt, xl_total, pt_total, db_total, mbr, rd, hs = parse_excel_report(f)
                 for k, v in xl_sales.items():

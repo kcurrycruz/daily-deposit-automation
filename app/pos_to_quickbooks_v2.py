@@ -649,15 +649,13 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     """
     Read the daily HASH worksheet.
 
-    Sheet-name matching is flexible:
-      1. Prefer a sheet containing both the report date and "hash"
-      2. Otherwise use any sheet whose name contains "hash"
-      3. Otherwise scan sheets for HASH-row descriptions
+    Source rows are identified primarily by subdepartment code:
+      23 = Refunded Discounts
+      32 = Pass Through Donations
+      34 = Paid-Ins
 
-    Recognized rows:
-      - Refunded Discounts
-      - Pass Through Donations
-      - Paid-Ins
+    The worksheet name does NOT have to be exactly "082026 hash".
+    Any sheet containing "hash" is accepted, with a content-based fallback.
 
     Returns:
       (refunded_discounts, pass_through_total, paid_in_total)
@@ -666,51 +664,29 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
 
-    date_tokens = {
-        report_date.strftime("%m%d%y").lower(),
-        f"{report_date.month}{report_date.strftime('%d%y')}".lower(),
-        report_date.strftime("%m-%d-%y").lower(),
-        report_date.strftime("%m_%d_%y").lower(),
-    }
-
+    # Prefer any worksheet containing "hash".
     hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
+    ws = wb[hash_candidates[0]] if hash_candidates else None
+    found_tab = hash_candidates[0] if hash_candidates else None
 
-    ws = None
-    found_tab = None
-
-    # Prefer date-matched HASH tab.
-    for sheet in hash_candidates:
-        low = sheet.lower().replace(" ", "")
-        if any(tok.replace(" ", "") in low for tok in date_tokens):
-            ws = wb[sheet]
-            found_tab = sheet
-            break
-
-    if ws is None and hash_candidates:
-        found_tab = hash_candidates[0]
-        ws = wb[found_tab]
-
-    # Content fallback.
+    # Fallback: scan for the known subdept descriptions/codes.
     if ws is None:
-        target_phrases = (
-            "refunded discounts",
-            "pass through donations",
-            "paid-ins",
-            "paid ins",
-        )
         for sheet in wb.sheetnames:
             candidate = wb[sheet]
-            for row in candidate.iter_rows(
-                min_row=1,
-                max_row=min(candidate.max_row, 25),
-                values_only=True
-            ):
+            found_known_row = False
+            for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
                 joined = " ".join(str(v or "") for v in row).lower()
-                if any(p in joined for p in target_phrases):
-                    ws = candidate
-                    found_tab = sheet
+                if (
+                    "refunded discounts" in joined
+                    or "pass through donations" in joined
+                    or "paid-ins" in joined
+                    or "paid ins" in joined
+                ):
+                    found_known_row = True
                     break
-            if ws is not None:
+            if found_known_row:
+                ws = candidate
+                found_tab = sheet
                 break
 
     if ws is None:
@@ -719,65 +695,115 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
 
-    # Locate the Amount column from the report header instead of guessing
-    # from all numeric cells in a row. This prevents sub-dept 34 from being
-    # mistaken for the $284.50 Paid-In amount.
+    # Find the Amount header anywhere in the top section.
     amount_col = None
-    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 15), values_only=True):
+    amount_header_row = None
+    for row_num, row in enumerate(
+        ws.iter_rows(min_row=1, max_row=min(ws.max_row, 20), values_only=True),
+        start=1
+    ):
         for idx, value in enumerate(row):
             if value is None:
                 continue
             label = str(value).strip().lower()
-            if label == "amount" or label.startswith("amount"):
+            if "amount" in label and "total" not in label:
                 amount_col = idx
+                amount_header_row = row_num
                 break
         if amount_col is not None:
             break
 
     if amount_col is None:
-        log.warning("  HASH sheet Amount column not found — cannot safely read HASH amounts.")
+        log.warning("  HASH Amount column not found — HASH values cannot be imported safely.")
         return 0.0, 0.0, 0.0
 
-    log.info(f"  HASH Amount column: {amount_col + 1}")
+    log.info(f"  HASH Amount header found at row {amount_header_row}, column {amount_col + 1}")
 
     refunded_discounts = 0.0
     pass_through_total = 0.0
     paid_in_total = 0.0
 
-    for row in ws.iter_rows(values_only=True):
-        joined = " ".join(str(v or "") for v in row).strip()
-        low = joined.lower()
+    target_codes = {
+        23: "refunded",
+        32: "pass_through",
+        34: "paid_in",
+    }
 
-        row_type = None
-        if "refunded discount" in low:
-            row_type = "refunded"
-        elif "pass through" in low and "donation" in low:
-            row_type = "pass_through"
-        elif "paid-ins" in low or "paid ins" in low or "paid-in" in low:
-            row_type = "paid_in"
+    for excel_row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        # Find a target subdepartment code in the left side of the row.
+        code = None
+        for idx in range(min(4, len(row))):
+            value = row[idx]
+            if value is None:
+                continue
+            try:
+                candidate_code = int(float(value))
+            except (TypeError, ValueError):
+                continue
+            if candidate_code in target_codes:
+                code = candidate_code
+                break
 
-        if row_type is None:
+        if code is None:
             continue
 
         if len(row) <= amount_col:
+            log.warning(f"    HASH row {excel_row_num} code {code}: Amount column missing")
             continue
 
         raw_amount = row[amount_col]
+
+        # Primary source: exact Amount column.
         try:
             amount = round(float(raw_amount), 2)
         except (TypeError, ValueError):
-            log.warning(f"    HASH row found but Amount value is invalid: {raw_amount!r}")
+            amount = None
+
+        # Fallback if the Amount header was shifted/merged:
+        # use numeric values to the RIGHT of the description area, excluding
+        # the known subdept code. Prefer the first currency-like value that
+        # is not the code itself.
+        if amount is None:
+            fallback_values = []
+            for idx, value in enumerate(row):
+                if idx < 3 or value is None:
+                    continue
+                try:
+                    num = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if abs(num - code) < 0.000001:
+                    continue
+                fallback_values.append((idx, num))
+
+            if fallback_values:
+                # For this HASH report, Qty precedes Amount. When at least two
+                # numeric values exist, the second numeric value is Amount.
+                amount = round(
+                    fallback_values[1][1] if len(fallback_values) >= 2 else fallback_values[0][1],
+                    2
+                )
+
+        if amount is None:
+            log.warning(f"    HASH row {excel_row_num} code {code}: could not read Amount")
             continue
+
+        row_type = target_codes[code]
 
         if row_type == "refunded":
             refunded_discounts = amount
-            log.info(f"    HASH Refunded Discounts: ${refunded_discounts:,.2f}")
+            log.info(f"    HASH code 23 Refunded Discounts: ${amount:,.2f}")
         elif row_type == "pass_through":
             pass_through_total = amount
-            log.info(f"    HASH Pass Through Donations: ${pass_through_total:,.2f}")
+            log.info(f"    HASH code 32 Pass Through Donations: ${amount:,.2f}")
         elif row_type == "paid_in":
             paid_in_total = amount
-            log.info(f"    HASH Paid-Ins: ${paid_in_total:,.2f}")
+            log.info(f"    HASH code 34 Paid-Ins: ${amount:,.2f}")
+
+    log.info(
+        f"  HASH values used: Refunded=${refunded_discounts:,.2f}, "
+        f"PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}"
+    )
 
     return refunded_discounts, pass_through_total, paid_in_total
 
@@ -1262,12 +1288,14 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     bs_ebt   = round(abs(ebt_cash) + abs(ebt_food), 2) or None
 
     charity_bs_amt = round(abs(bs_data.get("charity", 0.0)), 2)
-    pass_through_amt = round(abs(pass_through_total or 0.0), 2)
+    pass_through_amt = round(abs(pass_through_total), 2)
     charity_combined = round(charity_bs_amt + pass_through_amt, 2)
+
     log.info(
         f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + "
         f"HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}"
     )
+    log.info(f"    Paid-In mapping: HASH Paid-Ins=${abs(paid_in_total):,.2f} → 4444 · TBA Purchases / PAID IN:")
 
     MANUAL_LINES = [
         # Member shares
@@ -1286,9 +1314,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
         ("1311100 · Inventory - Bottles Deposit",      "",                    "Bottle Return",      -bs("bottle_return") if bs("bottle_return") else None),
         # Charitable donations — from BS sheet
-        ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)",
-         charity_combined or None),
-        ("4160000 · Charitable Donations Payable",     "",                    "Dust Bunnies", dust_bunnies_total if dust_bunnies_total else None),
+        ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)", charity_combined or None),
         # BS code 207 — Nickel Round Up/Down
         ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round"), "Admin"),
         # Gift cards & food bucks
@@ -1309,7 +1335,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         # Outreach
         ("8506000 · Outreach - Donations",             "",                    "", -bs("donation") if bs("donation") else None),
         # Paid in/out labels
-        ("4444 · TBA Purchases",                       "",                    "PAID IN:", paid_in_total if paid_in_total else None),
+        ("4444 · TBA Purchases",                       "",                    "PAID IN:", abs(paid_in_total) if paid_in_total else None),
         ("4444 · TBA Purchases",                       "",                    "PAID OUT:"),
         # Credit cards — negative in QB, so pass negative amounts
         # (manual loop does iif_amt = -amt, so negative amt → positive IIF → QB shows negative)

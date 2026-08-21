@@ -8,25 +8,26 @@ RUN:
   py C:\\POS_Automation\\pos_to_quickbooks_v2.py
 """
 
-import sys, re, logging, csv
+import sys, re, logging, csv, argparse
 from datetime import date, datetime, timedelta
 from datetime import date, datetime
 from pathlib import Path
 
 
 def get_project_root() -> Path:
-    """Return the writable app root in source and PyInstaller builds."""
+    """Return repository/app root for source runs or executable root if frozen."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
 
 
 PROJECT_ROOT = get_project_root()
+INPUT_DIR = PROJECT_ROOT / "input" / "daily_reports"
 QB_IMPORT_DIR = PROJECT_ROOT / "output" / "qb_imports"
 SUMMARY_DIR = PROJECT_ROOT / "output" / "summaries"
 LOG_DIR = PROJECT_ROOT / "logs"
 
-for _folder in (QB_IMPORT_DIR, SUMMARY_DIR, LOG_DIR):
+for _folder in (INPUT_DIR, QB_IMPORT_DIR, SUMMARY_DIR, LOG_DIR):
     _folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -35,12 +36,12 @@ for _folder in (QB_IMPORT_DIR, SUMMARY_DIR, LOG_DIR):
 # ═══════════════════════════════════════════════════════════════
 
 CONFIG = {
-    "pos_export_folder": r"C:\POS_Reports\Daily",
-    "output_folder":     r"S:\Finance Forms Public\QB_Imports",
+    "pos_export_folder": str(INPUT_DIR),
+    "output_folder": str(QB_IMPORT_DIR),
     "company_name":      "HWFC",
     # Base path for Excel SubDept Sales Total Reports
     # Script will look in: base_excel_path / FY{year} / {Month} /
-    "base_excel_path":   r"S:\Finance & Payroll Forms\Finance Work Files\Daily Deposit\Daily SubDept Sales Total Reports",
+    "base_excel_path": str(INPUT_DIR),
     # The exact QB account name shown in "Deposit To" field
     "deposit_account":   "1120200 · NBT Bank - Operating Account",
     "cc_pattern": ["Settlement", "Batch", "Commerce", "CCC", "BusinessTrack"],
@@ -122,6 +123,10 @@ INCOME_ACCOUNTS = {
 #  MAPPING 2 — Shopper Level code → QB Discount Account
 # ═══════════════════════════════════════════════════════════════
 
+# Level 1 is intentionally NOT mapped yet.
+# Current strongest clue: 8512006 · Discount 5% - Owner buy Local is the only
+# discount account elsewhere in this script whose shopper code is explicitly unknown.
+# The parser logs Level 1's POS description so the mapping can be confirmed safely.
 SHOPPER_LEVEL_TO_QB = {
     2:  "8512001 · Discount 2% - Owners",
     3:  "8511001 · Discount 2% - Senior Non Owner",
@@ -710,9 +715,19 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
                 pass
             continue
 
-        # Data rows — col 3 = shopper level code, col 8 = amount
+        # Data rows — col 3 = shopper level code, col 8 = amount.
+        # Capture nearby text columns too so unmapped shopper levels can be
+        # identified from the POS report without guessing an accounting map.
         code = row[3] if len(row) > 3 else None
         amt  = row[8] if len(row) > 8 else None
+
+        desc_candidates = []
+        for idx in (2, 4, 1, 5):
+            if len(row) > idx and row[idx] is not None:
+                val = str(row[idx]).strip()
+                if val and not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", val):
+                    desc_candidates.append(val)
+        shopper_desc = " | ".join(dict.fromkeys(desc_candidates)) if desc_candidates else "(no description found)"
 
         if code is None or amt is None:
             continue
@@ -739,7 +754,18 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
             log.info(f"    Level 15 (Student Discount Sun) ${amt:,.2f} — skipped (Sunday only)")
             grand_total = round(grand_total - abs(amt), 2)
         else:
-            log.warning(f"    Level {code}  ${amt:,.2f}  NOT MAPPED")
+            if code == 1:
+                log.warning(
+                    f"    Level 1  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}"
+                )
+                log.warning(
+                    "    Level 1 mapping candidate: 8512006 · Discount 5% - Owner buy Local "
+                    "(UNCONFIRMED — do not post automatically yet)"
+                )
+            else:
+                log.warning(
+                    f"    Level {code}  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}"
+                )
 
     log.info(f"  Discounts: {len(discounts)} accounts, grand total=${grand_total:,.2f}")
     return discounts, grand_total
@@ -854,101 +880,94 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
 
 
 def find_todays_files(deposit_date=None):
+    """
+    Cloud/Codespaces file finder.
+
+    All source files must be uploaded into INPUT_DIR:
+      input/daily_reports/
+
+    The selected deposit date is used to prefer matching filenames.
+    If a single Excel workbook exists and no filename matches, the newest
+    Excel workbook is used as a fallback.
+    """
     folder = Path(CONFIG["pos_export_folder"])
     selected_date = deposit_date or date.today()
+
     date_patterns = [
-        selected_date.strftime("%Y-%m-%d"), selected_date.strftime("%m-%d-%Y"),
-        selected_date.strftime("%m%d%Y"),   selected_date.strftime("%Y%m%d"),
+        selected_date.strftime("%Y-%m-%d"),
+        selected_date.strftime("%m-%d-%Y"),
+        selected_date.strftime("%m%d%Y"),
+        selected_date.strftime("%Y%m%d"),
         selected_date.strftime("%m%d%y"),
+        selected_date.strftime("%m-%d-%y"),
     ]
 
-    all_files = list(folder.glob("*.csv")) + list(folder.glob("*.xlsx"))
-    todays = [
+    all_files = [
+        f for f in folder.iterdir()
+        if f.is_file() and not f.name.startswith("~$")
+    ]
+
+    dated_files = [
         f for f in all_files
-        if not f.name.startswith("~$")   # skip Excel temp/lock files
-        and (any(p in f.name for p in date_patterns)
-             or datetime.fromtimestamp(f.stat().st_mtime).date() == selected_date)
+        if any(p in f.name for p in date_patterns)
     ]
 
-    if not todays:
-        log.warning(f"No CSV files found in {folder} for {selected_date} — will try network Excel path only.")
+    # Prefer date-matched files. If names do not contain dates, use all uploaded
+    # files so the user does not have to rename exports every day.
+    candidates = dated_files if dated_files else all_files
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"No input files found in {folder}. "
+            "Upload the day's Excel/CSV files into input/daily_reports and run again."
+        )
 
     sms_files, cc_file, coupon_files, excel_files = [], None, [], []
-    for f in todays:
-        name_up = f.name.upper()
-        try:
-            peek = f.read_text(encoding="utf-8-sig", errors="replace")[:500].upper()
-        except Exception:
-            peek = ""
-        if any(p.upper() in name_up or p.upper() in peek for p in CONFIG["cc_pattern"]):
-            cc_file = f
-            log.info(f"  CC settlement : {f.name}")
-        elif "COUPON" in name_up:
-            coupon_files.append(f)
-            log.info(f"  Coupon file     : {f.name}")
-        elif "DISCOUNTS BY SHOPPER LEVEL" in peek:
-            sms_files.append(f)
-            log.info(f"  SMS discount file: {f.name}")
-        elif "SUB-DEPARTMENT SINGLE TOTAL" in peek or "SUB-DEPARTMENT" in peek:
-            sms_files.append(f)
-            log.info(f"  SMS sales file: {f.name}")
-        else:
-            log.info(f"  Skipping (no recognised data): {f.name}")
 
-    # Detect Excel SubDept Sales Report files in POS folder
-    for f in list(folder.glob("*.xlsx")):
-        if f.name.startswith("~$"):
-            continue
-        if any(p in f.name for p in date_patterns) or            datetime.fromtimestamp(f.stat().st_mtime).date() == selected_date:
+    for f in candidates:
+        suffix = f.suffix.lower()
+        name_up = f.name.upper()
+
+        if suffix in {".xlsx", ".xlsm"}:
             excel_files.append(f)
             log.info(f"  Excel report    : {f.name}")
+            continue
 
-    # Search network shared drive for Excel file
-    if not excel_files:
-        base = Path(CONFIG["base_excel_path"])
+        if suffix != ".csv":
+            log.info(f"  Skipping unsupported file: {f.name}")
+            continue
 
-        # FY2026 = July 2025 - June 2026
-        deposit_date = selected_date
+        try:
+            peek = f.read_text(encoding="utf-8-sig", errors="replace")[:2000].upper()
+        except Exception:
+            peek = ""
 
-        fy_year = deposit_date.year + 1 if deposit_date.month >= 7 else deposit_date.year
-        fy_folder = base / f"FY {fy_year}"
-
-        # Fiscal month: July=1, Aug=2, Sep=3, Oct=4, Nov=5, Dec=6,
-        #               Jan=7, Feb=8, Mar=9, Apr=10, May=11, Jun=12
-        FISCAL_MONTHS = {
-            7:1, 8:2, 9:3, 10:4, 11:5, 12:6,
-            1:7, 2:8, 3:9,  4:10, 5:11, 6:12
-        }
-        fiscal_num  = FISCAL_MONTHS[deposit_date.month]
-        month_name  = deposit_date.strftime("%B")   # "April"
-        cal_year    = deposit_date.year              # 2026
-        # e.g. "10 - April 2026"
-        month_folder = fy_folder / f"{fiscal_num} - {month_name} {cal_year}"
-
-        log.info(f"  Network path: {month_folder}")
-
-        if month_folder.exists():
-            # Search for xlsx files matching the deposit date patterns
-            for f in sorted(month_folder.glob("*.xlsx")) + sorted(month_folder.glob("*.xls")):
-                if f.name.startswith("~$"):
-                    continue
-                if any(p in f.name for p in date_patterns):
-                    excel_files.append(f)
-                    log.info(f"  Excel (network) : {f.name}")
-            # Fallback: most recently modified xlsx today
-            if not excel_files:
-                for f in sorted(month_folder.glob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True):
-                    if not f.name.startswith("~$"):
-                        excel_files.append(f)
-                        log.info(f"  Excel (latest)  : {f.name}")
-                        break
+        if any(p.upper() in name_up or p.upper() in peek for p in CONFIG["cc_pattern"]):
+            cc_file = f
+            log.info(f"  CC settlement  : {f.name}")
+        elif "COUPON" in name_up:
+            coupon_files.append(f)
+            log.info(f"  Coupon file    : {f.name}")
+        elif "DISCOUNTS BY SHOPPER LEVEL" in peek:
+            sms_files.append(f)
+            log.info(f"  SMS discounts  : {f.name}")
+        elif "SUB-DEPARTMENT SINGLE TOTAL" in peek or "SUB-DEPARTMENT" in peek:
+            sms_files.append(f)
+            log.info(f"  SMS sales      : {f.name}")
         else:
-            log.warning(f"  Month folder not found: {month_folder}")
-            log.warning(f"  Expected: FY {fy_year} / {fiscal_num} - {month_name} {cal_year}")
+            log.info(f"  CSV not recognized: {f.name}")
+
+    # If multiple Excel files are present, prefer date-matched names.
+    if len(excel_files) > 1:
+        dated_excel = [f for f in excel_files if any(p in f.name for p in date_patterns)]
+        if dated_excel:
+            excel_files = dated_excel
+        else:
+            excel_files = [max(excel_files, key=lambda p: p.stat().st_mtime)]
+            log.info(f"  Multiple Excel files found; using newest: {excel_files[0].name}")
 
     if not sms_files:
-        log.info("  Using Excel report only (no CSV files needed)")
-        sms_files = [f for f in todays if f != cc_file]
+        log.info("  No SMS CSV needed if Excel report contains sales/discount tabs.")
 
     return sms_files, cc_file, coupon_files, excel_files
 
@@ -1454,34 +1473,39 @@ def main():
     try:
         today = date.today()
 
-        # Check for --auto flag (used by Task Scheduler — skips date prompt)
-        auto_mode = "--auto" in sys.argv
+        parser = argparse.ArgumentParser(
+            description="HWFC Daily Deposit Automation"
+        )
+        parser.add_argument(
+            "--date",
+            dest="deposit_date",
+            help="Deposit date in MM/DD/YY or MM/DD/YYYY format. Defaults to yesterday."
+        )
+        parser.add_argument(
+            "--auto",
+            action="store_true",
+            help="Use yesterday without prompting."
+        )
+        args, _unknown = parser.parse_known_args()
 
-        if auto_mode:
-            yesterday = today - timedelta(days=1)
-            log.info(f"  Auto mode: using yesterday {yesterday.strftime('%B %d, %Y')}")
+        if args.deposit_date:
+            parsed = None
+            for fmt in ("%m/%d/%y", "%m/%d/%Y", "%m-%d-%y", "%m-%d-%Y", "%m%d%y", "%m%d%Y"):
+                try:
+                    parsed = datetime.strptime(args.deposit_date, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if parsed is None:
+                raise ValueError(
+                    f"Could not parse date '{args.deposit_date}'. "
+                    "Use MM/DD/YY, for example 08/20/26."
+                )
+            yesterday = parsed
+            log.info(f"  Using requested date: {yesterday.strftime('%B %d, %Y')}")
         else:
-            # Interactive mode — ask for date
-            print("")
-            print(f"  Today is {today.strftime('%A, %B %d, %Y')}")
-            date_input = input("  Enter deposit date (MM/DD/YY or MM/DD/YYYY) or press Enter for yesterday: ").strip()
-
-            if date_input == "":
-                yesterday = today - timedelta(days=1)
-                log.info(f"  Using yesterday: {yesterday.strftime('%B %d, %Y')}")
-            else:
-                parsed = None
-                for fmt in ("%m/%d/%y", "%m/%d/%Y", "%m-%d-%y", "%m-%d-%Y", "%m%d%y", "%m%d%Y"):
-                    try:
-                        parsed = datetime.strptime(date_input, fmt).date()
-                        break
-                    except ValueError:
-                        continue
-                if parsed is None:
-                    log.error(f"  Could not parse date '{date_input}'. Use format MM/DD/YY (e.g. 04/07/26)")
-                    sys.exit(1)
-                yesterday = parsed
-                log.info(f"  Using entered date: {yesterday.strftime('%B %d, %Y')}")
+            yesterday = today - timedelta(days=1)
+            log.info(f"  Using yesterday: {yesterday.strftime('%B %d, %Y')}")
 
         log.info(f"Scanning {CONFIG['pos_export_folder']} ...")
         sms_files, cc_file, coupon_files, excel_files = find_todays_files(yesterday)
@@ -1525,7 +1549,7 @@ def main():
             for f in excel_files:
                 bs_data = parse_bs_sheet(f, yesterday)
         else:
-            log.warning("  No Excel report found — falling back to SMS CSV files")
+            log.warning("  No Excel report found in input/daily_reports — falling back to CSV files")
 
         # Read discounts from Excel file if available, else fall back to SMS CSV
         excel_discount_total = 0.0

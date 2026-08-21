@@ -40,6 +40,7 @@ ROOT = Path(__file__).resolve().parent
 def resolve_engine_path() -> Path:
     """Find the deposit engine in the repo root, including known Codespaces filenames."""
     candidates = [
+        ROOT / "app" / "pos_to_quickbooks_v2.py",
         ROOT / "pos_to_quickbooks_v2.py",
         ROOT / "pos_to_quickbooks_v2_CODESPACES_CONTENT_DETECTION.py",
         ROOT / "pos_to_quickbooks_v2_CODESPACES_HASH_FINAL_FIX.py",
@@ -297,6 +298,7 @@ st.markdown(
     div[data-baseweb="input"],
     div[data-baseweb="select"],
     div[data-testid="stFileUploader"] section,
+    div[data-testid="stExpander"],
     div[data-testid="stExpander"] details {
         background: #161B22 !important;
         color: #F4F1E8 !important;
@@ -305,6 +307,21 @@ st.markdown(
 
     label, p, span, .stMarkdown, .stCaption {
         color: #E8ECE7;
+    }
+
+    div[data-testid="stAppViewContainer"],
+    div[data-testid="stHeader"],
+    section[data-testid="stSidebar"] {
+        background-color: #0E1117 !important;
+    }
+
+    div[data-testid="stFileUploaderDropzone"],
+    div[data-testid="stFileUploaderFile"],
+    div[data-testid="stMetric"],
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #161B22 !important;
+        color: #F4F1E8 !important;
+        border-color: #30363D !important;
     }
 
     div[data-testid="stAlert"] {

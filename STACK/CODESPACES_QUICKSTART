@@ -1,0 +1,16 @@
+HWFC Daily Deposit — Codespaces commands
+
+Run yesterday:
+./run_deposit.sh
+
+Run a specific date:
+./run_deposit.sh 08/20/26
+
+Generated IIF:
+output/qb_imports/
+
+Generated summary:
+output/summaries/
+
+Last status:
+logs/last_run_status.txt

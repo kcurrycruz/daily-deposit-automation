@@ -1,5 +1,5 @@
 """
-HWFC Daily Deposit - Streamlit UI v2
+HWFC Daily Deposit - Streamlit UI
 Honest Weight Food Co-op
 
 Drop-in replacement for streamlit_app.py.

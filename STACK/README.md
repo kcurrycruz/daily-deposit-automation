@@ -1,50 +1,78 @@
+[README.md](https://github.com/user-attachments/files/31309520/README.md)
+# HWFC Daily Deposit Automation — Codespaces Edition
 
-# HWFC Daily Deposit Automation
+This version is designed to run away from the HWFC local Windows machine.
 
-## Project layout
+## Daily workflow
 
-```text
-daily-deposit-automation/
-├── app/
-│   ├── HWFC_Deposit_Launcher.pyw
-│   └── pos_to_quickbooks_v2.py
-├── output/
-│   ├── qb_imports/
-│   └── summaries/
-├── logs/
-│   └── last_run_status.txt   # created after a run
-├── build/
-└── README.md
-```
+1. Open this repository in GitHub.
+2. Choose **Code → Codespaces → Create codespace on main**.
+3. In the Codespace file explorer, upload the day's source files into:
 
-## Generated files
+   `input/daily_reports/`
 
-- QuickBooks IIF files: `output/qb_imports/`
-- Excel summaries: `output/summaries/`
-- Last-run status: `logs/last_run_status.txt`
+4. Open the terminal.
+5. Run the deposit for a specific date:
 
-The folders are resolved relative to the project when running from source,
-and relative to `HWFC_Deposit.exe` when running the PyInstaller build.
+   ```bash
+   ./run_deposit.sh 08/20/26
+   ```
 
-## Existing source-data locations
+   Or run without a date to use yesterday:
 
-This restructure does **not** change the POS and shared-drive source report paths.
-Those remain configured inside `app/pos_to_quickbooks_v2.py`.
+   ```bash
+   ./run_deposit.sh
+   ```
 
-## Build
+6. Review the terminal validation results.
+7. Download the generated files from:
 
-Run from the `app` folder:
+   - `output/qb_imports/` — QuickBooks IIF
+   - `output/summaries/` — Excel summary
+   - `logs/last_run_status.txt` — run status
 
-```bat
-C:\Users\karlcruz\AppData\Local\Python\pythoncore-3.14-64\python.exe -m PyInstaller --clean --onedir --windowed --name HWFC_Deposit --add-data "pos_to_quickbooks_v2.py;." HWFC_Deposit_Launcher.pyw
-```
+8. Import the IIF into QuickBooks on the HWFC computer.
 
-After building, the executable will create/use its own:
+## Important privacy rule
 
-```text
-output\qb_imports
-output\summaries
-logs
-```
+Do **not** commit daily sales, discount, credit-card, or deposit output files.
 
-next to `HWFC_Deposit.exe`.
+The repository `.gitignore` is configured so the contents of:
+
+- `input/daily_reports/`
+- `output/qb_imports/`
+- `output/summaries/`
+- `logs/`
+
+are ignored by Git.
+
+For real financial data, make the GitHub repository **private**.
+
+## What changed from the Windows version
+
+The cloud version no longer depends on:
+
+- `C:\POS_Reports\Daily`
+- mapped `S:` drives
+- local Python
+- Tkinter launcher
+- PyInstaller
+- Xcitium/Comodo allowing Python file writes
+
+Everything the engine reads and writes lives inside the remote Codespace.
+
+## Input files
+
+Upload the normal daily Excel workbook and any applicable CSV exports into one folder:
+
+`input/daily_reports/`
+
+The engine detects Excel, discounts, coupons, and Commerce Control Center CSV files from there.
+
+## Codespaces setup
+
+The `.devcontainer/devcontainer.json` file automatically provides Python 3.12 and installs `openpyxl`.
+
+## Validation
+
+GitHub Actions runs a lightweight syntax check whenever the Python engine changes. It does not process financial data.

@@ -666,8 +666,6 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
 
-    # Common date forms that may appear in worksheet names:
-    # 082026 hash, 82026 hash, 08-20-26 hash, etc.
     date_tokens = {
         report_date.strftime("%m%d%y").lower(),
         f"{report_date.month}{report_date.strftime('%d%y')}".lower(),
@@ -677,9 +675,10 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
 
-    # Prefer a date-matched hash tab when available.
     ws = None
     found_tab = None
+
+    # Prefer date-matched HASH tab.
     for sheet in hash_candidates:
         low = sheet.lower().replace(" ", "")
         if any(tok.replace(" ", "") in low for tok in date_tokens):
@@ -687,25 +686,31 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             found_tab = sheet
             break
 
-    # Otherwise use any sheet containing "hash".
     if ws is None and hash_candidates:
         found_tab = hash_candidates[0]
         ws = wb[found_tab]
 
-    # Final fallback: inspect sheet contents for the expected HASH descriptions.
+    # Content fallback.
     if ws is None:
-        target_phrases = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
+        target_phrases = (
+            "refunded discounts",
+            "pass through donations",
+            "paid-ins",
+            "paid ins",
+        )
         for sheet in wb.sheetnames:
             candidate = wb[sheet]
-            found = False
-            for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
+            for row in candidate.iter_rows(
+                min_row=1,
+                max_row=min(candidate.max_row, 25),
+                values_only=True
+            ):
                 joined = " ".join(str(v or "") for v in row).lower()
                 if any(p in joined for p in target_phrases):
-                    found = True
+                    ws = candidate
+                    found_tab = sheet
                     break
-            if found:
-                ws = candidate
-                found_tab = sheet
+            if ws is not None:
                 break
 
     if ws is None:
@@ -714,22 +719,30 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
 
+    # Locate the Amount column from the report header instead of guessing
+    # from all numeric cells in a row. This prevents sub-dept 34 from being
+    # mistaken for the $284.50 Paid-In amount.
+    amount_col = None
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 15), values_only=True):
+        for idx, value in enumerate(row):
+            if value is None:
+                continue
+            label = str(value).strip().lower()
+            if label == "amount" or label.startswith("amount"):
+                amount_col = idx
+                break
+        if amount_col is not None:
+            break
+
+    if amount_col is None:
+        log.warning("  HASH sheet Amount column not found — cannot safely read HASH amounts.")
+        return 0.0, 0.0, 0.0
+
+    log.info(f"  HASH Amount column: {amount_col + 1}")
+
     refunded_discounts = 0.0
     pass_through_total = 0.0
     paid_in_total = 0.0
-
-    def numeric_values(row):
-        vals = []
-        for idx, v in enumerate(row):
-            if v is None:
-                continue
-            try:
-                # Ignore integer ID/code fields toward the left side of the report.
-                num = float(v)
-            except (TypeError, ValueError):
-                continue
-            vals.append((idx, num))
-        return vals
 
     for row in ws.iter_rows(values_only=True):
         joined = " ".join(str(v or "") for v in row).strip()
@@ -746,27 +759,24 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
         if row_type is None:
             continue
 
-        nums = numeric_values(row)
-        if not nums:
+        if len(row) <= amount_col:
             continue
 
-        # HASH report amount is normally toward the right side of the row.
-        # Prefer the rightmost non-zero numeric value. This avoids depending
-        # on a fixed Excel column if the report layout shifts slightly.
-        nonzero = [(idx, num) for idx, num in nums if abs(num) > 0.000001]
-        if not nonzero:
-            amount = 0.0
-        else:
-            amount = nonzero[-1][1]
+        raw_amount = row[amount_col]
+        try:
+            amount = round(float(raw_amount), 2)
+        except (TypeError, ValueError):
+            log.warning(f"    HASH row found but Amount value is invalid: {raw_amount!r}")
+            continue
 
         if row_type == "refunded":
-            refunded_discounts = round(amount, 2)
+            refunded_discounts = amount
             log.info(f"    HASH Refunded Discounts: ${refunded_discounts:,.2f}")
         elif row_type == "pass_through":
-            pass_through_total = round(amount, 2)
+            pass_through_total = amount
             log.info(f"    HASH Pass Through Donations: ${pass_through_total:,.2f}")
         elif row_type == "paid_in":
-            paid_in_total = round(amount, 2)
+            paid_in_total = amount
             log.info(f"    HASH Paid-Ins: ${paid_in_total:,.2f}")
 
     return refunded_discounts, pass_through_total, paid_in_total

@@ -1,0 +1,45 @@
+# HWFC Daily Deposit — Web App
+
+This version wraps the existing Daily Deposit accounting engine in a Streamlit web interface.
+
+## What users do
+
+1. Open the web app.
+2. Choose the deposit date.
+3. Upload the completed daily Excel workbook.
+4. Click **Run Deposit Automation**.
+5. Review Sales, Discounts, HASH values, Charity, and PAID IN.
+6. Download the QuickBooks IIF.
+7. Import and review the deposit in QuickBooks.
+
+No terminal commands are required for normal users.
+
+## Test in Codespaces
+
+Install requirements:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the web app:
+
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+Codespaces should offer to open the forwarded Streamlit port in the browser.
+
+## Deploy
+
+For Streamlit Community Cloud:
+
+- Repository: your `daily-deposit-automation` repository
+- Branch: `main`
+- Main file path: `streamlit_app.py`
+
+Keep the repository private before using real financial data.
+
+## Important
+
+The accounting engine in `app/pos_to_quickbooks_v2.py` is kept separate from the Streamlit interface. The web app calls the existing engine rather than reimplementing its calculations.

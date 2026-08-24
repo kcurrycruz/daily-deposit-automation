@@ -955,6 +955,45 @@ def spl(date_str, acct, name, amount, memo, class_name=""):
     return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
 
 
+def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> list[dict]:
+    """Return signed adjustments needed to bring settlement amounts back to BS totals.
+
+    adjustment = BS - Processed Net Amount.
+    Therefore, when settlement is greater than BS the adjustment is negative;
+    when settlement is lower than BS the adjustment is positive.
+    Differences under two cents are treated as matched and do not create a line.
+    """
+    if not settlement_data:
+        return []
+
+    bs_ebt = round(abs(bs_data.get("ebt_cash", 0.0)) + abs(bs_data.get("ebt_food", 0.0)), 2)
+    checks = [
+        ("VISA/MC", "visa_mc", round(abs(bs_data.get("visa_mc", 0.0)), 2)),
+        ("Discover", "discover", round(abs(bs_data.get("discover", 0.0)), 2)),
+        ("AMEX", "amex", round(abs(bs_data.get("amex", 0.0)), 2)),
+        ("Debit Card", "debit", round(abs(bs_data.get("debit", 0.0)), 2)),
+        ("EBT Cash/Food Stamp", "ebt", bs_ebt),
+    ]
+
+    adjustments = []
+    for label, key, bs_value in checks:
+        if key not in settlement_data:
+            continue
+        settlement_value = round(abs(settlement_data.get(key, 0.0)), 2)
+        adjustment = round(bs_value - settlement_value, 2)
+        if abs(adjustment) < 0.02:
+            continue
+        adjustments.append({
+            "label": label,
+            "key": key,
+            "settlement": settlement_value,
+            "bs": bs_value,
+            "adjustment": adjustment,
+            "memo": f"{label} - Difference between First Data vs BS",
+        })
+    return adjustments
+
+
 def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
@@ -1100,6 +1139,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("Debit Card", "debit", round(abs(bs_data.get("debit", 0.0)), 2)),
         ("EBT Cash/Food Stamp", "ebt", bs_ebt_compare),
     ]
+    card_adjustments = build_card_settlement_adjustments(settlement_data, bs_data)
+    card_adjustments_by_key = {row["key"]: row for row in card_adjustments}
+
     if settlement_data:
         log.info("")
         log.info("  ─────────────────────────────────────────────────────────")
@@ -1107,11 +1149,13 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info("  ─────────────────────────────────────────────────────────")
         for label, key, bs_value in tender_checks:
             settlement_value = round(abs(settlement_data.get(key, 0.0)), 2)
-            difference = round(abs(settlement_value - bs_value), 2)
+            signed_adjustment = round(bs_value - settlement_value, 2)
+            difference = round(abs(signed_adjustment), 2)
             status = "MATCH" if difference < 0.02 else "MISMATCH"
             log.info(
                 f"  CARD SETTLEMENT | {label} | Settlement={settlement_value:.2f} | "
-                f"BS={bs_value:.2f} | Difference={difference:.2f} | {status}"
+                f"BS={bs_value:.2f} | Difference={difference:.2f} | "
+                f"Adjustment={signed_adjustment:.2f} | {status}"
             )
         log.info("  ─────────────────────────────────────────────────────────")
         log.info("")
@@ -1173,6 +1217,29 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             spl_total += iif_amt
             spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
             log.info(f"    TBA Purchases: {memo} = ${amount:.2f}")
+
+    # Card settlement differences are posted at the bottom of the deposit.
+    # The desired QuickBooks adjustment is BS - Processed Net Amount.
+    # The IIF amount is inverted because QuickBooks flips the sign on deposit SPL lines.
+    for adjustment_row in card_adjustments:
+        qb_adjustment = adjustment_row["adjustment"]
+        iif_amt = -qb_adjustment
+        spl_total += iif_amt
+        spls.append(
+            spl(
+                date_str,
+                "8314000 · FE - Cash Over/Shorts",
+                "",
+                iif_amt,
+                adjustment_row["memo"],
+            )
+        )
+        log.info(
+            f"    Card settlement adjustment: {adjustment_row['label']} "
+            f"Settlement=${adjustment_row['settlement']:,.2f} "
+            f"BS=${adjustment_row['bs']:,.2f} "
+            f"Adjustment=${qb_adjustment:,.2f} → 8314000"
+        )
 
     spl_total = round(spl_total, 2)
     trns_amt = round(-spl_total, 2)

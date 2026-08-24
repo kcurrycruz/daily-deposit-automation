@@ -1532,7 +1532,7 @@ def main():
             milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines,
             excel_sales_total, excel_discount_total, bs_data, pass_through_total,
             dust_bunnies_total, milk_bottles_returns, refunded_discounts,
-            hash_sales_total, paid_in_total
+            hash_sales_total, paid_in_total, settlement_data
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)

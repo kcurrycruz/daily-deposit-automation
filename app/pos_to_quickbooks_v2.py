@@ -958,9 +958,10 @@ def spl(date_str, acct, name, amount, memo, class_name=""):
 def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> list[dict]:
     """Return signed adjustments needed to bring settlement amounts back to BS totals.
 
-    adjustment = BS - Processed Net Amount.
-    Therefore, when settlement is greater than BS the adjustment is negative;
-    when settlement is lower than BS the adjustment is positive.
+    QuickBooks display adjustment = Processed Net Amount - BS.
+    These tender lines display as credits/negative charges in QuickBooks, so:
+      - when BS is greater than settlement, the QB adjustment is negative;
+      - when settlement is greater than BS, the QB adjustment is positive.
     Differences under two cents are treated as matched and do not create a line.
     """
     if not settlement_data:
@@ -980,7 +981,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
         if key not in settlement_data:
             continue
         settlement_value = round(abs(settlement_data.get(key, 0.0)), 2)
-        adjustment = round(bs_value - settlement_value, 2)
+        adjustment = round(settlement_value - bs_value, 2)
         if abs(adjustment) < 0.02:
             continue
         adjustments.append({
@@ -1149,7 +1150,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info("  ─────────────────────────────────────────────────────────")
         for label, key, bs_value in tender_checks:
             settlement_value = round(abs(settlement_data.get(key, 0.0)), 2)
-            signed_adjustment = round(bs_value - settlement_value, 2)
+            signed_adjustment = round(settlement_value - bs_value, 2)
             difference = round(abs(signed_adjustment), 2)
             status = "MATCH" if difference < 0.02 else "MISMATCH"
             log.info(
@@ -1219,7 +1220,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             log.info(f"    TBA Purchases: {memo} = ${amount:.2f}")
 
     # Card settlement differences are posted at the bottom of the deposit.
-    # The desired QuickBooks adjustment is BS - Processed Net Amount.
+    # The desired QuickBooks display adjustment is Processed Net Amount - BS.
     # The IIF amount is inverted because QuickBooks flips the sign on deposit SPL lines.
     for adjustment_row in card_adjustments:
         qb_adjustment = adjustment_row["adjustment"]

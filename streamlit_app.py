@@ -375,6 +375,57 @@ st.markdown(
         padding-right: 14px;
         font-weight: 750;
     }
+
+    .hwfc-mini-card {
+        background: #161B22;
+        border: 1px solid var(--hwfc-border);
+        border-radius: 12px;
+        padding: 12px 14px;
+        min-height: 74px;
+    }
+    .hwfc-mini-label {
+        color: var(--hwfc-muted);
+        font-size: .68rem;
+        font-weight: 800;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+    .hwfc-mini-value {
+        color: #F4F1E8;
+        font-size: .95rem;
+        font-weight: 750;
+        line-height: 1.25;
+        word-break: break-word;
+    }
+    .hwfc-check-card {
+        background: #14251B;
+        border: 1px solid #315F3A;
+        border-radius: 11px;
+        padding: 10px 11px;
+        min-height: 74px;
+    }
+    .hwfc-check-title {
+        color: #EAF4E7;
+        font-size: .84rem;
+        font-weight: 800;
+        margin-bottom: 5px;
+    }
+    .hwfc-check-sheet {
+        color: #C4CFC2;
+        font-size: .75rem;
+        line-height: 1.25;
+        word-break: break-word;
+    }
+    .hwfc-source-strip {
+        background: #151F18;
+        border: 1px solid #315F3A;
+        border-radius: 10px;
+        padding: 9px 12px;
+        color: #DDE7D5;
+        font-size: .82rem;
+        font-weight: 650;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1236,34 +1287,12 @@ st.markdown(
 )
 
 
+
 # ---------------------------------------------------------------------
 # Input area
 # ---------------------------------------------------------------------
 
-left, right = st.columns([0.34, 0.66], gap="large")
-
-with left:
-    st.markdown('<div class="hwfc-section-label">Deposit setup</div>', unsafe_allow_html=True)
-    date_placeholder = st.empty()
-
-with right:
-    st.markdown('<div class="hwfc-section-label">Daily workbook</div>', unsafe_allow_html=True)
-    uploaded = st.file_uploader(
-        "Upload completed SubDept workbook",
-        type=["xlsx", "xlsm"],
-        label_visibility="collapsed",
-        help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
-        key=f"daily_workbook_{st.session_state['file_uploader_key']}",
-    )
-
-    st.markdown('<div class="hwfc-section-label" style="margin-top:14px">Daily Card Settlement Report</div>', unsafe_allow_html=True)
-    settlement_file = st.file_uploader(
-        "Upload Daily Card Settlement Report",
-        type=["xlsx", "xlsm"],
-        label_visibility="collapsed",
-        help="Uses ONLY the Processed Net Amount column as the source of truth for VISA/MC, Discover, AMEX, Debit Card, and EBT bank settlement amounts.",
-        key=f"card_settlement_{st.session_state['file_uploader_key']}",
-    )
+setup_col, workbook_col, settlement_col = st.columns([0.22, 0.39, 0.39], gap="medium")
 
 roles = {}
 date_info = {
@@ -1275,23 +1304,44 @@ date_info = {
 }
 deposit_date = None
 
+with setup_col:
+    st.markdown('<div class="hwfc-section-label">Report date</div>', unsafe_allow_html=True)
+    date_placeholder = st.empty()
+
+with workbook_col:
+    st.markdown('<div class="hwfc-section-label">Daily workbook</div>', unsafe_allow_html=True)
+    uploaded = st.file_uploader(
+        "Upload completed SubDept workbook",
+        type=["xlsx", "xlsm"],
+        label_visibility="collapsed",
+        help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
+        key=f"daily_workbook_{st.session_state['file_uploader_key']}",
+    )
+
+with settlement_col:
+    st.markdown('<div class="hwfc-section-label">Card settlement</div>', unsafe_allow_html=True)
+    settlement_file = st.file_uploader(
+        "Upload Daily Card Settlement Report",
+        type=["xlsx", "xlsm"],
+        label_visibility="collapsed",
+        help="Uses ONLY Processed Net Amount for VISA/MC, Discover, AMEX, Debit Card, and EBT.",
+        key=f"card_settlement_{st.session_state['file_uploader_key']}",
+    )
+
 if uploaded:
     upload_bytes = uploaded.getvalue()
     roles = detect_sheet_roles(upload_bytes)
     date_info = detect_workbook_dates(upload_bytes)
     deposit_date = date_info["detected_date"]
 
-    with left:
+    with setup_col:
         if deposit_date is not None:
-            date_placeholder.success(
-                f"Detected report date\n\n{deposit_date.strftime('%m/%d/%Y')}",
-                icon="📅",
+            date_placeholder.markdown(
+                f'<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div></div>',
+                unsafe_allow_html=True,
             )
         else:
-            date_placeholder.error(
-                "Report date not detected\n\nCheck the workbook Date fields or dated worksheet names.",
-                icon="⚠️",
-            )
+            date_placeholder.error("Report date not detected", icon="⚠️")
 
     if date_info["has_mismatch"]:
         detail_lines = [
@@ -1308,7 +1358,7 @@ if uploaded:
             icon="⚠️",
         )
 
-    with st.expander("Workbook checklist", expanded=True):
+    with st.expander("Workbook validation", expanded=True):
         cols = st.columns(5)
         labels = [
             ("Sales", roles.get("sales")),
@@ -1320,14 +1370,20 @@ if uploaded:
         for col, (label, sheet_name) in zip(cols, labels):
             with col:
                 if sheet_name:
-                    st.success(f"{label}\n\n{sheet_name}", icon="✅")
+                    st.markdown(
+                        f'<div class="hwfc-check-card"><div class="hwfc-check-title">✓ {html.escape(label)}</div><div class="hwfc-check-sheet">{html.escape(sheet_name)}</div></div>',
+                        unsafe_allow_html=True,
+                    )
                 else:
                     st.warning(f"{label}\n\nNot detected", icon="⚠️")
 
     missing_roles = [k for k, v in roles.items() if not v]
 else:
-    with left:
-        date_placeholder.info("Upload a workbook to detect the report date automatically.", icon="📅")
+    with setup_col:
+        date_placeholder.markdown(
+            '<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">Upload workbook</div></div>',
+            unsafe_allow_html=True,
+        )
     missing_roles = []
 
 settlement_date_info = None
@@ -1336,17 +1392,6 @@ settlement_source_ok = False
 settlement_source_sheet = None
 if settlement_file is not None:
     settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(settlement_file.getvalue())
-    if settlement_source_ok:
-        st.success(
-            f"Card settlement source verified: Processed Net Amount ({settlement_source_sheet})",
-            icon="✅",
-        )
-    else:
-        st.error(
-            "CARD SETTLEMENT COLUMN MISMATCH — exact headers 'Network' and 'Processed Net Amount' were not found. "
-            "This app will not substitute Gross Amount, Submitted Amount, or any other amount column.",
-            icon="🚫",
-        )
     try:
         from io import BytesIO
         import openpyxl
@@ -1364,22 +1409,36 @@ if settlement_file is not None:
             settlement_date_info = raw_settlement_date.date()
         elif isinstance(raw_settlement_date, date):
             settlement_date_info = raw_settlement_date
-        if deposit_date and settlement_date_info and settlement_date_info != deposit_date:
-            settlement_date_mismatch = True
-            st.warning(
-                "**CARD SETTLEMENT DATE MISMATCH**\n\n"
-                f"Daily workbook: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
-                f"Card settlement: **{settlement_date_info.strftime('%m/%d/%Y')}**  \n\n"
-                "You can still run the deposit, but verify that you uploaded the intended settlement report.",
-                icon="⚠️",
-            )
-        elif settlement_date_info:
-            st.success(
-                f"Card settlement date: {settlement_date_info.strftime('%m/%d/%Y')}",
-                icon="💳",
-            )
     except Exception as exc:
         st.warning(f"Could not read the Daily Card Settlement Report date: {exc}", icon="⚠️")
+
+    if not settlement_source_ok:
+        st.error(
+            "CARD SETTLEMENT COLUMN MISMATCH — exact headers 'Network' and 'Processed Net Amount' were not found. "
+            "Gross, Submitted, or other amount columns will not be substituted.",
+            icon="🚫",
+        )
+    else:
+        source_text = f"✓ Processed Net Amount verified ({settlement_source_sheet})"
+        date_text = (
+            f"✓ Settlement date {settlement_date_info.strftime('%m/%d/%Y')}"
+            if settlement_date_info else "Settlement date not found"
+        )
+        source_col, date_col = st.columns(2, gap="small")
+        with source_col:
+            st.markdown(f'<div class="hwfc-source-strip">{html.escape(source_text)}</div>', unsafe_allow_html=True)
+        with date_col:
+            st.markdown(f'<div class="hwfc-source-strip">{html.escape(date_text)}</div>', unsafe_allow_html=True)
+
+    if deposit_date and settlement_date_info and settlement_date_info != deposit_date:
+        settlement_date_mismatch = True
+        st.warning(
+            "**CARD SETTLEMENT DATE MISMATCH**\n\n"
+            f"Daily workbook: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
+            f"Card settlement: **{settlement_date_info.strftime('%m/%d/%Y')}**  \n\n"
+            "You can still run the deposit, but verify that you uploaded the intended settlement report.",
+            icon="⚠️",
+        )
 
 run_clicked = st.button(
     "🌿  Validate & Build Deposit",

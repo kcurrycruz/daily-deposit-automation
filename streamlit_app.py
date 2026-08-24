@@ -19,11 +19,12 @@ Goals:
 from __future__ import annotations
 
 import html
+import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -55,8 +56,19 @@ ENGINE_PATH = resolve_engine_path()
 INPUT_DIR = ROOT / "input" / "daily_reports"
 QB_IMPORT_DIR = ROOT / "output" / "qb_imports"
 LOG_DIR = ROOT / "logs"
+HISTORY_DIR = ROOT / "output" / "history"
+HISTORY_FILE = HISTORY_DIR / "run_history.json"
+HISTORY_UPLOAD_DIR = HISTORY_DIR / "uploads"
+HISTORY_IIF_DIR = HISTORY_DIR / "iif"
 
-for folder in (INPUT_DIR, QB_IMPORT_DIR, LOG_DIR):
+for folder in (
+    INPUT_DIR,
+    QB_IMPORT_DIR,
+    LOG_DIR,
+    HISTORY_DIR,
+    HISTORY_UPLOAD_DIR,
+    HISTORY_IIF_DIR,
+):
     folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -474,90 +486,345 @@ def section_status(log_text: str, section_name: str) -> Optional[bool]:
 
 
 def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
-    """
-    Lightweight content-based sheet detector used only for the UI checklist.
-    The accounting engine remains the source of truth for the actual run.
+    """Detect workbook roles for the UI checklist.
+
+    Stable worksheet-name patterns are authoritative. Content scanning is only
+    a fallback so a sales sheet can never steal the HASH role when a real
+    ``... HASH`` sheet exists.
     """
     try:
         from io import BytesIO
         import openpyxl
 
         wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
+        detected = {
+            "sales": None,
+            "coupons": None,
+            "discounts": None,
+            "bs": None,
+            "hash": None,
+        }
+
+        # Name-first detection. Date prefixes can change every day, so match
+        # the stable role words case-insensitively.
+        for name in wb.sheetnames:
+            low = name.strip().lower()
+
+            if detected["hash"] is None and "hash" in low:
+                detected["hash"] = name
+                continue
+
+            if detected["coupons"] is None and "coupon" in low:
+                detected["coupons"] = name
+                continue
+
+            if detected["bs"] is None and (
+                low == "bs" or low.endswith(" bs") or "balance sheet" in low
+            ):
+                detected["bs"] = name
+                continue
+
+            if detected["discounts"] is None and "discount" in low and "coupon" not in low:
+                detected["discounts"] = name
+                continue
+
+            if detected["sales"] is None and (
+                "subdept sales" in low or "sales report" in low
+            ):
+                detected["sales"] = name
+
         previews = {}
         for name in wb.sheetnames:
             ws = wb[name]
             parts = []
-            for row in ws.iter_rows(
-                min_row=1,
-                max_row=min(ws.max_row, 30),
-                values_only=True,
-            ):
+            for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 30), values_only=True):
                 parts.extend(str(v).strip() for v in row if v is not None)
             previews[name] = " ".join(parts).lower()
 
-        detected = {"sales": None, "discounts": None, "bs": None, "hash": None}
+        used = {v for v in detected.values() if v}
 
-        for name, preview in previews.items():
-            markers = ("subdept sales report", "sub-department", "sub department", "subdept")
-            if sum(m in preview for m in markers) >= 2:
-                detected["sales"] = name
-                break
+        if detected["sales"] is None:
+            for name, preview in previews.items():
+                if name in used:
+                    continue
+                markers = ("subdept sales report", "sub-department", "sub department", "subdept")
+                if sum(m in preview for m in markers) >= 2:
+                    detected["sales"] = name
+                    used.add(name)
+                    break
 
-        for name, preview in previews.items():
-            if name == detected["sales"]:
-                continue
-            markers = ("member discounts", "shopper level", "discounts by shopper level", "senior", "owner")
-            if (
-                "member discounts" in preview
-                or "discounts by shopper level" in preview
-                or sum(m in preview for m in markers) >= 3
-            ):
-                detected["discounts"] = name
-                break
+        if detected["coupons"] is None:
+            for name, preview in previews.items():
+                if name in used:
+                    continue
+                if "store coupon" in preview or "local discount" in preview:
+                    detected["coupons"] = name
+                    used.add(name)
+                    break
 
-        for name, preview in previews.items():
-            if name in detected.values():
-                continue
-            markers = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
-            if sum(m in preview for m in markers) >= 2:
-                detected["hash"] = name
-                break
+        if detected["discounts"] is None:
+            for name, preview in previews.items():
+                if name in used:
+                    continue
+                markers = ("member discounts", "shopper level", "discounts by shopper level", "senior", "owner")
+                if (
+                    "member discounts" in preview
+                    or "discounts by shopper level" in preview
+                    or sum(m in preview for m in markers) >= 3
+                ):
+                    detected["discounts"] = name
+                    used.add(name)
+                    break
 
-        for name, preview in previews.items():
-            if name in detected.values():
-                continue
-            markers = (
-                "taxes",
-                "sales tax",
-                "charity",
-                "visa",
-                "mastercard",
-                "amex",
-                "discover",
-                "debit",
-                "cash",
-                "bottle",
-                "nickel round",
-                "prepaid",
-            )
-            if sum(m in preview for m in markers) >= 4:
-                detected["bs"] = name
-                break
+        if detected["hash"] is None:
+            for name, preview in previews.items():
+                if name in used:
+                    continue
+                markers = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
+                if sum(m in preview for m in markers) >= 2:
+                    detected["hash"] = name
+                    used.add(name)
+                    break
 
-        for name in wb.sheetnames:
-            low = name.lower()
-            if detected["discounts"] is None and "discount" in low:
-                detected["discounts"] = name
-            if detected["hash"] is None and "hash" in low:
-                detected["hash"] = name
-            if detected["bs"] is None and (" bs" in f" {low}" or "balance" in low):
-                detected["bs"] = name
-            if detected["sales"] is None and ("subdept" in low or "sales report" in low):
-                detected["sales"] = name
+        if detected["bs"] is None:
+            for name, preview in previews.items():
+                if name in used:
+                    continue
+                markers = (
+                    "taxes", "sales tax", "charity", "visa", "mastercard",
+                    "amex", "discover", "debit", "cash", "bottle", "nickel round", "prepaid",
+                )
+                if sum(m in preview for m in markers) >= 4:
+                    detected["bs"] = name
+                    used.add(name)
+                    break
 
         return detected
     except Exception:
-        return {"sales": None, "discounts": None, "bs": None, "hash": None}
+        return {
+            "sales": None,
+            "coupons": None,
+            "discounts": None,
+            "bs": None,
+            "hash": None,
+        }
+
+
+def detect_workbook_dates(upload_bytes: bytes) -> dict:
+    """Inspect workbook headers/sheet names and choose an automatic report date.
+
+    The main sales sheet is the primary date when available. If it does not
+    contain a readable date, the most common date found across supporting
+    sheets is used. Conflicting dates are reported but do not prevent running.
+    """
+    try:
+        from collections import Counter
+        from io import BytesIO
+        import openpyxl
+
+        wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
+        dates_by_sheet = {}
+
+        def parse_date_value(value):
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            if value is None:
+                return None
+
+            s = str(value).strip()
+            for fmt in (
+                "%m/%d/%Y", "%m/%d/%y",
+                "%m-%d-%Y", "%m-%d-%y",
+                "%m.%d.%Y", "%m.%d.%y",
+            ):
+                try:
+                    return datetime.strptime(s, fmt).date()
+                except ValueError:
+                    pass
+            return None
+
+        def date_from_sheet_name(name):
+            # Supports 082326, 82326, 08-23-26 and 8-23-26 style prefixes.
+            compact = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", name)
+            if compact:
+                digits = compact.group(1)
+                candidates = [digits]
+                if len(digits) == 5:
+                    candidates.append("0" + digits)
+                for candidate in candidates:
+                    try:
+                        return datetime.strptime(candidate, "%m%d%y").date()
+                    except ValueError:
+                        pass
+
+            separated = re.search(r"(?<!\\d)(\\d{1,2})[-_/](\\d{1,2})[-_/](\\d{2,4})(?!\\d)", name)
+            if separated:
+                m, d, y = separated.groups()
+                y = ("20" + y) if len(y) == 2 else y
+                try:
+                    return date(int(y), int(m), int(d))
+                except ValueError:
+                    pass
+            return None
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            found = None
+
+            # Prefer an explicit Date label in the workbook header.
+            rows = list(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 15), values_only=True))
+            for row in rows:
+                for idx, value in enumerate(row):
+                    label = str(value).strip().lower() if value is not None else ""
+                    if label in {"date", "date:"} or label.startswith("date:"):
+                        # Date can be in the label itself or in the next few cells.
+                        if ":" in label and label.split(":", 1)[1].strip():
+                            found = parse_date_value(label.split(":", 1)[1].strip())
+                        if found is None:
+                            for offset in (1, 2, 3):
+                                if idx + offset < len(row):
+                                    found = parse_date_value(row[idx + offset])
+                                    if found is not None:
+                                        break
+                        if found is not None:
+                            break
+                if found is not None:
+                    break
+
+            if found is None:
+                found = date_from_sheet_name(sheet_name)
+
+            if found is not None:
+                dates_by_sheet[sheet_name] = found
+
+        if not dates_by_sheet:
+            return {
+                "detected_date": None,
+                "dates_by_sheet": {},
+                "has_mismatch": False,
+                "unique_dates": [],
+                "source_sheet": None,
+            }
+
+        sales_sheet = next(
+            (name for name in wb.sheetnames if "subdept sales" in name.lower() or "sales report" in name.lower()),
+            None,
+        )
+
+        source_sheet = sales_sheet if sales_sheet in dates_by_sheet else None
+        if source_sheet:
+            detected_date = dates_by_sheet[source_sheet]
+        else:
+            counts = Counter(dates_by_sheet.values())
+            detected_date = counts.most_common(1)[0][0]
+            source_sheet = next(name for name, dt in dates_by_sheet.items() if dt == detected_date)
+
+        unique_dates = sorted(set(dates_by_sheet.values()))
+        return {
+            "detected_date": detected_date,
+            "dates_by_sheet": dates_by_sheet,
+            "has_mismatch": len(unique_dates) > 1,
+            "unique_dates": unique_dates,
+            "source_sheet": source_sheet,
+        }
+    except Exception:
+        return {
+            "detected_date": None,
+            "dates_by_sheet": {},
+            "has_mismatch": False,
+            "unique_dates": [],
+            "source_sheet": None,
+        }
+
+
+# ---------------------------------------------------------------------
+# Reset / run history helpers
+# ---------------------------------------------------------------------
+
+def load_run_history() -> list[dict]:
+    """Return saved deposit run history, newest first."""
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return []
+        return sorted(data, key=lambda item: item.get("run_at", ""), reverse=True)
+    except Exception:
+        return []
+
+
+def save_run_history(records: list[dict]) -> None:
+    """Persist run history to the local Streamlit runtime."""
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    HISTORY_FILE.write_text(
+        json.dumps(records, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _safe_history_name(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).name).strip("._")
+    return cleaned or "uploaded_workbook.xlsx"
+
+
+def archive_run(
+    uploaded_file,
+    result: dict,
+    report_date: date,
+    roles: dict,
+    date_info: dict,
+) -> dict:
+    """Archive a successful run and append one record to history."""
+    run_at = datetime.now()
+    stamp = run_at.strftime("%Y%m%d_%H%M%S_%f")
+    upload_name = _safe_history_name(uploaded_file.name)
+    upload_path = HISTORY_UPLOAD_DIR / f"{stamp}_{upload_name}"
+    iif_name = Path(result["iif_path"]).name
+    iif_path = HISTORY_IIF_DIR / f"{stamp}_{iif_name}"
+
+    upload_bytes = uploaded_file.getvalue()
+    upload_path.write_bytes(upload_bytes)
+    iif_path.write_bytes(result["iif_bytes"])
+
+    v = result.get("validation", {})
+    record = {
+        "id": stamp,
+        "run_at": run_at.isoformat(timespec="seconds"),
+        "report_date": report_date.isoformat(),
+        "uploaded_filename": uploaded_file.name,
+        "archived_upload": str(upload_path),
+        "iif_filename": iif_name,
+        "archived_iif": str(iif_path),
+        "status": "Passed" if v.get("all_ok") else "Review",
+        "sales_status": "MATCH" if v.get("sales_ok") is True else ("REVIEW" if v.get("sales_ok") is False else "N/A"),
+        "discount_status": "MATCH" if v.get("discounts_ok") is True else ("REVIEW" if v.get("discounts_ok") is False else "N/A"),
+        "hash_status": "MATCH" if v.get("hash_ok") is True else ("REVIEW" if v.get("hash_ok") is False else "N/A"),
+        "iif_status": "MATCH" if v.get("iif_ok") is True else "REVIEW",
+        "date_mismatch": bool(date_info.get("has_mismatch", False)),
+        "sheet_roles": {k: v for k, v in roles.items() if v},
+    }
+
+    records = load_run_history()
+    records.insert(0, record)
+    # Keep the index reasonably small while retaining a useful audit trail.
+    save_run_history(records[:250])
+    return record
+
+
+def reset_current_work() -> None:
+    """Clear only the active run; saved history remains untouched."""
+    for key in (
+        "run_result",
+        "run_date",
+        "run_filename",
+        "run_date_mismatch",
+        "last_history_id",
+    ):
+        st.session_state.pop(key, None)
+    st.session_state["file_uploader_key"] = st.session_state.get("file_uploader_key", 0) + 1
 
 
 @dataclass
@@ -881,6 +1148,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if "file_uploader_key" not in st.session_state:
+    st.session_state["file_uploader_key"] = 0
+
+action_left, action_right = st.columns([0.80, 0.20])
+with action_right:
+    if st.button("↻ Start Over", use_container_width=True, help="Clear the current upload and results. Run History is preserved."):
+        reset_current_work()
+        st.rerun()
+
 has_results = "run_result" in st.session_state
 
 st.markdown(
@@ -904,13 +1180,7 @@ left, right = st.columns([0.34, 0.66], gap="large")
 
 with left:
     st.markdown('<div class="hwfc-section-label">Deposit setup</div>', unsafe_allow_html=True)
-
-    default_date = date.today() - timedelta(days=1)
-    deposit_date = st.date_input(
-        "Deposit date",
-        value=default_date,
-        format="MM/DD/YYYY",
-    )
+    date_placeholder = st.empty()
 
 with right:
     st.markdown('<div class="hwfc-section-label">Daily workbook</div>', unsafe_allow_html=True)
@@ -918,19 +1188,61 @@ with right:
         "Upload completed SubDept workbook",
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
-        help="Workbook should contain Sales, Discounts, BS, and HASH data.",
+        help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
+        key=f"daily_workbook_{st.session_state['file_uploader_key']}",
     )
 
+roles = {}
+date_info = {
+    "detected_date": None,
+    "dates_by_sheet": {},
+    "has_mismatch": False,
+    "unique_dates": [],
+    "source_sheet": None,
+}
+deposit_date = None
+
 if uploaded:
-    roles = detect_sheet_roles(uploaded.getvalue())
+    upload_bytes = uploaded.getvalue()
+    roles = detect_sheet_roles(upload_bytes)
+    date_info = detect_workbook_dates(upload_bytes)
+    deposit_date = date_info["detected_date"]
+
+    with left:
+        if deposit_date is not None:
+            date_placeholder.success(
+                f"Detected report date\n\n{deposit_date.strftime('%m/%d/%Y')}",
+                icon="📅",
+            )
+        else:
+            date_placeholder.error(
+                "Report date not detected\n\nCheck the workbook Date fields or dated worksheet names.",
+                icon="⚠️",
+            )
+
+    if date_info["has_mismatch"]:
+        detail_lines = [
+            f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
+            for sheet, dt in date_info["dates_by_sheet"].items()
+        ]
+        source = date_info.get("source_sheet") or "workbook"
+        st.warning(
+            "**DATE MISMATCH WARNING**\n\n"
+            + "The workbook contains more than one report date. "
+            + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** from **{source}**. "
+            + "You can still run the deposit, but review the dates first.\n\n"
+            + "  \n".join(detail_lines),
+            icon="⚠️",
+        )
 
     with st.expander("Workbook checklist", expanded=True):
-        cols = st.columns(4)
+        cols = st.columns(5)
         labels = [
-            ("Sales", roles["sales"]),
-            ("Discounts", roles["discounts"]),
-            ("Balance Sheet", roles["bs"]),
-            ("HASH", roles["hash"]),
+            ("Sales", roles.get("sales")),
+            ("Coupons", roles.get("coupons")),
+            ("Discounts", roles.get("discounts")),
+            ("Balance Sheet", roles.get("bs")),
+            ("HASH", roles.get("hash")),
         ]
         for col, (label, sheet_name) in zip(cols, labels):
             with col:
@@ -941,13 +1253,15 @@ if uploaded:
 
     missing_roles = [k for k, v in roles.items() if not v]
 else:
+    with left:
+        date_placeholder.info("Upload a workbook to detect the report date automatically.", icon="📅")
     missing_roles = []
 
 run_clicked = st.button(
     "🌿  Validate & Build Deposit",
     type="primary",
     use_container_width=True,
-    disabled=uploaded is None,
+    disabled=uploaded is None or deposit_date is None,
 )
 
 if run_clicked:
@@ -957,6 +1271,9 @@ if run_clicked:
             st.session_state["run_result"] = result
             st.session_state["run_date"] = deposit_date
             st.session_state["run_filename"] = uploaded.name
+            st.session_state["run_date_mismatch"] = date_info.get("has_mismatch", False)
+            history_record = archive_run(uploaded, result, deposit_date, roles, date_info)
+            st.session_state["last_history_id"] = history_record["id"]
         st.rerun()
     except Exception as exc:
         st.error("The deposit could not be completed.")
@@ -972,7 +1289,7 @@ if "run_result" in st.session_state:
     v = result["validation"]
     lines = result["lines"]
     iif_df = result["iif_df"]
-    run_date = st.session_state.get("run_date", deposit_date)
+    run_date = st.session_state.get("run_date") or deposit_date or date.today()
 
     st.markdown("---")
 
@@ -1212,10 +1529,92 @@ if "run_result" in st.session_state:
         st.code(result["log_text"], language="text")
 
     if st.button("Run another deposit", use_container_width=False):
-        st.session_state.pop("run_result", None)
-        st.session_state.pop("run_date", None)
-        st.session_state.pop("run_filename", None)
+        reset_current_work()
         st.rerun()
+
+
+# ---------------------------------------------------------------------
+# Run history
+# ---------------------------------------------------------------------
+
+st.markdown("---")
+st.subheader("Run History")
+st.caption(
+    "Successful app runs are recorded here. Start Over clears only the current work, not this history. "
+    "History is stored in the app's local runtime and may be cleared by a Streamlit Cloud redeploy or restart."
+)
+
+history_records = load_run_history()
+if not history_records:
+    st.info("No completed deposit runs have been recorded yet.")
+else:
+    summary_rows = []
+    for record in history_records[:12]:
+        try:
+            report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
+        except Exception:
+            report_label = record.get("report_date", "—")
+        try:
+            run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
+        except Exception:
+            run_label = record.get("run_at", "—")
+        summary_rows.append({
+            "Report Date": report_label,
+            "Run Time": run_label,
+            "Workbook": record.get("uploaded_filename", "—"),
+            "Status": record.get("status", "—"),
+            "Date Check": "MISMATCH WARNING" if record.get("date_mismatch") else "MATCH",
+        })
+
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+    with st.expander("View run files and details", expanded=False):
+        for idx, record in enumerate(history_records[:25]):
+            try:
+                report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
+            except Exception:
+                report_label = record.get("report_date", "—")
+            title = f"{report_label} · {record.get('uploaded_filename', 'Workbook')} · {record.get('status', '—')}"
+            st.markdown(f"**{html.escape(title)}**")
+            st.caption(
+                f"Sales {record.get('sales_status', 'N/A')} · "
+                f"Discounts {record.get('discount_status', 'N/A')} · "
+                f"HASH {record.get('hash_status', 'N/A')} · "
+                f"IIF {record.get('iif_status', 'N/A')}"
+            )
+
+            download_cols = st.columns(2)
+            archived_upload = Path(record.get("archived_upload", ""))
+            archived_iif = Path(record.get("archived_iif", ""))
+
+            with download_cols[0]:
+                if archived_upload.is_file():
+                    st.download_button(
+                        "Download uploaded workbook",
+                        data=archived_upload.read_bytes(),
+                        file_name=record.get("uploaded_filename", archived_upload.name),
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"history_upload_{record.get('id', idx)}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("Uploaded workbook archive is no longer available.")
+
+            with download_cols[1]:
+                if archived_iif.is_file():
+                    st.download_button(
+                        "Download IIF",
+                        data=archived_iif.read_bytes(),
+                        file_name=record.get("iif_filename", archived_iif.name),
+                        mime="text/plain",
+                        key=f"history_iif_{record.get('id', idx)}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("IIF archive is no longer available.")
+
+            if idx < min(len(history_records[:25]) - 1, 24):
+                st.markdown("---")
 
 
 st.markdown(

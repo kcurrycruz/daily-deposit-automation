@@ -474,257 +474,90 @@ def section_status(log_text: str, section_name: str) -> Optional[bool]:
 
 
 def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
-    """Detect workbook roles for the UI checklist.
-
-    Stable worksheet-name patterns are authoritative. Content scanning is only
-    a fallback so a sales sheet can never steal the HASH role when a real
-    ``... HASH`` sheet exists.
+    """
+    Lightweight content-based sheet detector used only for the UI checklist.
+    The accounting engine remains the source of truth for the actual run.
     """
     try:
         from io import BytesIO
         import openpyxl
 
         wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
-        detected = {
-            "sales": None,
-            "coupons": None,
-            "discounts": None,
-            "bs": None,
-            "hash": None,
-        }
-
-        # Name-first detection. Date prefixes can change every day, so match
-        # the stable role words case-insensitively.
-        for name in wb.sheetnames:
-            low = name.strip().lower()
-
-            if detected["hash"] is None and "hash" in low:
-                detected["hash"] = name
-                continue
-
-            if detected["coupons"] is None and "coupon" in low:
-                detected["coupons"] = name
-                continue
-
-            if detected["bs"] is None and (
-                low == "bs" or low.endswith(" bs") or "balance sheet" in low
-            ):
-                detected["bs"] = name
-                continue
-
-            if detected["discounts"] is None and "discount" in low and "coupon" not in low:
-                detected["discounts"] = name
-                continue
-
-            if detected["sales"] is None and (
-                "subdept sales" in low or "sales report" in low
-            ):
-                detected["sales"] = name
-
         previews = {}
         for name in wb.sheetnames:
             ws = wb[name]
             parts = []
-            for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 30), values_only=True):
+            for row in ws.iter_rows(
+                min_row=1,
+                max_row=min(ws.max_row, 30),
+                values_only=True,
+            ):
                 parts.extend(str(v).strip() for v in row if v is not None)
             previews[name] = " ".join(parts).lower()
 
-        used = {v for v in detected.values() if v}
+        detected = {"sales": None, "discounts": None, "bs": None, "hash": None}
 
-        if detected["sales"] is None:
-            for name, preview in previews.items():
-                if name in used:
-                    continue
-                markers = ("subdept sales report", "sub-department", "sub department", "subdept")
-                if sum(m in preview for m in markers) >= 2:
-                    detected["sales"] = name
-                    used.add(name)
-                    break
+        for name, preview in previews.items():
+            markers = ("subdept sales report", "sub-department", "sub department", "subdept")
+            if sum(m in preview for m in markers) >= 2:
+                detected["sales"] = name
+                break
 
-        if detected["coupons"] is None:
-            for name, preview in previews.items():
-                if name in used:
-                    continue
-                if "store coupon" in preview or "local discount" in preview:
-                    detected["coupons"] = name
-                    used.add(name)
-                    break
+        for name, preview in previews.items():
+            if name == detected["sales"]:
+                continue
+            markers = ("member discounts", "shopper level", "discounts by shopper level", "senior", "owner")
+            if (
+                "member discounts" in preview
+                or "discounts by shopper level" in preview
+                or sum(m in preview for m in markers) >= 3
+            ):
+                detected["discounts"] = name
+                break
 
-        if detected["discounts"] is None:
-            for name, preview in previews.items():
-                if name in used:
-                    continue
-                markers = ("member discounts", "shopper level", "discounts by shopper level", "senior", "owner")
-                if (
-                    "member discounts" in preview
-                    or "discounts by shopper level" in preview
-                    or sum(m in preview for m in markers) >= 3
-                ):
-                    detected["discounts"] = name
-                    used.add(name)
-                    break
+        for name, preview in previews.items():
+            if name in detected.values():
+                continue
+            markers = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
+            if sum(m in preview for m in markers) >= 2:
+                detected["hash"] = name
+                break
 
-        if detected["hash"] is None:
-            for name, preview in previews.items():
-                if name in used:
-                    continue
-                markers = ("refunded discounts", "pass through donations", "paid-ins", "paid ins")
-                if sum(m in preview for m in markers) >= 2:
-                    detected["hash"] = name
-                    used.add(name)
-                    break
+        for name, preview in previews.items():
+            if name in detected.values():
+                continue
+            markers = (
+                "taxes",
+                "sales tax",
+                "charity",
+                "visa",
+                "mastercard",
+                "amex",
+                "discover",
+                "debit",
+                "cash",
+                "bottle",
+                "nickel round",
+                "prepaid",
+            )
+            if sum(m in preview for m in markers) >= 4:
+                detected["bs"] = name
+                break
 
-        if detected["bs"] is None:
-            for name, preview in previews.items():
-                if name in used:
-                    continue
-                markers = (
-                    "taxes", "sales tax", "charity", "visa", "mastercard",
-                    "amex", "discover", "debit", "cash", "bottle", "nickel round", "prepaid",
-                )
-                if sum(m in preview for m in markers) >= 4:
-                    detected["bs"] = name
-                    used.add(name)
-                    break
+        for name in wb.sheetnames:
+            low = name.lower()
+            if detected["discounts"] is None and "discount" in low:
+                detected["discounts"] = name
+            if detected["hash"] is None and "hash" in low:
+                detected["hash"] = name
+            if detected["bs"] is None and (" bs" in f" {low}" or "balance" in low):
+                detected["bs"] = name
+            if detected["sales"] is None and ("subdept" in low or "sales report" in low):
+                detected["sales"] = name
 
         return detected
     except Exception:
-        return {
-            "sales": None,
-            "coupons": None,
-            "discounts": None,
-            "bs": None,
-            "hash": None,
-        }
-
-
-def detect_workbook_dates(upload_bytes: bytes) -> dict:
-    """Inspect workbook headers/sheet names and choose an automatic report date.
-
-    The main sales sheet is the primary date when available. If it does not
-    contain a readable date, the most common date found across supporting
-    sheets is used. Conflicting dates are reported but do not prevent running.
-    """
-    try:
-        from collections import Counter
-        from io import BytesIO
-        import openpyxl
-
-        wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
-        dates_by_sheet = {}
-
-        def parse_date_value(value):
-            if isinstance(value, datetime):
-                return value.date()
-            if isinstance(value, date):
-                return value
-            if value is None:
-                return None
-
-            s = str(value).strip()
-            for fmt in (
-                "%m/%d/%Y", "%m/%d/%y",
-                "%m-%d-%Y", "%m-%d-%y",
-                "%m.%d.%Y", "%m.%d.%y",
-            ):
-                try:
-                    return datetime.strptime(s, fmt).date()
-                except ValueError:
-                    pass
-            return None
-
-        def date_from_sheet_name(name):
-            # Supports 082326, 82326, 08-23-26 and 8-23-26 style prefixes.
-            compact = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", name)
-            if compact:
-                digits = compact.group(1)
-                candidates = [digits]
-                if len(digits) == 5:
-                    candidates.append("0" + digits)
-                for candidate in candidates:
-                    try:
-                        return datetime.strptime(candidate, "%m%d%y").date()
-                    except ValueError:
-                        pass
-
-            separated = re.search(r"(?<!\\d)(\\d{1,2})[-_/](\\d{1,2})[-_/](\\d{2,4})(?!\\d)", name)
-            if separated:
-                m, d, y = separated.groups()
-                y = ("20" + y) if len(y) == 2 else y
-                try:
-                    return date(int(y), int(m), int(d))
-                except ValueError:
-                    pass
-            return None
-
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            found = None
-
-            # Prefer an explicit Date label in the workbook header.
-            rows = list(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 15), values_only=True))
-            for row in rows:
-                for idx, value in enumerate(row):
-                    label = str(value).strip().lower() if value is not None else ""
-                    if label in {"date", "date:"} or label.startswith("date:"):
-                        # Date can be in the label itself or in the next few cells.
-                        if ":" in label and label.split(":", 1)[1].strip():
-                            found = parse_date_value(label.split(":", 1)[1].strip())
-                        if found is None:
-                            for offset in (1, 2, 3):
-                                if idx + offset < len(row):
-                                    found = parse_date_value(row[idx + offset])
-                                    if found is not None:
-                                        break
-                        if found is not None:
-                            break
-                if found is not None:
-                    break
-
-            if found is None:
-                found = date_from_sheet_name(sheet_name)
-
-            if found is not None:
-                dates_by_sheet[sheet_name] = found
-
-        if not dates_by_sheet:
-            return {
-                "detected_date": None,
-                "dates_by_sheet": {},
-                "has_mismatch": False,
-                "unique_dates": [],
-                "source_sheet": None,
-            }
-
-        sales_sheet = next(
-            (name for name in wb.sheetnames if "subdept sales" in name.lower() or "sales report" in name.lower()),
-            None,
-        )
-
-        source_sheet = sales_sheet if sales_sheet in dates_by_sheet else None
-        if source_sheet:
-            detected_date = dates_by_sheet[source_sheet]
-        else:
-            counts = Counter(dates_by_sheet.values())
-            detected_date = counts.most_common(1)[0][0]
-            source_sheet = next(name for name, dt in dates_by_sheet.items() if dt == detected_date)
-
-        unique_dates = sorted(set(dates_by_sheet.values()))
-        return {
-            "detected_date": detected_date,
-            "dates_by_sheet": dates_by_sheet,
-            "has_mismatch": len(unique_dates) > 1,
-            "unique_dates": unique_dates,
-            "source_sheet": source_sheet,
-        }
-    except Exception:
-        return {
-            "detected_date": None,
-            "dates_by_sheet": {},
-            "has_mismatch": False,
-            "unique_dates": [],
-            "source_sheet": None,
-        }
+        return {"sales": None, "discounts": None, "bs": None, "hash": None}
 
 
 @dataclass
@@ -1071,7 +904,13 @@ left, right = st.columns([0.34, 0.66], gap="large")
 
 with left:
     st.markdown('<div class="hwfc-section-label">Deposit setup</div>', unsafe_allow_html=True)
-    date_placeholder = st.empty()
+
+    default_date = date.today() - timedelta(days=1)
+    deposit_date = st.date_input(
+        "Deposit date",
+        value=default_date,
+        format="MM/DD/YYYY",
+    )
 
 with right:
     st.markdown('<div class="hwfc-section-label">Daily workbook</div>', unsafe_allow_html=True)
@@ -1079,60 +918,19 @@ with right:
         "Upload completed SubDept workbook",
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
-        help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
+        help="Workbook should contain Sales, Discounts, BS, and HASH data.",
     )
 
-roles = {}
-date_info = {
-    "detected_date": None,
-    "dates_by_sheet": {},
-    "has_mismatch": False,
-    "unique_dates": [],
-    "source_sheet": None,
-}
-deposit_date = None
-
 if uploaded:
-    upload_bytes = uploaded.getvalue()
-    roles = detect_sheet_roles(upload_bytes)
-    date_info = detect_workbook_dates(upload_bytes)
-    deposit_date = date_info["detected_date"]
-
-    with left:
-        if deposit_date is not None:
-            date_placeholder.success(
-                f"Detected report date\n\n{deposit_date.strftime('%m/%d/%Y')}",
-                icon="📅",
-            )
-        else:
-            date_placeholder.error(
-                "Report date not detected\n\nCheck the workbook Date fields or dated worksheet names.",
-                icon="⚠️",
-            )
-
-    if date_info["has_mismatch"]:
-        detail_lines = [
-            f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
-            for sheet, dt in date_info["dates_by_sheet"].items()
-        ]
-        source = date_info.get("source_sheet") or "workbook"
-        st.warning(
-            "**DATE MISMATCH WARNING**\n\n"
-            + "The workbook contains more than one report date. "
-            + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** from **{source}**. "
-            + "You can still run the deposit, but review the dates first.\n\n"
-            + "  \n".join(detail_lines),
-            icon="⚠️",
-        )
+    roles = detect_sheet_roles(uploaded.getvalue())
 
     with st.expander("Workbook checklist", expanded=True):
-        cols = st.columns(5)
+        cols = st.columns(4)
         labels = [
-            ("Sales", roles.get("sales")),
-            ("Coupons", roles.get("coupons")),
-            ("Discounts", roles.get("discounts")),
-            ("Balance Sheet", roles.get("bs")),
-            ("HASH", roles.get("hash")),
+            ("Sales", roles["sales"]),
+            ("Discounts", roles["discounts"]),
+            ("Balance Sheet", roles["bs"]),
+            ("HASH", roles["hash"]),
         ]
         for col, (label, sheet_name) in zip(cols, labels):
             with col:
@@ -1143,15 +941,13 @@ if uploaded:
 
     missing_roles = [k for k, v in roles.items() if not v]
 else:
-    with left:
-        date_placeholder.info("Upload a workbook to detect the report date automatically.", icon="📅")
     missing_roles = []
 
 run_clicked = st.button(
     "🌿  Validate & Build Deposit",
     type="primary",
     use_container_width=True,
-    disabled=uploaded is None or deposit_date is None,
+    disabled=uploaded is None,
 )
 
 if run_clicked:
@@ -1161,7 +957,6 @@ if run_clicked:
             st.session_state["run_result"] = result
             st.session_state["run_date"] = deposit_date
             st.session_state["run_filename"] = uploaded.name
-            st.session_state["run_date_mismatch"] = date_info.get("has_mismatch", False)
         st.rerun()
     except Exception as exc:
         st.error("The deposit could not be completed.")
@@ -1177,7 +972,7 @@ if "run_result" in st.session_state:
     v = result["validation"]
     lines = result["lines"]
     iif_df = result["iif_df"]
-    run_date = st.session_state.get("run_date") or deposit_date or date.today()
+    run_date = st.session_state.get("run_date", deposit_date)
 
     st.markdown("---")
 
@@ -1420,7 +1215,6 @@ if "run_result" in st.session_state:
         st.session_state.pop("run_result", None)
         st.session_state.pop("run_date", None)
         st.session_state.pop("run_filename", None)
-        st.session_state.pop("run_date_mismatch", None)
         st.rerun()
 
 

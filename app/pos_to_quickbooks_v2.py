@@ -692,6 +692,110 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
     return discounts, grand_total
 
 
+
+def parse_card_settlement_report(filepath: Path) -> dict:
+    """Read the Daily Card Settlement Report.
+
+    The Processed Net Amount is the bank-settlement source of truth for the
+    five tender lines imported to QuickBooks. VISA and MASTERCARD are combined
+    into VISA/MC. Labels are matched case-insensitively so minor formatting
+    changes such as trailing asterisks do not break the parser.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+
+    report_date = None
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 12), values_only=True):
+        for idx, value in enumerate(row):
+            label = str(value or "").strip().lower()
+            if label == "date" and idx + 1 < len(row):
+                raw = row[idx + 1]
+                if isinstance(raw, datetime):
+                    report_date = raw.date()
+                elif isinstance(raw, date):
+                    report_date = raw
+                elif raw:
+                    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
+                        try:
+                            report_date = datetime.strptime(str(raw).strip(), fmt).date()
+                            break
+                        except ValueError:
+                            continue
+                if report_date:
+                    break
+        if report_date:
+            break
+
+    header_row = None
+    network_col = None
+    net_col = None
+    for rnum, row in enumerate(
+        ws.iter_rows(min_row=1, max_row=min(ws.max_row, 20), values_only=True),
+        start=1,
+    ):
+        normalized = [str(v or "").strip().lower() for v in row]
+        for idx, label in enumerate(normalized):
+            if label == "network":
+                network_col = idx
+            if label == "processed net amount":
+                net_col = idx
+        if network_col is not None and net_col is not None:
+            header_row = rnum
+            break
+
+    if header_row is None:
+        raise ValueError(
+            f"Daily Card Settlement Report columns not found in {filepath.name}. "
+            "Expected exact headers: Network and Processed Net Amount. "
+            "No other amount column will be used."
+        )
+
+    log.info("  Card Settlement source column: Processed Net Amount")
+
+    totals = {
+        "visa_mc": 0.0,
+        "discover": 0.0,
+        "amex": 0.0,
+        "debit": 0.0,
+        "ebt": 0.0,
+    }
+
+    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        if len(row) <= max(network_col, net_col):
+            continue
+        raw_network = str(row[network_col] or "").strip()
+        network = re.sub(r"[^a-z0-9]+", "", raw_network.lower())
+        try:
+            amount = round(float(row[net_col]), 2)
+        except (TypeError, ValueError):
+            continue
+
+        if network.startswith("visa") or network.startswith("mastercard") or network == "mc":
+            totals["visa_mc"] = round(totals["visa_mc"] + amount, 2)
+        elif network.startswith("discover"):
+            totals["discover"] = round(totals["discover"] + amount, 2)
+        elif network.startswith("amex") or network.startswith("americanexpress"):
+            totals["amex"] = round(totals["amex"] + amount, 2)
+        elif network.startswith("debit"):
+            totals["debit"] = round(totals["debit"] + amount, 2)
+        elif network.startswith("ebt"):
+            totals["ebt"] = round(totals["ebt"] + amount, 2)
+
+    totals["report_date"] = report_date
+    totals["source_file"] = filepath.name
+
+    log.info(
+        "  Card Settlement: "
+        f"VISA/MC=${totals['visa_mc']:,.2f} "
+        f"Discover=${totals['discover']:,.2f} "
+        f"AMEX=${totals['amex']:,.2f} "
+        f"Debit=${totals['debit']:,.2f} "
+        f"EBT=${totals['ebt']:,.2f}"
+    )
+    return totals
+
 def parse_bs_sheet(filepath: Path, report_date) -> dict:
     import openpyxl
     mmddyy = f"{report_date.month}{report_date.strftime('%d%y')}"
@@ -771,6 +875,7 @@ def find_todays_files(deposit_date=None):
         selected_date.strftime("%Y-%m-%d"), selected_date.strftime("%m-%d-%Y"),
         selected_date.strftime("%m%d%Y"), selected_date.strftime("%Y%m%d"),
         selected_date.strftime("%m%d%y"), selected_date.strftime("%m-%d-%y"),
+        selected_date.strftime("%-m.%-d.%Y") if sys.platform != "win32" else selected_date.strftime("%#m.%#d.%Y"),
     ]
     all_files = [f for f in folder.iterdir() if f.is_file() and not f.name.startswith("~$")]
     dated_files = [f for f in all_files if any(p in f.name for p in date_patterns)]
@@ -778,13 +883,31 @@ def find_todays_files(deposit_date=None):
     if not candidates:
         raise FileNotFoundError(f"No input files found in {folder}. Upload the day's files into input/daily_reports and run again.")
 
-    sms_files, cc_file, coupon_files, excel_files = [], None, [], []
+    sms_files, cc_file, coupon_files, excel_files, settlement_files = [], None, [], [], []
     for f in candidates:
         suffix = f.suffix.lower()
         name_up = f.name.upper()
         if suffix in {".xlsx", ".xlsm"}:
-            excel_files.append(f)
-            log.info(f"  Excel report    : {f.name}")
+            is_settlement = "DAILY CARD SETTLEMENT" in name_up or "CARD SETTLEMENT" in name_up
+            if not is_settlement:
+                try:
+                    import openpyxl
+                    wb_probe = openpyxl.load_workbook(f, read_only=True, data_only=True)
+                    ws_probe = wb_probe[wb_probe.sheetnames[0]]
+                    probe = " ".join(
+                        str(ws_probe.cell(r, c).value or "")
+                        for r in range(1, min(ws_probe.max_row, 8) + 1)
+                        for c in range(1, min(ws_probe.max_column, 6) + 1)
+                    ).upper()
+                    is_settlement = "DAILY CARD SETTLEMENT REPORT" in probe and "PROCESSED NET AMOUNT" in probe
+                except Exception:
+                    is_settlement = False
+            if is_settlement:
+                settlement_files.append(f)
+                log.info(f"  Card settlement : {f.name}")
+            else:
+                excel_files.append(f)
+                log.info(f"  Excel report    : {f.name}")
             continue
         if suffix != ".csv":
             log.info(f"  Skipping unsupported file: {f.name}")
@@ -813,16 +936,26 @@ def find_todays_files(deposit_date=None):
         excel_files = dated_excel or [max(excel_files, key=lambda p: p.stat().st_mtime)]
         if not dated_excel:
             log.info(f"  Multiple Excel files found; using newest: {excel_files[0].name}")
+    if len(settlement_files) > 1:
+        matching = []
+        for f in settlement_files:
+            try:
+                parsed = parse_card_settlement_report(f)
+                if parsed.get("report_date") == selected_date:
+                    matching.append(f)
+            except Exception:
+                pass
+        settlement_files = matching or [max(settlement_files, key=lambda p: p.stat().st_mtime)]
     if not sms_files:
         log.info("  No SMS CSV needed if Excel report contains sales/discount tabs.")
-    return sms_files, cc_file, coupon_files, excel_files
+    return sms_files, cc_file, coupon_files, excel_files, settlement_files
 
 def spl(date_str, acct, name, amount, memo, class_name=""):
     amt_str = f"{amount:.2f}" if amount is not None else ""
     return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -830,6 +963,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         misc_tba_lines = []
     if bs_data is None:
         bs_data = {}
+    if settlement_data is None:
+        settlement_data = {}
 
     def bs(key, default=None):
         v = bs_data.get(key, 0.0)
@@ -957,6 +1092,35 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     log.info(f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}")
     log.info(f"    Paid-In mapping: HASH Paid-Ins=${abs(paid_in_total):,.2f} → 4444 · TBA Purchases / PAID IN:")
 
+    bs_ebt_compare = round(abs(bs_data.get("ebt_cash", 0.0)) + abs(bs_data.get("ebt_food", 0.0)), 2)
+    tender_checks = [
+        ("VISA/MC", "visa_mc", round(abs(bs_data.get("visa_mc", 0.0)), 2)),
+        ("Discover", "discover", round(abs(bs_data.get("discover", 0.0)), 2)),
+        ("AMEX", "amex", round(abs(bs_data.get("amex", 0.0)), 2)),
+        ("Debit Card", "debit", round(abs(bs_data.get("debit", 0.0)), 2)),
+        ("EBT Cash/Food Stamp", "ebt", bs_ebt_compare),
+    ]
+    if settlement_data:
+        log.info("")
+        log.info("  ─────────────────────────────────────────────────────────")
+        log.info("  CARD SETTLEMENT RECONCILIATION")
+        log.info("  ─────────────────────────────────────────────────────────")
+        for label, key, bs_value in tender_checks:
+            settlement_value = round(abs(settlement_data.get(key, 0.0)), 2)
+            difference = round(abs(settlement_value - bs_value), 2)
+            status = "MATCH" if difference < 0.02 else "MISMATCH"
+            log.info(
+                f"  CARD SETTLEMENT | {label} | Settlement={settlement_value:.2f} | "
+                f"BS={bs_value:.2f} | Difference={difference:.2f} | {status}"
+            )
+        log.info("  ─────────────────────────────────────────────────────────")
+        log.info("")
+
+    def tender_source(key, fallback):
+        if settlement_data and key in settlement_data:
+            return abs(settlement_data.get(key, 0.0)) or None
+        return fallback
+
     MANUAL_LINES = [
         ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Paid", bs("subscription") if bs("subscription") else None),
         ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Receivable"),
@@ -984,11 +1148,11 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("8506000 · Outreach - Donations", "", "", -bs("donation") if bs("donation") else None),
         ("4444 · TBA Purchases", "", "PAID IN:", abs(paid_in_total) if paid_in_total else None),
         ("4444 · TBA Purchases", "", "PAID OUT:"),
-        ("1240001 · Credit Card Payments Receivable", "", "Visa/MC", -bs("visa_mc") if bs("visa_mc") else None),
-        ("1240001 · Credit Card Payments Receivable", "", "Discover", -bs("discover") if bs("discover") else None),
-        ("1240001 · Credit Card Payments Receivable", "", "AMEX", -bs("amex") if bs("amex") else None),
-        ("1240001 · Credit Card Payments Receivable", "", "Debit Card", -bs("debit") if bs("debit") else None),
-        ("1240001 · Credit Card Payments Receivable", "", "EBT Cash/Food Stamp", -bs_ebt if bs_ebt else None),
+        ("1240001 · Credit Card Payments Receivable", "", "Visa/MC", -tender_source("visa_mc", bs("visa_mc")) if tender_source("visa_mc", bs("visa_mc")) else None),
+        ("1240001 · Credit Card Payments Receivable", "", "Discover", -tender_source("discover", bs("discover")) if tender_source("discover", bs("discover")) else None),
+        ("1240001 · Credit Card Payments Receivable", "", "AMEX", -tender_source("amex", bs("amex")) if tender_source("amex", bs("amex")) else None),
+        ("1240001 · Credit Card Payments Receivable", "", "Debit Card", -tender_source("debit", bs("debit")) if tender_source("debit", bs("debit")) else None),
+        ("1240001 · Credit Card Payments Receivable", "", "EBT Cash/Food Stamp", -tender_source("ebt", bs_ebt) if tender_source("ebt", bs_ebt) else None),
         ("8314000 · FE - Cash Over/Shorts", "", "Over/Short per Closeout Sheet"),
         ("8314000 · FE - Cash Over/Shorts", "", "Over/Short per POS (to = POS total)"),
     ]
@@ -1257,7 +1421,7 @@ def main():
             log.info(f"  Using yesterday: {yesterday.strftime('%B %d, %Y')}")
 
         log.info(f"Scanning {CONFIG['pos_export_folder']} ...")
-        sms_files, cc_file, coupon_files, excel_files = find_todays_files(yesterday)
+        sms_files, cc_file, coupon_files, excel_files, settlement_files = find_todays_files(yesterday)
 
         sales     = {}
         discounts = {}
@@ -1278,6 +1442,7 @@ def main():
         refunded_discounts   = 0.0
         paid_in_total        = 0.0
         bs_data            = {}
+        settlement_data    = {}
 
         if excel_files:
             for f in excel_files:
@@ -1332,6 +1497,19 @@ def main():
                 _, d_map = parse_sms_file(f)
                 for k, v in d_map.items():
                     discounts[k] = round(discounts.get(k, 0.0) + v, 2)
+
+        if settlement_files:
+            # The Daily Card Settlement Report is the bank-received source of truth
+            # for VISA/MC, Discover, AMEX, Debit, and EBT.
+            settlement_data = parse_card_settlement_report(settlement_files[0])
+            settlement_report_date = settlement_data.get("report_date")
+            if settlement_report_date and settlement_report_date != yesterday:
+                log.warning(
+                    f"  CARD SETTLEMENT DATE MISMATCH: settlement={settlement_report_date:%m/%d/%Y} "
+                    f"deposit={yesterday:%m/%d/%Y}"
+                )
+        else:
+            log.warning("  No Daily Card Settlement Report found — card tender lines will fall back to BS values.")
 
         per_dept_coupons = {}
         for f in coupon_files:

@@ -30,27 +30,14 @@ LOG_DIR = PROJECT_ROOT / "logs"
 for _folder in (INPUT_DIR, QB_IMPORT_DIR, SUMMARY_DIR, LOG_DIR):
     _folder.mkdir(parents=True, exist_ok=True)
 
-
-# ═══════════════════════════════════════════════════════════════
-#  CONFIGURATION
-# ═══════════════════════════════════════════════════════════════
-
 CONFIG = {
     "pos_export_folder": str(INPUT_DIR),
     "output_folder": str(QB_IMPORT_DIR),
     "company_name":      "HWFC",
-    # Base path for Excel SubDept Sales Total Reports
-    # Script will look in: base_excel_path / FY{year} / {Month} /
     "base_excel_path": str(INPUT_DIR),
-    # The exact QB account name shown in "Deposit To" field
     "deposit_account":   "1120200 · NBT Bank - Operating Account",
     "cc_pattern": ["Settlement", "Batch", "Commerce", "CCC", "BusinessTrack"],
 }
-
-
-# ═══════════════════════════════════════════════════════════════
-#  MAPPING 1 — Sub-department number → QB Account name
-# ═══════════════════════════════════════════════════════════════
 
 SUBDEPT_TO_QB = {
     110:  "7110110 · Sales - Packaged Grocery - NT",
@@ -64,7 +51,7 @@ SUBDEPT_TO_QB = {
     190:  "7110190 · Sales - General Merchandise",
     210:  "7110210 · Sales - In-House Deli",
     220:  "7110220 · Sales - In-House Bakery",
-    230:  "7110210 · Sales - In-House Deli|Catering",  # Catering — separate line
+    230:  "7110210 · Sales - In-House Deli|Catering",
     235:  "7110235 · Sales - Sushi",
     240:  "7110240 · Sales - Java & Juice",
     250:  "7110250 · Sales - Co-op Cafe (ESP)",
@@ -82,13 +69,9 @@ SUBDEPT_TO_QB = {
     27:   "8515000 · Marketing - Coupons, Store",
     28:   "8320000 · Store Supplies",
     38:   "4150300 · NYS Paper Bag Fees Payable",
-    170:  None,   # Adjustments — handled via MISC_SUBDEPTS → TBA Purchases
+    170:  None,
 }
 
-# Income accounts post as negative amounts in the deposit
-# (they are credits — money coming IN to the store)
-# Income accounts post as NEGATIVE SPL (credits) in the deposit
-# Everything NOT in this set posts as POSITIVE (debit)
 INCOME_ACCOUNTS = {
     "7110110 · Sales - Packaged Grocery - NT",
     "7110120 · Sales - Dairy/Refrigerated",
@@ -115,18 +98,9 @@ INCOME_ACCOUNTS = {
     "7110520 · Sales - Vitamins & Supplements",
     "7110550 · Sales - Magazines",
     "7111300 · Promotional Sales",
-    # Store Supplies and NYS Bag Fees are POSITIVE (debit) — NOT in this set
 }
 
-
-# ═══════════════════════════════════════════════════════════════
-#  MAPPING 2 — Shopper Level code → QB Discount Account
-# ═══════════════════════════════════════════════════════════════
-
-# Level 1 is intentionally NOT mapped yet.
-# Current strongest clue: 8512006 · Discount 5% - Owner buy Local is the only
-# discount account elsewhere in this script whose shopper code is explicitly unknown.
-# The parser logs Level 1's POS description so the mapping can be confirmed safely.
+# Level 15 is Student Discount Sun and posts to College Day.
 SHOPPER_LEVEL_TO_QB = {
     2:  "8512001 · Discount 2% - Owners",
     3:  "8511001 · Discount 2% - Senior Non Owner",
@@ -136,17 +110,12 @@ SHOPPER_LEVEL_TO_QB = {
     7:  "8423100 · Discount - Staff  (24%)",
     8:  "8512002 · Discount 2% - Visiting Coop",
     9:  "8512003 · Discount 8% - Vendors",
+    10: "8511001 · Discount 2% - Senior Non Owner",
+    15: "8512005 · Discount 8% - College Day",
     19: "8512007 · Discount 15% - Non-profit",
-    10: "8511001 · Discount 2% - Senior Non Owner",  # Seniors on Wednesday
 }
 
-
-# ═══════════════════════════════════════════════════════════════
-#  MAPPING 3 — Credit card types
-# ═══════════════════════════════════════════════════════════════
-
 CC_ACCOUNT = "1240001 · Credit Card Payments Receivable"
-
 CC_TYPE_MAP = {
     "Visa/MC":             ["visa", "mastercard", "mc", "visa/mc"],
     "Discover":            ["discover"],
@@ -155,14 +124,7 @@ CC_TYPE_MAP = {
     "EBT Cash/Food Stamp": ["ebt", "food stamp", "snap"],
 }
 
-
-# ═══════════════════════════════════════════════════════════════
-#  LOGGING
-# ═══════════════════════════════════════════════════════════════
-
 output_dir = QB_IMPORT_DIR
-
-# Log to console only — no file needed
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)s  %(message)s",
@@ -170,10 +132,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
-# ═══════════════════════════════════════════════════════════════
-#  HELPERS
-# ═══════════════════════════════════════════════════════════════
 
 def clean_amount(val) -> float:
     if val is None:
@@ -195,52 +153,35 @@ def read_rows(filepath: Path) -> list:
     return rows
 
 
-# ═══════════════════════════════════════════════════════════════
-#  PARSER — SMS Combined Export File
-# ═══════════════════════════════════════════════════════════════
-
 def parse_sms_file(filepath: Path) -> tuple:
     rows = read_rows(filepath)
     log.info(f"  Parsing {filepath.name} ({len(rows)} rows)")
-
-    sales_raw    = {}
-    discount_raw = {}
-    mode    = None
+    sales_raw, discount_raw = {}, {}
+    mode = None
     in_data = False
 
     for row in rows:
         if not any(row):
             continue
         joined = ",".join(row)
-
-        # Detect section type
         if "Sub-department Single Total" in joined or "Sub-Department Single Total" in joined:
-            mode    = "subdept"
-            in_data = False
+            mode, in_data = "subdept", False
             continue
         if "Discounts by Shopper Level" in joined:
-            mode    = "discount"
-            in_data = False
+            mode, in_data = "discount", False
             continue
-
-        # Detect start of data rows
         if mode == "subdept" and "Sub-Department" in joined:
             in_data = True
             continue
         if mode == "discount" and "Description" in joined:
             in_data = True
             continue
-
         if not in_data:
             continue
-
-        # Skip footer/summary rows
         low = joined.lower()
-        if any(x in low for x in ["total", "printed", "grand total", "member discount",
-                                   "honest weight", "date:", "target:", "tlz.", "s-dept"]):
+        if any(x in low for x in ["total", "printed", "grand total", "member discount", "honest weight", "date:", "target:", "tlz.", "s-dept"]):
             continue
 
-        # ── Sub-dept rows ──────────────────────────────────
         if mode == "subdept":
             dept_num = None
             for cell in row:
@@ -252,7 +193,6 @@ def parse_sms_file(filepath: Path) -> tuple:
                         pass
             if dept_num is None:
                 continue
-
             amt = 0.0
             for col_idx in [7, 8, 6, 9]:
                 if col_idx < len(row) and row[col_idx]:
@@ -260,15 +200,12 @@ def parse_sms_file(filepath: Path) -> tuple:
                     if candidate != 0.0:
                         amt = candidate
                         break
-
             if amt == 0.0:
                 if dept_num == 170:
-                    log.info(f"    Dept 170 Adjustments — skipped")
+                    log.info("    Dept 170 Adjustments — skipped")
                 continue
-
             sales_raw[dept_num] = round(sales_raw.get(dept_num, 0.0) + amt, 2)
 
-        # ── Discount rows ──────────────────────────────────
         elif mode == "discount":
             code = None
             for cell in row:
@@ -280,7 +217,6 @@ def parse_sms_file(filepath: Path) -> tuple:
                         pass
             if code is None:
                 continue
-
             amt = 0.0
             for col_idx in [8, 7, 9]:
                 if col_idx < len(row) and row[col_idx]:
@@ -290,10 +226,8 @@ def parse_sms_file(filepath: Path) -> tuple:
                         break
             if amt == 0.0:
                 continue
-
             discount_raw[code] = round(discount_raw.get(code, 0.0) + amt, 2)
 
-    # Map to QB accounts
     sales_totals = {}
     log.info("\n  ── Sales ──")
     for num, amt in sorted(sales_raw.items()):
@@ -320,95 +254,56 @@ def parse_sms_file(filepath: Path) -> tuple:
     return sales_totals, discount_totals
 
 
-# ═══════════════════════════════════════════════════════════════
-#  PARSER — Commerce Control Center
-# ═══════════════════════════════════════════════════════════════
-
 def parse_cc_file(filepath: Path) -> dict:
     rows = read_rows(filepath)
     log.info(f"  Parsing CC: {filepath.name}")
-
     header_idx = None
     for i, row in enumerate(rows):
         joined = ",".join(row).lower()
         if any(x in joined for x in ["card type", "cardtype", "tender", "payment type"]):
             header_idx = i
             break
-
     if header_idx is None:
         log.warning(f"  Could not find header in {filepath.name}")
         return {}
-
-    headers  = [h.lower() for h in rows[header_idx]]
-    type_idx = next((i for i, h in enumerate(headers)
-                     if any(x in h for x in ["card type", "cardtype", "tender", "type"])), None)
-    amt_idx  = next((i for i, h in enumerate(headers)
-                     if any(x in h for x in ["net", "amount", "total", "sales"])), None)
-
+    headers = [h.lower() for h in rows[header_idx]]
+    type_idx = next((i for i, h in enumerate(headers) if any(x in h for x in ["card type", "cardtype", "tender", "type"])), None)
+    amt_idx = next((i for i, h in enumerate(headers) if any(x in h for x in ["net", "amount", "total", "sales"])), None)
     if type_idx is None or amt_idx is None:
         log.warning(f"  CC columns not found. Headers: {headers}")
         return {}
-
     raw_totals = {}
     for row in rows[header_idx + 1:]:
         if len(row) <= max(type_idx, amt_idx):
             continue
         card = row[type_idx].lower().strip()
-        amt  = clean_amount(row[amt_idx])
+        amt = clean_amount(row[amt_idx])
         if not card or amt == 0:
             continue
         raw_totals[card] = round(raw_totals.get(card, 0.0) + amt, 2)
-
     totals = {}
     log.info("\n  ── Credit Cards ──")
     for card_raw, amt in raw_totals.items():
-        label = next(
-            (lbl for lbl, kws in CC_TYPE_MAP.items() if any(kw in card_raw for kw in kws)),
-            card_raw.title()
-        )
+        label = next((lbl for lbl, kws in CC_TYPE_MAP.items() if any(kw in card_raw for kw in kws)), card_raw.title())
         key = f"{CC_ACCOUNT}|{label}"
         log.info(f"    {label:30s}  ${amt:>10,.2f}")
         totals[key] = round(totals.get(key, 0.0) + amt, 2)
-
     return totals
 
 
-# ═══════════════════════════════════════════════════════════════
-#  FILE FINDER
-# ═══════════════════════════════════════════════════════════════
-
 def parse_coupon_file(filepath: Path) -> tuple:
-    """
-    Read the coupons CSV.
-    Returns (per_dept_coupons, owner_local_total) where:
-      per_dept_coupons = { subdept_num: coupon_amount }  (for net sales calc)
-      owner_local_total = grand total (for 8512006)
-    Coupon file format:
-      col 1 = sub-dept number
-      col 7 = coupon amount for that dept
-      Total row at bottom has grand total in col 7
-    """
     rows = read_rows(filepath)
     log.info(f"  Parsing coupon file: {filepath.name}")
-
-    per_dept  = {}   # { subdept_num: amount }
-    grand_total = 0.0
-    in_data   = False
-
+    per_dept, grand_total, in_data = {}, 0.0, False
     for row in rows:
         if not any(row):
             continue
         joined = ",".join(row)
-
-        # Detect data start
         if "Sub-Department" in joined:
             in_data = True
             continue
-
         if not in_data:
             continue
-
-        # Total row — grab grand total
         low = joined.lower()
         if "total" in low and "printed" not in low:
             amt = clean_amount(row[7]) if len(row) > 7 and row[7] else 0.0
@@ -416,12 +311,8 @@ def parse_coupon_file(filepath: Path) -> tuple:
                 grand_total = abs(amt)
                 log.info(f"    Coupon grand total: ${grand_total:.2f}")
             continue
-
-        # Skip printed/footer rows
         if "printed" in low:
             continue
-
-        # Data row: col 1 = dept num, col 7 = amount
         if len(row) > 7:
             try:
                 dept_num = int(str(row[1]).strip())
@@ -431,48 +322,22 @@ def parse_coupon_file(filepath: Path) -> tuple:
             if abs(amt) > 0:
                 per_dept[dept_num] = round(per_dept.get(dept_num, 0.0) + abs(amt), 2)
                 log.info(f"    Coupon dept {dept_num:>5}: ${abs(amt):.2f}")
-
     return per_dept, grand_total
 
 
-# Misc sub-depts that post to TBA Purchases if non-zero
 MISC_SUBDEPTS = {
-    170: "Adjustments",
-    22: "Coop Scoop Ad payment",
-    23: "Refunded Discounts",
-    24: "Bottle Deposits",
-    25: "Gift Certificates",
-    26: "Share Payment",
-    29: "Building Blocks",
-    30: "Groupon",
-    31: "Crowd Savings",
-    32: "Pass Through Donations",
-    33: "Bag Credits",
-    34: "Paid-Ins",
-    35: "Owner Appreciation 5%",
-    37: "Staff Appreciation",
-    50: "Envirotokens",
-    260: "Maria College Cafe",
-    530: "Herbs",
-    540: "Books",
-    560: "Candles/Incense/Baskets",
-    999: "UnAssigned",
+    170: "Adjustments", 22: "Coop Scoop Ad payment", 23: "Refunded Discounts",
+    24: "Bottle Deposits", 25: "Gift Certificates", 26: "Share Payment",
+    29: "Building Blocks", 30: "Groupon", 31: "Crowd Savings",
+    32: "Pass Through Donations", 33: "Bag Credits", 34: "Paid-Ins",
+    35: "Owner Appreciation 5%", 37: "Staff Appreciation", 50: "Envirotokens",
+    260: "Maria College Cafe", 530: "Herbs", 540: "Books",
+    560: "Candles/Incense/Baskets", 999: "UnAssigned",
 }
 
-
 def parse_excel_report(filepath: Path) -> tuple:
-    """
-    Read the SubDept Sales Report Excel file.
-    Sheet: 'SubDept Sales Report'
-      Col A = sub-dept number, Col G = net amount
-      Row 1 Col M = Milk Bottle Return
-      Row 2 Col J = Owner Apprec 5% Total, Col M = Store Coupons
-    Returns (sales_dict, misc_lines, milk_bottle_return, store_coupons_amt, owner_apprec_amt)
-      misc_lines = [(memo, amount)] for non-zero misc sub-depts → post to TBA Purchases
-    """
     import openpyxl
     log.info(f"  Reading Excel report: {filepath.name}")
-
     try:
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     except Exception as e:
@@ -489,17 +354,17 @@ def parse_excel_report(filepath: Path) -> tuple:
         return {}, [], 0.0, 0.0, 0.0
 
     ws = wb['SubDept Sales Report']
-    sales              = {}
-    misc_lines         = []
+    sales = {}
+    misc_lines = []
     milk_bottle_return = 0.0
-    store_coupons_amt  = 0.0
-    owner_apprec_amt   = 0.0
-    sales_total_xl     = 0.0
-    pass_through_total   = 0.0
-    dust_bunnies_total   = 0.0
+    store_coupons_amt = 0.0
+    owner_apprec_amt = 0.0
+    sales_total_xl = 0.0
+    pass_through_total = 0.0
+    dust_bunnies_total = 0.0
     milk_bottles_returns = 0.0
-    refunded_discounts   = 0.0
-    hash_sales_total     = 0.0
+    refunded_discounts = 0.0
+    hash_sales_total = 0.0
 
     for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
         if i == 1:
@@ -510,7 +375,6 @@ def parse_excel_report(filepath: Path) -> tuple:
                     log.info(f"    Milk Bottle Return (M1): ${milk_bottle_return:.2f}")
                 except (ValueError, TypeError):
                     pass
-            # M1 (index 12) = Milk Bottles Returns amount (L1 is the label, M1 is the number)
             val_m1_mbr = row[12] if len(row) > 12 else None
             if val_m1_mbr is not None:
                 try:
@@ -518,7 +382,6 @@ def parse_excel_report(filepath: Path) -> tuple:
                     log.info(f"    Milk Bottles Returns (M1): ${milk_bottles_returns:.2f}")
                 except (ValueError, TypeError):
                     pass
-            # Read O1 label to know what P1 is
             val_o1 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p1 = row[15] if len(row) > 15 else None
             if val_p1 is not None:
@@ -539,7 +402,7 @@ def parse_excel_report(filepath: Path) -> tuple:
             continue
 
         if i == 2:
-            val_j = row[9]  if len(row) > 9  else None
+            val_j = row[9] if len(row) > 9 else None
             val_m = row[12] if len(row) > 12 else None
             if val_j is not None:
                 try:
@@ -553,7 +416,6 @@ def parse_excel_report(filepath: Path) -> tuple:
                     log.info(f"    Store Coupons (M2): ${store_coupons_amt:.2f}")
                 except (ValueError, TypeError):
                     pass
-            # Read O2 label to know what P2 is
             val_o2 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p2 = row[15] if len(row) > 15 else None
             if val_p2 is not None:
@@ -581,7 +443,6 @@ def parse_excel_report(filepath: Path) -> tuple:
                     log.info(f"    Excel Sales Total (J3): ${sales_total_xl:,.2f}")
                 except (ValueError, TypeError):
                     pass
-            # Read O3 label to know what P3 is
             val_o3 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p3 = row[15] if len(row) > 15 else None
             if val_p3 is not None:
@@ -602,15 +463,13 @@ def parse_excel_report(filepath: Path) -> tuple:
             continue
 
         dept_num = row[0]
-        amount   = row[6] if len(row) > 6 else None
-
+        amount = row[6] if len(row) > 6 else None
         if dept_num is None:
             continue
         try:
             dept_num = int(dept_num)
         except (ValueError, TypeError):
             continue
-
         if amount is None:
             amount = 0.0
         try:
@@ -620,7 +479,6 @@ def parse_excel_report(filepath: Path) -> tuple:
 
         qb = SUBDEPT_TO_QB.get(dept_num)
         if qb is None:
-            # Check if misc sub-dept with non-zero amount → TBA Purchases
             if dept_num in MISC_SUBDEPTS:
                 if amount != 0.0:
                     memo = MISC_SUBDEPTS[dept_num]
@@ -629,7 +487,6 @@ def parse_excel_report(filepath: Path) -> tuple:
             elif dept_num in SUBDEPT_TO_QB:
                 log.info(f"    Dept {dept_num:>5}  SKIPPED")
             else:
-                # Unknown dept — if non-zero, post to TBA Purchases
                 if amount != 0.0:
                     misc_lines.append((f"Dept {dept_num}", round(amount, 2)))
                     log.warning(f"    Dept {dept_num:>5}  ${amount:,.2f}  → TBA Purchases (unmapped dept — add to MISC_SUBDEPTS)")
@@ -644,44 +501,20 @@ def parse_excel_report(filepath: Path) -> tuple:
     return sales, misc_lines, milk_bottle_return, store_coupons_amt, owner_apprec_amt, sales_total_xl, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total
 
 
-
 def parse_hash_sheet(filepath: Path, report_date) -> tuple:
-    """
-    Read the daily HASH worksheet.
-
-    Source rows are identified primarily by subdepartment code:
-      23 = Refunded Discounts
-      32 = Pass Through Donations
-      34 = Paid-Ins
-
-    The worksheet name does NOT have to be exactly "082026 hash".
-    Any sheet containing "hash" is accepted, with a content-based fallback.
-
-    Returns:
-      (refunded_discounts, pass_through_total, paid_in_total)
-    """
     import openpyxl
-
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-
-    # Prefer any worksheet containing "hash".
     hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
     ws = wb[hash_candidates[0]] if hash_candidates else None
     found_tab = hash_candidates[0] if hash_candidates else None
 
-    # Fallback: scan for the known subdept descriptions/codes.
     if ws is None:
         for sheet in wb.sheetnames:
             candidate = wb[sheet]
             found_known_row = False
             for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
                 joined = " ".join(str(v or "") for v in row).lower()
-                if (
-                    "refunded discounts" in joined
-                    or "pass through donations" in joined
-                    or "paid-ins" in joined
-                    or "paid ins" in joined
-                ):
+                if "refunded discounts" in joined or "pass through donations" in joined or "paid-ins" in joined or "paid ins" in joined:
                     found_known_row = True
                     break
             if found_known_row:
@@ -694,14 +527,9 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
         return 0.0, 0.0, 0.0
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
-
-    # Find the Amount header anywhere in the top section.
     amount_col = None
     amount_header_row = None
-    for row_num, row in enumerate(
-        ws.iter_rows(min_row=1, max_row=min(ws.max_row, 20), values_only=True),
-        start=1
-    ):
+    for row_num, row in enumerate(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 20), values_only=True), start=1):
         for idx, value in enumerate(row):
             if value is None:
                 continue
@@ -718,19 +546,12 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
         return 0.0, 0.0, 0.0
 
     log.info(f"  HASH Amount header found at row {amount_header_row}, column {amount_col + 1}")
-
     refunded_discounts = 0.0
     pass_through_total = 0.0
     paid_in_total = 0.0
-
-    target_codes = {
-        23: "refunded",
-        32: "pass_through",
-        34: "paid_in",
-    }
+    target_codes = {23: "refunded", 32: "pass_through", 34: "paid_in"}
 
     for excel_row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
-        # Find a target subdepartment code in the left side of the row.
         code = None
         for idx in range(min(4, len(row))):
             value = row[idx]
@@ -743,26 +564,16 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             if candidate_code in target_codes:
                 code = candidate_code
                 break
-
         if code is None:
             continue
-
         if len(row) <= amount_col:
             log.warning(f"    HASH row {excel_row_num} code {code}: Amount column missing")
             continue
-
         raw_amount = row[amount_col]
-
-        # Primary source: exact Amount column.
         try:
             amount = round(float(raw_amount), 2)
         except (TypeError, ValueError):
             amount = None
-
-        # Fallback if the Amount header was shifted/merged:
-        # use numeric values to the RIGHT of the description area, excluding
-        # the known subdept code. Prefer the first currency-like value that
-        # is not the code itself.
         if amount is None:
             fallback_values = []
             for idx, value in enumerate(row):
@@ -775,21 +586,12 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
                 if abs(num - code) < 0.000001:
                     continue
                 fallback_values.append((idx, num))
-
             if fallback_values:
-                # For this HASH report, Qty precedes Amount. When at least two
-                # numeric values exist, the second numeric value is Amount.
-                amount = round(
-                    fallback_values[1][1] if len(fallback_values) >= 2 else fallback_values[0][1],
-                    2
-                )
-
+                amount = round(fallback_values[1][1] if len(fallback_values) >= 2 else fallback_values[0][1], 2)
         if amount is None:
             log.warning(f"    HASH row {excel_row_num} code {code}: could not read Amount")
             continue
-
         row_type = target_codes[code]
-
         if row_type == "refunded":
             refunded_discounts = amount
             log.info(f"    HASH code 23 Refunded Discounts: ${amount:,.2f}")
@@ -800,51 +602,32 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             paid_in_total = amount
             log.info(f"    HASH code 34 Paid-Ins: ${amount:,.2f}")
 
-    log.info(
-        f"  HASH values used: Refunded=${refunded_discounts:,.2f}, "
-        f"PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}"
-    )
-
+    log.info(f"  HASH values used: Refunded=${refunded_discounts:,.2f}, PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}")
     return refunded_discounts, pass_through_total, paid_in_total
 
 
 def parse_excel_discounts(filepath: Path, report_date) -> dict:
-    """
-    Read the discounts sheet from the Excel file.
-    Tab name format: MMDDYY discounts (e.g. '41226 discounts' for 4/12/26)
-    Col 3 (index 3) = shopper level code
-    Col 9 (index 9) = amount
-    Returns { qb_account: amount } — amounts are positive (IIF sign flip handled in generate_iif)
-    """
     import openpyxl
-
-    # Build expected tab name: MMDDYY discounts (e.g. "41226 discounts")
-    # Remove leading zero from month for Windows compatibility
     mmddyy = f"{report_date.month}{report_date.strftime('%d%y')}"
     tab_candidates = [
-        f"{mmddyy} discounts",               # 41226 discounts
-        f"0{mmddyy} discounts",              # 041226 discounts
-        report_date.strftime("%m%d%y discounts"),  # 041226 discounts (with leading zero)
+        f"{mmddyy} discounts",
+        f"0{mmddyy} discounts",
+        report_date.strftime("%m%d%y discounts"),
     ]
-
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = None
     found_tab = None
-
     for candidate in tab_candidates:
         if candidate in wb.sheetnames:
             ws = wb[candidate]
             found_tab = candidate
             break
-
-    # Fallback: find any sheet ending in " discounts"
     if ws is None:
         for sheet in wb.sheetnames:
             if sheet.lower().endswith(" discounts") or sheet.lower().endswith("discounts"):
                 ws = wb[sheet]
                 found_tab = sheet
                 break
-
     if ws is None:
         log.warning(f"  No discounts sheet found in {filepath.name}")
         log.warning(f"  Tried: {tab_candidates}")
@@ -852,19 +635,15 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
         return {}
 
     log.info(f"  Reading discounts from sheet: '{found_tab}'")
-
-    # Wednesday Senior Day: levels 3, 4, 10 combine into 8511002
     WEDNESDAY_SENIOR_LEVELS = {3, 4, 10}
-    WEDNESDAY_SENIOR_ACCT   = "8511002 · Discount 8% - Senior Day"
-    is_wednesday = (report_date.weekday() == 2)  # 0=Mon, 2=Wed
+    WEDNESDAY_SENIOR_ACCT = "8511002 · Discount 8% - Senior Day"
+    is_wednesday = report_date.weekday() == 2
     if is_wednesday:
         log.info(f"  Wednesday — combining Senior levels 3, 4, 10 → {WEDNESDAY_SENIOR_ACCT}")
 
     discounts = {}
     grand_total = 0.0
-
     for row in ws.iter_rows(values_only=True):
-        # Grand total row — "Member Discounts" label in col 2, total in col 8
         if row[2] is not None and "member discount" in str(row[2]).lower():
             try:
                 grand_total = abs(float(str(row[8])))
@@ -873,12 +652,8 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
                 pass
             continue
 
-        # Data rows — col 3 = shopper level code, col 8 = amount.
-        # Capture nearby text columns too so unmapped shopper levels can be
-        # identified from the POS report without guessing an accounting map.
         code = row[3] if len(row) > 3 else None
-        amt  = row[8] if len(row) > 8 else None
-
+        amt = row[8] if len(row) > 8 else None
         desc_candidates = []
         for idx in (2, 4, 1, 5):
             if len(row) > idx and row[idx] is not None:
@@ -891,14 +666,12 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
             continue
         try:
             code = int(float(str(code)))
-            amt  = float(str(amt))
+            amt = float(str(amt))
         except (ValueError, TypeError):
             continue
-
         if amt == 0:
             continue
 
-        # Wednesday: combine senior levels 3, 4, 10 into Senior Day account
         if is_wednesday and code in WEDNESDAY_SENIOR_LEVELS:
             discounts[WEDNESDAY_SENIOR_ACCT] = round(discounts.get(WEDNESDAY_SENIOR_ACCT, 0.0) + abs(amt), 2)
             log.info(f"    Level {code:>2}  ${amt:>9,.2f}  →  {WEDNESDAY_SENIOR_ACCT} (Senior Day)")
@@ -908,43 +681,21 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
         if qb:
             discounts[qb] = round(discounts.get(qb, 0.0) + abs(amt), 2)
             log.info(f"    Level {code:>2}  ${amt:>9,.2f}  →  {qb}")
-        elif code == 15:
-            log.info(f"    Level 15 (Student Discount Sun) ${amt:,.2f} — skipped (Sunday only)")
-            grand_total = round(grand_total - abs(amt), 2)
         else:
             if code == 1:
-                log.warning(
-                    f"    Level 1  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}"
-                )
-                log.warning(
-                    "    Level 1 mapping candidate: 8512006 · Discount 5% - Owner buy Local "
-                    "(UNCONFIRMED — do not post automatically yet)"
-                )
+                log.warning(f"    Level 1  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}")
+                log.warning("    Level 1 mapping candidate: 8512006 · Discount 5% - Owner buy Local (UNCONFIRMED — do not post automatically yet)")
             else:
-                log.warning(
-                    f"    Level {code}  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}"
-                )
+                log.warning(f"    Level {code}  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}")
 
     log.info(f"  Discounts: {len(discounts)} accounts, grand total=${grand_total:,.2f}")
     return discounts, grand_total
 
 
 def parse_bs_sheet(filepath: Path, report_date) -> dict:
-    """
-    Read the Balance Sheet tab (e.g. '41226 BS') from the Excel file.
-    Extracts: Sales Tax, Bottle Sales/Fee/Return, Charity, Credit Cards, Cash, etc.
-    Returns dict of { field_name: amount }
-    """
     import openpyxl
-
-    # Build tab name: MMDDYY BS
     mmddyy = f"{report_date.month}{report_date.strftime('%d%y')}"
-    tab_candidates = [
-        f"{mmddyy} BS",
-        f"0{mmddyy} BS",
-        report_date.strftime("%m%d%y BS"),
-    ]
-
+    tab_candidates = [f"{mmddyy} BS", f"0{mmddyy} BS", report_date.strftime("%m%d%y BS")]
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = None
     for candidate in tab_candidates:
@@ -952,141 +703,96 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
             ws = wb[candidate]
             log.info(f"  Reading BS sheet: '{candidate}'")
             break
-
     if ws is None:
         for sheet in wb.sheetnames:
             if sheet.upper().endswith(" BS"):
                 ws = wb[sheet]
                 log.info(f"  Reading BS sheet: '{sheet}'")
                 break
-
     if ws is None:
         log.warning(f"  No BS sheet found in {filepath.name}")
         return {}
 
     bs = {
-        "sales_tax":        0.0,
-        "bottle_sales":     0.0,
-        "milk_bottle_fee":  0.0,
-        "milk_bottle_return": 0.0,
-        "bottle_return":    0.0,
-        "charity":          0.0,
-        "prepaid_increase": 0.0,
-        "penny_round":      0.0,
-        "visa_mc":          0.0,
-        "amex":             0.0,
-        "discover":         0.0,
-        "debit":            0.0,
-        "ebt_cash":         0.0,
-        "ebt_food":         0.0,
-        "dufb":             0.0,
-        "cash":             0.0,
-        "check":            0.0,
-        "vendor_coupon":    0.0,
-        "charge":           0.0,
-        "prepaid_card":     0.0,
-        "donation":         0.0,
-        "subscription":     0.0,
+        "sales_tax": 0.0, "bottle_sales": 0.0, "milk_bottle_fee": 0.0,
+        "milk_bottle_return": 0.0, "bottle_return": 0.0, "charity": 0.0,
+        "prepaid_increase": 0.0, "penny_round": 0.0, "visa_mc": 0.0,
+        "amex": 0.0, "discover": 0.0, "debit": 0.0, "ebt_cash": 0.0,
+        "ebt_food": 0.0, "dufb": 0.0, "cash": 0.0, "check": 0.0,
+        "vendor_coupon": 0.0, "charge": 0.0, "prepaid_card": 0.0,
+        "donation": 0.0, "subscription": 0.0,
     }
 
     for row in ws.iter_rows(values_only=True):
         code = row[0]
-        desc = str(row[2] or row[1] or "").strip().lower()
-        amt  = row[4] if len(row) > 4 else None
-
-        # Total rows use col 7 (Balance column)
-        bal  = row[7] if len(row) > 7 else None
-
+        amt = row[4] if len(row) > 4 else None
+        bal = row[7] if len(row) > 7 else None
         def to_float(v):
-            try: return float(v)
-            except: return 0.0
+            try:
+                return float(v)
+            except Exception:
+                return 0.0
 
-        # Total Taxes → Sales Tax
         if row[1] == "Total" and row[2] == "Taxes":
             bs["sales_tax"] = to_float(bal)
             log.info(f"    Sales Tax: ${bs['sales_tax']:,.2f}")
+        if code == 39: bs["bottle_sales"] = to_float(amt)
+        if code == 40: bs["milk_bottle_fee"] = to_float(amt)
+        if code == 205: bs["charity"] = to_float(amt)
+        if code == 207: bs["penny_round"] = to_float(amt)
+        if code == 208: bs["prepaid_increase"] = to_float(amt)
+        if code == 910: bs["milk_bottle_return"] = to_float(amt)
+        if code == 911: bs["bottle_return"] = to_float(amt)
+        if code == 901: bs["cash"] = to_float(amt)
+        if code == 902: bs["check"] = to_float(amt)
+        if code == 903: bs["debit"] = to_float(amt)
+        if code == 920: bs["ebt_cash"] = to_float(amt)
+        if code == 921: bs["ebt_food"] = to_float(amt)
+        if code == 928: bs["dufb"] = to_float(amt)
+        if code == 930: bs["visa_mc"] = round(bs["visa_mc"] + to_float(amt), 2)
+        if code == 931: bs["visa_mc"] = round(bs["visa_mc"] + to_float(amt), 2)
+        if code == 932: bs["amex"] = to_float(amt)
+        if code == 933: bs["discover"] = to_float(amt)
+        if code == 980: bs["prepaid_card"] = to_float(amt)
+        if code == 1117: bs["prepaid_card"] = round(bs["prepaid_card"] + to_float(amt), 2)
+        if code == 906: bs["charge"] = to_float(amt)
+        if code == 908: bs["vendor_coupon"] = to_float(amt)
+        if code == 1122: bs["donation"] = to_float(amt)
+        if code == 3420: bs["subscription"] = to_float(amt)
 
-        # Individual rows by code
-        if code == 39:   bs["bottle_sales"]      = to_float(amt)
-        if code == 40:   bs["milk_bottle_fee"]    = to_float(amt)
-        if code == 205:  bs["charity"]            = to_float(amt)
-        if code == 207:  bs["penny_round"]        = to_float(amt)
-        if code == 208:  bs["prepaid_increase"]   = to_float(amt)
-        # Revenue rows (PkUp = what was actually collected)
-        if code == 910:  bs["milk_bottle_return"] = to_float(amt)
-        if code == 911:  bs["bottle_return"]      = to_float(amt)
-        if code == 901:  bs["cash"]               = to_float(amt)
-        if code == 902:  bs["check"]              = to_float(amt)
-        if code == 903:  bs["debit"]              = to_float(amt)
-        if code == 920:  bs["ebt_cash"]           = to_float(amt)
-        if code == 921:  bs["ebt_food"]           = to_float(amt)
-        if code == 928:  bs["dufb"]               = to_float(amt)
-        if code == 930:  bs["visa_mc"]            = round(bs["visa_mc"] + to_float(amt), 2)  # Visa
-        if code == 931:  bs["visa_mc"]            = round(bs["visa_mc"] + to_float(amt), 2)  # Master
-        if code == 932:  bs["amex"]               = to_float(amt)
-        if code == 933:  bs["discover"]           = to_float(amt)
-        if code == 980:  bs["prepaid_card"]       = to_float(amt)
-        if code == 1117: bs["prepaid_card"]       = round(bs["prepaid_card"] + to_float(amt), 2)  # PkUp Gift card used — add to prepaid
-        if code == 906:  bs["charge"]             = to_float(amt)
-        if code == 908:  bs["vendor_coupon"]      = to_float(amt)
-        if code == 1122: bs["donation"]           = to_float(amt)
-        if code == 3420: bs["subscription"]       = to_float(amt)
-
-    log.info(f"  BS: Tax=${bs['sales_tax']:,.2f} BottleSales=${bs['bottle_sales']:,.2f} "
-             f"Fee=${bs['milk_bottle_fee']:,.2f} Charity=${bs['charity']:,.2f} "
-             f"Visa/MC=${bs['visa_mc']:,.2f} AMEX=${bs['amex']:,.2f} "
-             f"Discover=${bs['discover']:,.2f} Debit=${bs['debit']:,.2f}")
+    log.info(f"  BS: Tax=${bs['sales_tax']:,.2f} BottleSales=${bs['bottle_sales']:,.2f} Fee=${bs['milk_bottle_fee']:,.2f} Charity=${bs['charity']:,.2f} Visa/MC=${bs['visa_mc']:,.2f} AMEX=${bs['amex']:,.2f} Discover=${bs['discover']:,.2f} Debit=${bs['debit']:,.2f}")
     return bs
 
 
 def find_todays_files(deposit_date=None):
-    """Find uploaded daily files inside input/daily_reports."""
     folder = Path(CONFIG["pos_export_folder"])
     selected_date = deposit_date or date.today()
-
     date_patterns = [
-        selected_date.strftime("%Y-%m-%d"),
-        selected_date.strftime("%m-%d-%Y"),
-        selected_date.strftime("%m%d%Y"),
-        selected_date.strftime("%Y%m%d"),
-        selected_date.strftime("%m%d%y"),
-        selected_date.strftime("%m-%d-%y"),
+        selected_date.strftime("%Y-%m-%d"), selected_date.strftime("%m-%d-%Y"),
+        selected_date.strftime("%m%d%Y"), selected_date.strftime("%Y%m%d"),
+        selected_date.strftime("%m%d%y"), selected_date.strftime("%m-%d-%y"),
     ]
-
-    all_files = [
-        f for f in folder.iterdir()
-        if f.is_file() and not f.name.startswith("~$")
-    ]
-
+    all_files = [f for f in folder.iterdir() if f.is_file() and not f.name.startswith("~$")]
     dated_files = [f for f in all_files if any(p in f.name for p in date_patterns)]
     candidates = dated_files if dated_files else all_files
-
     if not candidates:
-        raise FileNotFoundError(
-            f"No input files found in {folder}. "
-            "Upload the day's files into input/daily_reports and run again."
-        )
+        raise FileNotFoundError(f"No input files found in {folder}. Upload the day's files into input/daily_reports and run again.")
 
     sms_files, cc_file, coupon_files, excel_files = [], None, [], []
-
     for f in candidates:
         suffix = f.suffix.lower()
         name_up = f.name.upper()
-
         if suffix in {".xlsx", ".xlsm"}:
             excel_files.append(f)
             log.info(f"  Excel report    : {f.name}")
             continue
-
         if suffix != ".csv":
             log.info(f"  Skipping unsupported file: {f.name}")
             continue
-
         try:
             peek = f.read_text(encoding="utf-8-sig", errors="replace")[:2000].upper()
         except Exception:
             peek = ""
-
         if any(p.upper() in name_up or p.upper() in peek for p in CONFIG["cc_pattern"]):
             cc_file = f
             log.info(f"  CC settlement  : {f.name}")
@@ -1107,136 +813,100 @@ def find_todays_files(deposit_date=None):
         excel_files = dated_excel or [max(excel_files, key=lambda p: p.stat().st_mtime)]
         if not dated_excel:
             log.info(f"  Multiple Excel files found; using newest: {excel_files[0].name}")
-
     if not sms_files:
         log.info("  No SMS CSV needed if Excel report contains sales/discount tabs.")
-
     return sms_files, cc_file, coupon_files, excel_files
 
-
-# ═══════════════════════════════════════════════════════════════
-#  IIF GENERATOR
-#  Uses DEPOSIT transaction type so it lands in
-#  Banking → Make Deposits → 1120200 · NBT Bank - Operating Account
-# ═══════════════════════════════════════════════════════════════
-
 def spl(date_str, acct, name, amount, memo, class_name=""):
-    """Build one SPL line. amount=None leaves the amount blank for manual entry.
-    CLASS is intentionally left blank for all imported lines.
-    """
     amt_str = f"{amount:.2f}" if amount is not None else ""
     return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
 
 
 def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0) -> Path:
-    date_str     = report_date.strftime("%m/%d/%Y")
+    date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
-    iif_path     = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
-
+    iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
     if misc_tba_lines is None:
         misc_tba_lines = []
     if bs_data is None:
         bs_data = {}
 
     def bs(key, default=None):
-        """Get a value from BS data, return as positive amount or None."""
         v = bs_data.get(key, 0.0)
         if v != 0.0:
             return abs(v)
         return default
 
-    # Helper to get amount from sales dict, None if not found
     def s(key):
-        """Return gross sales as negative SPL (income = credit)."""
         if key not in sales:
             return None
         return -abs(sales[key])
 
     def d(key):
-        # Positive in IIF → QB shows as negative in Make Deposits
         return abs(discounts[key]) if key in discounts else None
 
-    lines = []
-    lines.append("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS")
-    lines.append("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS")
-    lines.append("!ENDTRNS")
-    lines.append("")
-
+    lines = [
+        "!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS",
+        "!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS",
+        "!ENDTRNS",
+        "",
+    ]
     spls = []
 
-    # ── SALES (Image 1) — exact order matching your manual entry ──
     SALES_ORDER = [
         ("7110110 · Sales - Packaged Grocery - NT", ""),
-        ("7110120 · Sales - Dairy/Refrigerated",    ""),
-        ("7110130 · Sales - Frozen Foods",           ""),
-        ("7110141 · Sales - Bulk",                   ""),
-        ("7110142 · Sales - Bulk Herbs",             ""),
-        ("7110150 · Sales - Bread",                  ""),
-        ("7110160 · Sales - Beer",                   ""),
-        ("7110180 · Sales - Pets",                   ""),
-        ("7110190 · Sales - General Merchandise",    ""),
-        ("7110210 · Sales - In-House Deli",          ""),
-        ("7110220 · Sales - In-House Bakery",        ""),
-        ("7110210 · Sales - In-House Deli",          "Catering"),   # separate catering line
-        ("7110235 · Sales - Sushi",                  ""),
-        ("7110240 · Sales - Java & Juice",           ""),
-        ("7110250 · Sales - Co-op Cafe (ESP)",       "ESP Co-op Cafe"),
-        ("7110310 · Sales - Cheese",                 ""),
-        ("7110320 · Sales - Meat",                   ""),
-        ("7110330 · Sales - Specialty Foods",        ""),
-        ("7110340 · Sales - Fish & Seafood",         ""),
-        ("7110350 · Sales - Specialty Mercantile",   ""),
-        ("7110410 · Sales - Produce",                ""),
-        ("7110420 · Sales - Gardening/Plants",       ""),
-        ("7110510 · Sales - Personal Care Taxable",  ""),
+        ("7110120 · Sales - Dairy/Refrigerated", ""),
+        ("7110130 · Sales - Frozen Foods", ""),
+        ("7110141 · Sales - Bulk", ""),
+        ("7110142 · Sales - Bulk Herbs", ""),
+        ("7110150 · Sales - Bread", ""),
+        ("7110160 · Sales - Beer", ""),
+        ("7110180 · Sales - Pets", ""),
+        ("7110190 · Sales - General Merchandise", ""),
+        ("7110210 · Sales - In-House Deli", ""),
+        ("7110220 · Sales - In-House Bakery", ""),
+        ("7110210 · Sales - In-House Deli", "Catering"),
+        ("7110235 · Sales - Sushi", ""),
+        ("7110240 · Sales - Java & Juice", ""),
+        ("7110250 · Sales - Co-op Cafe (ESP)", "ESP Co-op Cafe"),
+        ("7110310 · Sales - Cheese", ""),
+        ("7110320 · Sales - Meat", ""),
+        ("7110330 · Sales - Specialty Foods", ""),
+        ("7110340 · Sales - Fish & Seafood", ""),
+        ("7110350 · Sales - Specialty Mercantile", ""),
+        ("7110410 · Sales - Produce", ""),
+        ("7110420 · Sales - Gardening/Plants", ""),
+        ("7110510 · Sales - Personal Care Taxable", ""),
         ("7110520 · Sales - Vitamins & Supplements", ""),
-        ("7110550 · Sales - Magazines",              ""),
-        ("7111300 · Promotional Sales",              ""),
-        ("8320000 · Store Supplies",                 "HWFC Grocery Paper Bags"),
+        ("7110550 · Sales - Magazines", ""),
+        ("7111300 · Promotional Sales", ""),
+        ("8320000 · Store Supplies", "HWFC Grocery Paper Bags"),
     ]
 
-    # Track running total for auto-filled amounts only
     spl_total = 0.0
-    seen_deli = False  # Deli appears twice — first is regular, second is Catering
-
-    # Catering (sub-dept 230) was merged into Deli in SUBDEPT_TO_QB.
-    # Get the raw Deli-only amount by subtracting Catering from combined total.
-    catering_amt = None
-    deli_combined = sales.get("7110210 · Sales - In-House Deli", 0)
-    # Catering amount is stored in the SMS file under sub-dept 230
-    # We stored it merged — so show combined on first line, blank on Catering line
-    # (Catering is already included in the Deli total)
-
+    seen_deli = False
     for acct, memo in SALES_ORDER:
         if acct == "7110210 · Sales - In-House Deli":
             if not seen_deli:
-                # First Deli line — regular deli amount (not catering)
                 amt = s(acct)
                 seen_deli = True
             else:
-                # Catering line — pull from the pipe-keyed Catering entry
                 catering_key = "7110210 · Sales - In-House Deli|Catering"
                 amt = -abs(sales[catering_key]) if catering_key in sales else None
         elif acct in INCOME_ACCOUNTS:
             amt = s(acct)
         else:
-            # Store Supplies: negative in IIF → QB shows positive
             amt = -(abs(sales[acct])) if acct in sales else None
-
         if amt is not None:
             spl_total += amt
         spls.append(spl(date_str, acct, "", amt, memo))
 
-    # ── NYS BAG FEES — negative in IIF so QB shows positive ──
     bag_amt = -(abs(sales.get("4150300 · NYS Paper Bag Fees Payable", 0))) or None
     if bag_amt:
         spl_total += bag_amt
-    spls.append(spl(date_str, "4150300 · NYS Paper Bag Fees Payable", "",
-                    bag_amt, "NYS-Albany County Paper Bag Fees"))
+    spls.append(spl(date_str, "4150300 · NYS Paper Bag Fees Payable", "", bag_amt, "NYS-Albany County Paper Bag Fees"))
 
-    # ── COUPONS — use Excel Col M value if available, else fall back to sales ──
     if store_coupons_xl != 0.0:
-        # QB flips sign — put positive in IIF to show negative
         coupon_amt = abs(store_coupons_xl)
         log.info(f"    Coupons from Excel M2: ${store_coupons_xl:.2f}")
     else:
@@ -1244,224 +914,175 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         coupon_amt = abs(raw_coupon) if raw_coupon != 0 else None
     if coupon_amt is not None:
         spl_total += coupon_amt
-    spls.append(spl(date_str, "8515000 · Marketing - Coupons, Store", "",
-                    coupon_amt, "Store Coupons"))
+    spls.append(spl(date_str, "8515000 · Marketing - Coupons, Store", "", coupon_amt, "Store Coupons"))
 
-    # ── DISCOUNTS — all forced negative ──
     DISCOUNT_ORDER = [
-        ("8512006 · Discount 5% - Owner buy Local",  "PdOut -"),   # manual — shopper code unknown
-        ("8512001 · Discount 2% - Owners",           "PdOut -"),
+        ("8512006 · Discount 5% - Owner buy Local", "PdOut -"),
+        ("8512001 · Discount 2% - Owners", "PdOut -"),
         ("8511001 · Discount 2% - Senior Non Owner", "PdOut -"),
-        ("8511002 · Discount 8% - Senior Day",        "PdOut -"),
-        ("8511003 · Discount 5% - Senior Owners",     "PdOut -"),
-        ("8140010 · Monthly Time Discount (8%)",      "PdOut -"),
-        ("8140026 · Weekly Time Discount (24%)",      "PdOut -"),
-        ("8423100 · Discount - Staff  (24%)",         "PdOut -"),
-        ("8512002 · Discount 2% - Visiting Coop",    "PdOut -"),
-        ("8512003 · Discount 8% - Vendors",           "PdOut -"),
-        ("8512007 · Discount 15% - Non-profit",       "PdOut-"),
-        ("8140026 · Weekly Time Discount (24%)",      "Refunded Discounts", refunded_discounts if refunded_discounts else None),
+        ("8511002 · Discount 8% - Senior Day", "PdOut -"),
+        ("8511003 · Discount 5% - Senior Owners", "PdOut -"),
+        ("8140010 · Monthly Time Discount (8%)", "PdOut -"),
+        ("8140026 · Weekly Time Discount (24%)", "PdOut -"),
+        ("8423100 · Discount - Staff  (24%)", "PdOut -"),
+        ("8512002 · Discount 2% - Visiting Coop", "PdOut -"),
+        ("8512003 · Discount 8% - Vendors", "PdOut -"),
+        ("8512005 · Discount 8% - College Day", "PdOut -"),
+        ("8512007 · Discount 15% - Non-profit", "PdOut-"),
+        ("8140026 · Weekly Time Discount (24%)", "Refunded Discounts", refunded_discounts if refunded_discounts else None),
     ]
     for entry in DISCOUNT_ORDER:
         acct = entry[0]
         memo = entry[1]
         override_amt = entry[2] if len(entry) > 2 else None
-
         if override_amt is not None:
-            # Pass raw Excel value — manual loop will flip sign for QB display
-            # Positive Excel value → negative IIF → QB shows positive
-            # Negative Excel value → positive IIF → QB shows negative
             amt = -override_amt
         elif acct == "8512006 · Discount 5% - Owner buy Local":
             source = owner_apprec_xl if owner_apprec_xl != 0 else owner_local_amt
             amt = abs(source) if source != 0 else None
         elif memo == "Refunded Discounts":
-            amt = None   # no Excel value found — leave blank
+            amt = None
         else:
             amt = d(acct)
         if amt is not None:
             spl_total += amt
         spls.append(spl(date_str, acct, "", amt, memo))
 
-    # ── MANUAL LINES (Image 2 & 3) — blank amounts, accounts + memos pre-loaded ──
-    # Combine EBT Cash + EBT Food Stamps into one line
     ebt_cash = bs_data.get("ebt_cash", 0.0)
     ebt_food = bs_data.get("ebt_food", 0.0)
-    bs_ebt   = round(abs(ebt_cash) + abs(ebt_food), 2) or None
-
+    bs_ebt = round(abs(ebt_cash) + abs(ebt_food), 2) or None
     charity_bs_amt = round(abs(bs_data.get("charity", 0.0)), 2)
     pass_through_amt = round(abs(pass_through_total), 2)
     charity_combined = round(charity_bs_amt + pass_through_amt, 2)
-
-    log.info(
-        f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + "
-        f"HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}"
-    )
+    log.info(f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}")
     log.info(f"    Paid-In mapping: HASH Paid-Ins=${abs(paid_in_total):,.2f} → 4444 · TBA Purchases / PAID IN:")
 
     MANUAL_LINES = [
-        # Member shares
-        ("6100000 · Member Shares (Paid-In Equity)",  "",                    "Member Shares - Paid", bs("subscription") if bs("subscription") else None),
-        ("6100000 · Member Shares (Paid-In Equity)",  "",                    "Member Shares - Receivable"),
-        ("1260000 · Member Shares Receivable",         "",                    "Share Installments - Receivable"),
-        ("1260000 · Member Shares Receivable",         "",                    "Share Installments - Paid"),
-        ("9104000 · Interest Income",                  "",                    "Share Installments - Paid"),
-        # Sales tax — from BS sheet Total Taxes
-        ("4150100 · Sales Tax Payable",                "New York State Sales Tax", "", bs("sales_tax")),
-        # Bottle deposits — from BS sheet
-        ("1311100 · Inventory - Bottles Deposit",      "",                    "Bottle Sales",       bs("bottle_sales")),
-        ("1311100 · Inventory - Bottles Deposit",      "",                    "Milk Bottle Fee",    bs("milk_bottle_fee")),
-        # Milk Bottle Return = Excel M1 (-118) + BS row 910 — both negative in QB
-        ("1311100 · Inventory - Bottles Deposit",      "",                    "Milk Bottle Return",
-            -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
-        ("1311100 · Inventory - Bottles Deposit",      "",                    "Bottle Return",      -bs("bottle_return") if bs("bottle_return") else None),
-        # Charitable donations — from BS sheet
-        ("4160000 · Charitable Donations Payable",     "",                    "Charity/Pass through Donations (Round up)", charity_combined or None),
-        # BS code 207 — Nickel Round Up/Down
-        ("9107000 · Miscellaneous Income",              "",                    "Penny Round Up for Cash Transactions", bs("penny_round")),
-        # Gift cards & food bucks
-        ("4160500 · Gift Cards - Sold - Old/Vantiv",   "",                    "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
-        ("1230400 · Due From Double Up Food Bucks",    "",                    "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
-        ("4160510 · Gift Cards- Redeemed-Old/Vantiv",  "",                    "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
-        # NCG / MFG coupons
-        ("1250000 · Coupons Receivable",               "",                    "NCG Coupons", -bs("vendor_coupon") if bs("vendor_coupon") else None),
-        ("1250000 · Coupons Receivable",               "",                    "MFG Coupons"),
-        # InHouse blank line
-        ("4444 · TBA Purchases",                       "",                    "InHouse:", -bs("charge") if bs("charge") else None),
-        # Blank rows
+        ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Paid", bs("subscription") if bs("subscription") else None),
+        ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Receivable"),
+        ("1260000 · Member Shares Receivable", "", "Share Installments - Receivable"),
+        ("1260000 · Member Shares Receivable", "", "Share Installments - Paid"),
+        ("9104000 · Interest Income", "", "Share Installments - Paid"),
+        ("4150100 · Sales Tax Payable", "New York State Sales Tax", "", bs("sales_tax")),
+        ("1311100 · Inventory - Bottles Deposit", "", "Bottle Sales", bs("bottle_sales")),
+        ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Fee", bs("milk_bottle_fee")),
+        ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Return", -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
+        ("1311100 · Inventory - Bottles Deposit", "", "Bottle Return", -bs("bottle_return") if bs("bottle_return") else None),
+        ("4160000 · Charitable Donations Payable", "", "Charity/Pass through Donations (Round up)", charity_combined or None),
+        ("9107000 · Miscellaneous Income", "", "Penny Round Up for Cash Transactions", bs("penny_round")),
+        ("4160500 · Gift Cards - Sold - Old/Vantiv", "", "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
+        ("1230400 · Due From Double Up Food Bucks", "", "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
+        ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
+        ("1250000 · Coupons Receivable", "", "NCG Coupons", -bs("vendor_coupon") if bs("vendor_coupon") else None),
+        ("1250000 · Coupons Receivable", "", "MFG Coupons"),
+        ("4444 · TBA Purchases", "", "InHouse:", -bs("charge") if bs("charge") else None),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
-        # Outreach
-        ("8506000 · Outreach - Donations",             "",                    "", -bs("donation") if bs("donation") else None),
-        # Paid in/out labels
-        ("4444 · TBA Purchases",                       "",                    "PAID IN:", abs(paid_in_total) if paid_in_total else None),
-        ("4444 · TBA Purchases",                       "",                    "PAID OUT:"),
-        # Credit cards — negative in QB, so pass negative amounts
-        # (manual loop does iif_amt = -amt, so negative amt → positive IIF → QB shows negative)
-        ("1240001 · Credit Card Payments Receivable",  "",  "Visa/MC",            -bs("visa_mc")    if bs("visa_mc")    else None),
-        ("1240001 · Credit Card Payments Receivable",  "",  "Discover",           -bs("discover")   if bs("discover")   else None),
-        ("1240001 · Credit Card Payments Receivable",  "",  "AMEX",               -bs("amex")       if bs("amex")       else None),
-        ("1240001 · Credit Card Payments Receivable",  "",  "Debit Card",         -bs("debit")      if bs("debit")      else None),
-        ("1240001 · Credit Card Payments Receivable",  "",  "EBT Cash/Food Stamp",-bs_ebt           if bs_ebt           else None),
-        # Cash over/short
-        ("8314000 · FE - Cash Over/Shorts",            "",                    "Over/Short per Closeout Sheet"),
-        ("8314000 · FE - Cash Over/Shorts",            "",                    "Over/Short per POS (to = POS total)"),
+        ("8506000 · Outreach - Donations", "", "", -bs("donation") if bs("donation") else None),
+        ("4444 · TBA Purchases", "", "PAID IN:", abs(paid_in_total) if paid_in_total else None),
+        ("4444 · TBA Purchases", "", "PAID OUT:"),
+        ("1240001 · Credit Card Payments Receivable", "", "Visa/MC", -bs("visa_mc") if bs("visa_mc") else None),
+        ("1240001 · Credit Card Payments Receivable", "", "Discover", -bs("discover") if bs("discover") else None),
+        ("1240001 · Credit Card Payments Receivable", "", "AMEX", -bs("amex") if bs("amex") else None),
+        ("1240001 · Credit Card Payments Receivable", "", "Debit Card", -bs("debit") if bs("debit") else None),
+        ("1240001 · Credit Card Payments Receivable", "", "EBT Cash/Food Stamp", -bs_ebt if bs_ebt else None),
+        ("8314000 · FE - Cash Over/Shorts", "", "Over/Short per Closeout Sheet"),
+        ("8314000 · FE - Cash Over/Shorts", "", "Over/Short per POS (to = POS total)"),
     ]
 
     for entry in MANUAL_LINES:
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
         if amt is not None and amt != 0:
-            # QB flips sign — put -amt in IIF so QB displays amt correctly
             iif_amt = -amt
             spl_total += iif_amt
         else:
             iif_amt = None
         spls.append(spl(date_str, acct, name, iif_amt, memo))
 
-    # ── MISC TBA PURCHASES — non-zero misc sub-depts at the bottom ──
     if misc_tba_lines:
         for memo, amount in misc_tba_lines:
-            # Positive amounts in IIF → QB shows negative; negative → positive
             iif_amt = -amount
             spl_total += iif_amt
             spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
             log.info(f"    TBA Purchases: {memo} = ${amount:.2f}")
 
-    # ── TRNS total — must be exact negative of all SPL amounts so it zeros out ──
     spl_total = round(spl_total, 2)
-    trns_amt  = round(-spl_total, 2)
+    trns_amt = round(-spl_total, 2)
 
-    # ── VERIFY 1: Gross sales minus coupons minus owner apprec should match Excel J3 ──
-    # Mirrors the Excel formula: J3 = G53 + J1 (coupons) + J2 (owner apprec)
-    # Gross sales = all sales accounts EXCEPT store coupons (sub-dept 27)
-    # Includes: 711xxxx income, store supplies, NYS bags, AND misc TBA lines
     COUPON_ACCT = "8515000 · Marketing - Coupons, Store"
     sales_acct_set = set(sales.keys()) - {COUPON_ACCT}
     gross_sales_spl = 0.0
-    for s in spls:
-        parts = s.split("\t")
+    for line in spls:
+        parts = line.split("\t")
         if len(parts) < 6 or not parts[5].strip():
             continue
         acct = parts[3].strip()
-        # Include if it came from the sales dict (excluding coupons)
         if acct in sales_acct_set:
             try:
                 gross_sales_spl += abs(float(parts[5]))
             except ValueError:
                 pass
-
-    # Also add misc TBA lines (560, 999, 170, etc.) — only positive amounts
-    # Negative misc lines (e.g. Refunded Discounts) reduce sales, not increase gross
     if misc_tba_lines:
         for memo, amount in misc_tba_lines:
-            if amount > 0:
-                gross_sales_spl += amount
-            else:
-                gross_sales_spl += amount  # still include — matches Excel G column total
+            gross_sales_spl += amount
     gross_sales_spl = round(gross_sales_spl, 2)
 
-    coupon_deduct        = abs(store_coupons_xl) if store_coupons_xl else abs(sales.get("8515000 · Marketing - Coupons, Store", 0))
-    owner_apprec_deduct  = abs(owner_apprec_xl)  if owner_apprec_xl  else 0.0
-    # milk_bottle_return is already the M1 value (negative) — reuse it for the deduction
-    milk_returns_deduct  = abs(milk_bottle_return) if milk_bottle_return else abs(milk_bottles_returns) if milk_bottles_returns else 0.0
-    net_sales_check      = round(gross_sales_spl - coupon_deduct - owner_apprec_deduct - milk_returns_deduct, 2)
+    coupon_deduct = abs(store_coupons_xl) if store_coupons_xl else abs(sales.get("8515000 · Marketing - Coupons, Store", 0))
+    owner_apprec_deduct = abs(owner_apprec_xl) if owner_apprec_xl else 0.0
+    milk_returns_deduct = abs(milk_bottle_return) if milk_bottle_return else abs(milk_bottles_returns) if milk_bottles_returns else 0.0
+    net_sales_check = round(gross_sales_spl - coupon_deduct - owner_apprec_deduct - milk_returns_deduct, 2)
 
     if excel_sales_total != 0.0:
         diff = round(abs(excel_sales_total - net_sales_check), 2)
-        log.info(f"")
-        log.info(f"  ─────────────────────────────────────────")
-        log.info(f"  SALES CHECK")
-        log.info(f"  ─────────────────────────────────────────")
+        log.info("")
+        log.info("  ─────────────────────────────────────────")
+        log.info("  SALES CHECK")
+        log.info("  ─────────────────────────────────────────")
         log.info(f"  Gross Sales:        ${gross_sales_spl:>12,.2f}")
         log.info(f"  Store Coupons:     -${coupon_deduct:>12,.2f}")
         log.info(f"  Owner Apprec:      -${owner_apprec_deduct:>12,.2f}")
         if milk_returns_deduct:
             log.info(f"  Milk Btl Returns:  -${milk_returns_deduct:>12,.2f}")
-        log.info(f"  ─────────────────────────────────────────")
+        log.info("  ─────────────────────────────────────────")
         log.info(f"  Script Net Sales:   ${net_sales_check:>12,.2f}")
         log.info(f"  Excel Sales Total:  ${excel_sales_total:>12,.2f}")
         if diff < 0.02:
-            log.info(f"  RESULT: ✓ MATCH — OK to import!")
+            log.info("  RESULT: ✓ MATCH — OK to import!")
         else:
             log.info(f"  Difference:         ${diff:>12,.2f}")
-            log.warning(f"  RESULT: ⚠ MISMATCH — Check your Excel file before importing!")
-        log.info(f"  ─────────────────────────────────────────")
-        log.info(f"")
+            log.warning("  RESULT: ⚠ MISMATCH — Check your Excel file before importing!")
+        log.info("  ─────────────────────────────────────────")
+        log.info("")
 
-    # ── HASH SALES 6 — Refunded Discounts + Pass Through Donations ──
-    # Compare the script-calculated total against the actual Hash Sales 6
-    # value read from the Excel report.
-    script_hash  = round(abs(refunded_discounts) + abs(pass_through_total), 2)
-    excel_hash   = round(abs(hash_sales_total), 2)
-    hash_diff    = round(abs(excel_hash - script_hash), 2)
-    log.info(f"  ─────────────────────────────────────────")
-    log.info(f"  HASH SALES 6 CHECK")
-    log.info(f"  ─────────────────────────────────────────")
+    script_hash = round(abs(refunded_discounts) + abs(pass_through_total), 2)
+    excel_hash = round(abs(hash_sales_total), 2)
+    hash_diff = round(abs(excel_hash - script_hash), 2)
+    log.info("  ─────────────────────────────────────────")
+    log.info("  HASH SALES 6 CHECK")
+    log.info("  ─────────────────────────────────────────")
     log.info(f"  Refunded Discounts:  ${abs(refunded_discounts):>10,.2f}")
     log.info(f"  Pass Thru Donations: ${abs(pass_through_total):>10,.2f}")
-    log.info(f"  ─────────────────────────────────────────")
+    log.info("  ─────────────────────────────────────────")
     log.info(f"  Script Total:        ${script_hash:>10,.2f}")
     log.info(f"  Hash Sales 6 Total:  ${excel_hash:>10,.2f}")
     if hash_sales_total == 0.0:
-        log.warning(f"  RESULT: ⚠ NO HASH SALES 6 TOTAL FOUND IN EXCEL — verify manually")
+        log.warning("  RESULT: ⚠ NO HASH SALES 6 TOTAL FOUND IN EXCEL — verify manually")
     elif hash_diff < 0.02:
-        log.info(f"  RESULT: ✓ MATCH — OK to import!")
+        log.info("  RESULT: ✓ MATCH — OK to import!")
     else:
         log.info(f"  Difference:          ${hash_diff:>10,.2f}")
-        log.warning(f"  RESULT: ⚠ MISMATCH — Check before importing!")
-    log.info(f"  ─────────────────────────────────────────")
-    log.info(f"")
+        log.warning("  RESULT: ⚠ MISMATCH — Check before importing!")
+    log.info("  ─────────────────────────────────────────")
+    log.info("")
 
-    # ── VERIFY 2: Discount total must match Excel discounts sheet grand total ──
-    # Exclude Refunded Discounts (positive amount — not a real discount)
     disc_acct_names = set(discounts.keys())
     disc_spl_total = 0.0
-    for s in spls:
-        parts = s.split("\t")
+    for line in spls:
+        parts = line.split("\t")
         if len(parts) < 6 or not parts[5].strip():
             continue
         acct = parts[3].strip()
@@ -1475,36 +1096,30 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
 
     if excel_discount_total != 0.0:
         diff2 = round(abs(excel_discount_total - disc_spl_total), 2)
-        log.info(f"  ─────────────────────────────────────────────")
-        log.info(f"  DISCOUNTS CHECK")
-        log.info(f"  ─────────────────────────────────────────────")
+        log.info("  ─────────────────────────────────────────────")
+        log.info("  DISCOUNTS CHECK")
+        log.info("  ─────────────────────────────────────────────")
         log.info(f"  Script Discounts:   ${disc_spl_total:>12,.2f}")
         log.info(f"  Excel Disc Total:   ${excel_discount_total:>12,.2f}")
         if diff2 < 0.02:
-            log.info(f"  RESULT: ✓ MATCH — OK to import!")
+            log.info("  RESULT: ✓ MATCH — OK to import!")
         else:
             log.info(f"  Difference:         ${diff2:>12,.2f}")
-            if report_date.weekday() == 6:  # Sunday
-                log.info(f"  NOTE: Sunday — difference likely Student Discount (level 15, not mapped)")
-                log.info(f"  RESULT: ✓ OK to import!")
-            else:
-                log.warning(f"  RESULT: ⚠ MISMATCH — Check your discounts sheet before importing!")
-        log.info(f"  ─────────────────────────────────────────────")
-        log.info(f"")
+            log.warning("  RESULT: ⚠ MISMATCH — Check your discounts sheet before importing!")
+        log.info("  ─────────────────────────────────────────────")
+        log.info("")
 
-    # ── Write status summary file ────────────────────────────────
-    status_lines = []
-    status_lines.append(f"HWFC Daily Deposit — {report_date.strftime('%A, %B %d, %Y')}")
-    status_lines.append(f"Run time: {datetime.now().strftime('%I:%M %p')}")
-    status_lines.append("")
-
+    status_lines = [
+        f"HWFC Daily Deposit — {report_date.strftime('%A, %B %d, %Y')}",
+        f"Run time: {datetime.now().strftime('%I:%M %p')}",
+        "",
+    ]
     if excel_sales_total != 0.0:
         sales_diff = round(abs(excel_sales_total - net_sales_check), 2)
         if sales_diff < 0.02:
             status_lines.append(f"  SALES:     ✓ MATCH   ${net_sales_check:,.2f}")
         else:
             status_lines.append(f"  SALES:     ⚠ MISMATCH  Script=${net_sales_check:,.2f}  Excel=${excel_sales_total:,.2f}  (off by ${sales_diff:,.2f})")
-
     if excel_discount_total != 0.0:
         disc_spl = round(sum(abs(v) for v in discounts.values()), 2)
         disc_diff = round(abs(excel_discount_total - disc_spl), 2)
@@ -1512,7 +1127,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             status_lines.append(f"  DISCOUNTS: ✓ MATCH   ${disc_spl:,.2f}")
         else:
             status_lines.append(f"  DISCOUNTS: ⚠ MISMATCH  Script=${disc_spl:,.2f}  Excel=${excel_discount_total:,.2f}  (off by ${disc_diff:,.2f})")
-
     if hash_sales_total != 0.0:
         if hash_diff < 0.02:
             status_lines.append(f"  HASH SALES: ✓ MATCH   ${script_hash:,.2f}")
@@ -1520,11 +1134,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             status_lines.append(f"  HASH SALES: ⚠ MISMATCH  Script=${script_hash:,.2f}  Excel=${excel_hash:,.2f}  (off by ${hash_diff:,.2f})")
     else:
         status_lines.append("  HASH SALES: ⚠ NO EXCEL TOTAL FOUND")
-
-    status_lines.append("")
-    status_lines.append(f"  IIF file: {iif_path}")
-    status_lines.append(f"  QB import: File → Utilities → Import → IIF Files")
-    status_lines.append("")
+    status_lines.extend(["", f"  IIF file: {iif_path}", "  QB import: File → Utilities → Import → IIF Files", ""])
 
     overall_ok = all([
         abs(excel_sales_total - net_sales_check) < 0.02 if excel_sales_total else True,
@@ -1543,12 +1153,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     except Exception as e:
         log.warning(f"  Could not write status file: {e}")
 
-    lines.append(
-        f"TRNS\tDEPOSIT\t{date_str}\t{deposit_acct}\t\t{trns_amt:.2f}\tDeposit\t"
-    )
+    lines.append(f"TRNS\tDEPOSIT\t{date_str}\t{deposit_acct}\t\t{trns_amt:.2f}\tDeposit\t")
     lines.extend(spls)
     lines.append("ENDTRNS")
-
     try:
         with open(iif_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
@@ -1560,10 +1167,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         raise
     return iif_path
 
-
-# ═══════════════════════════════════════════════════════════════
-#  EXCEL SUMMARY
-# ═══════════════════════════════════════════════════════════════
 
 def write_excel_summary(sales, discounts, cc, report_date: date) -> Path:
     import openpyxl
@@ -1692,6 +1295,7 @@ def main():
                 refunded_discounts   += rd
                 hash_sales_total     += hs
             log.info(f"  Using Excel report for sales ({len(excel_files)} file(s))")
+
             # Also read BS sheet
             for f in excel_files:
                 bs_data = parse_bs_sheet(f, yesterday)
@@ -1745,7 +1349,13 @@ def main():
             log.error("Nothing mapped. Check files and try again.")
             sys.exit(1)
 
-        iif_path  = generate_iif(sales, discounts, cc, yesterday, owner_local_amt, per_dept_coupons, milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines, excel_sales_total, excel_discount_total, bs_data, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total, paid_in_total)
+        iif_path = generate_iif(
+            sales, discounts, cc, yesterday, owner_local_amt, per_dept_coupons,
+            milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines,
+            excel_sales_total, excel_discount_total, bs_data, pass_through_total,
+            dust_bunnies_total, milk_bottles_returns, refunded_discounts,
+            hash_sales_total, paid_in_total
+        )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)
         except Exception as e:

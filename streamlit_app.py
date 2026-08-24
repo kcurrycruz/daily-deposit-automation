@@ -1049,6 +1049,7 @@ def parse_card_settlement_rows(log_text: str) -> list[dict]:
         r"CARD SETTLEMENT \| (?P<tender>[^|]+?) \| "
         r"Settlement=(?P<settlement>-?[0-9.]+) \| "
         r"BS=(?P<bs>-?[0-9.]+) \| Difference=(?P<diff>-?[0-9.]+) \| "
+        r"Adjustment=(?P<adjustment>-?[0-9.]+) \| "
         r"(?P<status>MATCH|MISMATCH)",
         flags=re.IGNORECASE,
     )
@@ -1059,7 +1060,13 @@ def parse_card_settlement_rows(log_text: str) -> list[dict]:
             "Daily Card Settlement": float(match.group("settlement")),
             "BS": float(match.group("bs")),
             "Difference": float(match.group("diff")),
+            "Adjustment": float(match.group("adjustment")),
             "Status": match.group("status").upper(),
+            "Resolution": (
+                "Matched"
+                if match.group("status").upper() == "MATCH"
+                else "Adjusted to BS via 8314000"
+            ),
         })
     return rows
 
@@ -1612,15 +1619,18 @@ if "run_result" in st.session_state:
     settlement_rows = v.get("card_settlement_rows", [])
     if settlement_rows:
         settlement_df = pd.DataFrame(settlement_rows)
-        for col in ["Daily Card Settlement", "BS", "Difference"]:
-            settlement_df[col] = settlement_df[col].map(lambda x: f"${x:,.2f}")
+        for col in ["Daily Card Settlement", "BS", "Difference", "Adjustment"]:
+            settlement_df[col] = settlement_df[col].map(
+                lambda x: f"(${abs(x):,.2f})" if x < 0 else f"${x:,.2f}"
+            )
         st.dataframe(settlement_df, use_container_width=True, hide_index=True)
         if v.get("card_settlement_ok"):
             st.success("All five card settlement amounts match the BS control totals.", icon="✅")
         else:
             st.warning(
-                "One or more card settlement amounts do not tie to the BS tab. "
-                "The IIF uses the Daily Card Settlement Report amounts because they reflect the bank-received settlement.",
+                "One or more card settlement amounts differ from the BS tab. "
+                "The IIF uses the Daily Card Settlement Report amounts, then posts the signed difference "
+                "to 8314000 · FE - Cash Over/Shorts so each tender ties back to the BS control total.",
                 icon="⚠️",
             )
     else:

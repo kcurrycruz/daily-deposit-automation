@@ -1138,6 +1138,58 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
     }
 
 
+def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, Optional[float]]:
+    """Build overview values from the generated IIF wherever possible.
+
+    The IIF is the source of truth for amounts that are actually posted.
+    Pass Through Donations remains sourced from the HASH validation because
+    the IIF combines it with the BS charity amount on one payable line.
+    """
+
+    def total_for(*, account_starts: str | None = None, memo_contains: str | None = None) -> Optional[float]:
+        matches = []
+        for line in lines:
+            if line.line_type != "SPL" or line.amount is None:
+                continue
+            if account_starts and not (line.account or "").startswith(account_starts):
+                continue
+            if memo_contains and memo_contains.lower() not in (line.memo or "").lower():
+                continue
+            matches.append(float(line.amount))
+        return round(sum(matches), 2) if matches else None
+
+    store_coupons = total_for(account_starts="8515000", memo_contains="Store Coupons")
+    owner_apprec = total_for(account_starts="8512006")
+    refunded = total_for(memo_contains="Refunded Discounts")
+    milk_bottle = total_for(account_starts="1311100", memo_contains="Milk Bottle Return")
+
+    card_adjustment_iif = 0.0
+    card_adjustment_found = False
+    for line in lines:
+        if line.line_type != "SPL" or line.amount is None:
+            continue
+        if not (line.account or "").startswith("8314000"):
+            continue
+        if "difference between first data vs bs" not in (line.memo or "").lower():
+            continue
+        card_adjustment_iif += float(line.amount)
+        card_adjustment_found = True
+
+    # Engine intentionally inverts the IIF sign so QuickBooks displays the
+    # requested cash over/short sign. Show the QuickBooks-facing adjustment.
+    card_adjustment = round(-card_adjustment_iif, 2) if card_adjustment_found else 0.0
+
+    return {
+        "Store Coupons": abs(store_coupons) if store_coupons is not None else None,
+        "Owner Appreciation": abs(owner_apprec) if owner_apprec is not None else None,
+        "Milk Bottle Returns": abs(milk_bottle) if milk_bottle is not None else None,
+        "Refunded Discounts": abs(refunded) if refunded is not None else None,
+        "Pass Through Donations": abs(float(validation.get("pass_through"))) if validation.get("pass_through") is not None else None,
+        "Card Settlement Adjustment": card_adjustment,
+        "IIF Difference": float(validation.get("iif_difference", 0.0)),
+    }
+
+
 def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
@@ -1426,16 +1478,15 @@ if settlement_file is not None:
             icon="🚫",
         )
     else:
-        source_text = f"✓ Processed Net Amount verified ({settlement_source_sheet})"
-        date_text = (
-            f"✓ Settlement date {settlement_date_info.strftime('%m/%d/%Y')}"
-            if settlement_date_info else "Settlement date not found"
+        settlement_status = (
+            f"💳 Card Settlement · {settlement_date_info.strftime('%m/%d/%Y')} · ✓ Verified"
+            if settlement_date_info
+            else "💳 Card Settlement · ✓ Verified"
         )
-        source_col, date_col = st.columns(2, gap="small")
-        with source_col:
-            st.markdown(f'<div class="hwfc-source-strip">{html.escape(source_text)}</div>', unsafe_allow_html=True)
-        with date_col:
-            st.markdown(f'<div class="hwfc-source-strip">{html.escape(date_text)}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="hwfc-source-strip">{html.escape(settlement_status)}</div>',
+            unsafe_allow_html=True,
+        )
 
     if deposit_date and settlement_date_info and settlement_date_info != deposit_date:
         settlement_date_mismatch = True
@@ -1648,23 +1699,29 @@ if "run_result" in st.session_state:
     )
 
     with overview_tab:
-        st.subheader("Deposit overview")
+        st.subheader("Deposit Summary")
 
-        o1, o2, o3 = st.columns(3)
-        with o1:
-            st.metric("Store Coupons", abs_money(v["store_coupons"]))
-        with o2:
-            st.metric("Owner Appreciation", abs_money(v["owner_apprec"]))
-        with o3:
-            st.metric("Milk Bottle Returns", abs_money(v["milk_bottle"]))
+        summary = build_deposit_summary(lines, v)
+        primary_items = [
+            ("Store Coupons", summary["Store Coupons"]),
+            ("Owner Appreciation", summary["Owner Appreciation"]),
+            ("Refunded Discounts", summary["Refunded Discounts"]),
+            ("Pass Through Donations", summary["Pass Through Donations"]),
+            ("Card Settlement Adjustment", summary["Card Settlement Adjustment"]),
+            ("IIF Difference", summary["IIF Difference"]),
+        ]
 
-        h1, h2, h3 = st.columns(3)
-        with h1:
-            st.metric("Refunded Discounts", abs_money(v["refunded"]))
-        with h2:
-            st.metric("Pass Through Donations", abs_money(v["pass_through"]))
-        with h3:
-            st.metric("Warnings found", v["warning_count"])
+        # Hide truly unavailable values instead of filling the overview with dashes.
+        visible_items = [(label, value) for label, value in primary_items if value is not None]
+        for row_start in range(0, len(visible_items), 3):
+            row_items = visible_items[row_start:row_start + 3]
+            metric_cols = st.columns(len(row_items))
+            for metric_col, (label, value) in zip(metric_cols, row_items):
+                with metric_col:
+                    if label == "Card Settlement Adjustment":
+                        st.metric(label, money(value))
+                    else:
+                        st.metric(label, abs_money(value))
 
         st.markdown(
             f"""

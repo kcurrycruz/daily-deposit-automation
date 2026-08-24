@@ -1299,9 +1299,9 @@ def card(label: str, value: str, foot: str = ""):
 
 def status_word(value: Optional[bool]) -> str:
     if value is True:
-        return '<span class="hwfc-match">✓ MATCH</span>'
+        return '<span class="hwfc-match">✓</span>'
     if value is False:
-        return '<span class="hwfc-mismatch">✕ REVIEW</span>'
+        return '<span class="hwfc-mismatch">✕</span>'
     return '<span style="color:#777">—</span>'
 
 
@@ -1344,6 +1344,35 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+with st.expander("📘 How to Build the Daily Workbook", expanded=False):
+    st.markdown(
+        """
+        **Use this guide when preparing the files for a daily deposit.**
+
+        **1. Build the Daily Workbook**
+
+        The workbook should contain these five worksheets:
+
+        - **SubDept Sales Report** — daily sales by sub-department.
+        - **SubDept Coupon (Local Discount)** — store/local coupons.
+        - **MMDDYY Discounts** — Discounts by Shopper Level. The date prefix should match the report date.
+        - **MMDDYY BS** — Balance Sheet and tender control totals.
+        - **MMDDYY Hash** — Refunded Discounts, Pass Through Donations, and Paid-Ins.
+
+        **2. Prepare the Daily Card Settlement Report**
+
+        Upload the separate Daily Card Settlement Report for the same date. The automation uses only the **Processed Net Amount** column for **VISA/MC, Discover, AMEX, Debit Card, and EBT Cash/Food Stamp**.
+
+        **3. Before You Run**
+
+        Confirm that the daily workbook and settlement report are for the same date, all five required workbook tabs are detected, and the settlement report shows as verified. Then select **Validate & Build Deposit**.
+
+        **4. Review Differences**
+
+        The app compares each card settlement amount with the matching BS tender total. If they differ, the adjustment is posted to **8314000 · FE - Cash Over/Shorts** with a memo identifying the tender and the difference between First Data and BS. Review any red **✕** before importing the IIF into QuickBooks.
+        """
+    )
 
 
 
@@ -1637,31 +1666,40 @@ if "run_result" in st.session_state:
         {
             "Check": "Sales total",
             "Source / comparison": "Script Net Sales vs Excel Sales Total",
-            "Status": "MATCH" if v["sales_ok"] else ("REVIEW" if v["sales_ok"] is False else "N/A"),
+            "Status": "✓" if v["sales_ok"] is True else ("✕" if v["sales_ok"] is False else "—"),
         },
         {
             "Check": "Discount total",
             "Source / comparison": "Script Discounts vs Excel Discount Total",
-            "Status": "MATCH" if v["discounts_ok"] else ("REVIEW" if v["discounts_ok"] is False else "N/A"),
+            "Status": "✓" if v["discounts_ok"] is True else ("✕" if v["discounts_ok"] is False else "—"),
         },
         {
             "Check": "HASH sales",
             "Source / comparison": "Script HASH total vs HASH Sales 6",
-            "Status": "MATCH" if v["hash_ok"] else ("REVIEW" if v["hash_ok"] is False else "N/A"),
+            "Status": "✓" if v["hash_ok"] is True else ("✕" if v["hash_ok"] is False else "—"),
         },
         {
             "Check": "IIF balance",
             "Source / comparison": "Positive vs negative IIF amounts",
-            "Status": "MATCH" if v["iif_ok"] else "REVIEW",
+            "Status": "✓" if v["iif_ok"] else "✕",
         },
         {
             "Check": "Card settlement",
             "Source / comparison": "Daily Card Settlement Report vs BS tender totals",
-            "Status": "MATCH" if v.get("card_settlement_ok") else "REVIEW",
+            "Status": "✓" if v.get("card_settlement_ok") else "✕",
         },
     ]
+    validation_df = pd.DataFrame(validation_rows)
+    validation_styled = validation_df.style.map(
+        lambda value: (
+            "color: #78A85B; font-weight: 900; font-size: 1.05rem;" if value == "✓"
+            else "color: #E05A4F; font-weight: 900; font-size: 1.05rem;" if value == "✕"
+            else ""
+        ),
+        subset=["Status"],
+    )
     st.dataframe(
-        pd.DataFrame(validation_rows),
+        validation_styled,
         use_container_width=True,
         hide_index=True,
     )
@@ -1670,11 +1708,23 @@ if "run_result" in st.session_state:
     settlement_rows = v.get("card_settlement_rows", [])
     if settlement_rows:
         settlement_df = pd.DataFrame(settlement_rows)
+        if "Status" in settlement_df.columns:
+            settlement_df["Status"] = settlement_df["Status"].map(
+                lambda value: "✓" if str(value).upper() == "MATCH" else "✕"
+            )
         for col in ["Daily Card Settlement", "BS", "Difference", "Adjustment"]:
             settlement_df[col] = settlement_df[col].map(
                 lambda x: f"(${abs(x):,.2f})" if x < 0 else f"${x:,.2f}"
             )
-        st.dataframe(settlement_df, use_container_width=True, hide_index=True)
+        settlement_styled = settlement_df.style.map(
+            lambda value: (
+                "color: #78A85B; font-weight: 900; font-size: 1.05rem;" if value == "✓"
+                else "color: #E05A4F; font-weight: 900; font-size: 1.05rem;" if value == "✕"
+                else ""
+            ),
+            subset=["Status"] if "Status" in settlement_df.columns else None,
+        )
+        st.dataframe(settlement_styled, use_container_width=True, hide_index=True)
         if v.get("card_settlement_ok"):
             st.success("All five card settlement amounts match the BS control totals.", icon="✅")
         else:

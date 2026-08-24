@@ -1359,11 +1359,41 @@ with st.expander("📘 How to Build the Daily Workbook", expanded=False):
         - **MMDDYY Discounts** — Discounts by Shopper Level. The date prefix should match the report date.
         - **MMDDYY BS** — Balance Sheet and tender control totals.
         - **MMDDYY Hash** — Refunded Discounts, Pass Through Donations, and Paid-Ins.
+        """
+    )
 
+    with st.expander("View Daily Workbook Example", expanded=False):
+        st.caption(
+            "Your completed Daily Workbook should look like this. "
+            "Confirm the required Sales, Coupons, Discounts, HASH, and BS tabs are present."
+        )
+        daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
+        if daily_workbook_example.exists():
+            st.image(str(daily_workbook_example), use_container_width=True)
+        else:
+            st.info("Daily Workbook example image is not installed in the repo assets folder.")
+
+    st.markdown(
+        """
         **2. Prepare the Daily Card Settlement Report**
 
         Upload the separate Daily Card Settlement Report for the same date. The automation uses only the **Processed Net Amount** column for **VISA/MC, Discover, AMEX, Debit Card, and EBT Cash/Food Stamp**.
+        """
+    )
 
+    with st.expander("View Daily Card Settlement Example", expanded=False):
+        st.caption(
+            "Your Daily Card Settlement Report should look like this. "
+            "The automation uses the Processed Net Amount column."
+        )
+        daily_card_settlement_example = ROOT / "assets" / "daily_card_settlement_example.png"
+        if daily_card_settlement_example.exists():
+            st.image(str(daily_card_settlement_example), use_container_width=True)
+        else:
+            st.info("Daily Card Settlement example image is not installed in the repo assets folder.")
+
+    st.markdown(
+        """
         **3. Before You Run**
 
         Confirm that the daily workbook and settlement report are for the same date, all five required workbook tabs are detected, and the settlement report shows as verified. Then select **Validate & Build Deposit**.

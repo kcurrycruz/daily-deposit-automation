@@ -1,5 +1,5 @@
 """
-HWFC Daily Deposit - Streamlit UI v3 · SIDEBAR HISTORY BUILD 2026-08-25
+HWFC Daily Deposit - Streamlit UI v9 · SIMPLE OPERATIONS PREVIEW 2026-08-25
 Honest Weight Food Co-op
 
 Drop-in replacement for streamlit_app.py.
@@ -24,7 +24,8 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +36,19 @@ import streamlit as st
 # Self-contained UI helpers and SOP content
 # ---------------------------------------------------------------------
 
+def format_history_time_eastern(value: str, include_date: bool = True) -> str:
+    """Format a stored Run History timestamp in HWFC Eastern Time.
+
+    Existing history records were written as naive server timestamps on
+    Streamlit Cloud, whose server clock is UTC. Offset-aware timestamps are
+    respected as written.
+    """
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    eastern = dt.astimezone(ZoneInfo("America/New_York"))
+    return eastern.strftime("%m/%d/%Y %I:%M %p" if include_date else "%I:%M %p")
+
 def build_history_option_label(record: dict) -> str:
     """Return a compact label for the Run History select box."""
     try:
@@ -43,7 +57,7 @@ def build_history_option_label(record: dict) -> str:
         report_label = record.get("report_date", "—") or "—"
 
     try:
-        run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%I:%M %p")
+        run_label = format_history_time_eastern(record.get("run_at", ""), include_date=False)
     except Exception:
         run_label = "—"
 
@@ -585,6 +599,144 @@ st.markdown(
         color: #DDE7D5;
         font-size: .82rem;
         font-weight: 650;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Simple operations visual layer: clean, compact, and task-focused.
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: #0D1110 !important;
+        color: #F2F1E9;
+    }
+
+    .block-container {
+        max-width: 1100px !important;
+        padding-top: 1rem !important;
+        padding-bottom: 3rem !important;
+    }
+
+    section[data-testid="stSidebar"] {
+        background: #101612 !important;
+        border-right: 1px solid #2B352E;
+    }
+
+    .simple-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 6px 0 12px;
+        border-bottom: 1px solid #2B352E;
+        margin-bottom: 12px;
+    }
+
+    .simple-eyebrow {
+        color: #8E9A91;
+        font-size: .68rem;
+        font-weight: 800;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        margin-bottom: 3px;
+    }
+
+    .simple-title {
+        color: #F4F1E8;
+        font-size: 1.55rem;
+        font-weight: 760;
+        letter-spacing: -.025em;
+        line-height: 1.05;
+    }
+
+    .simple-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: #C7D2C5;
+        font-size: .78rem;
+        white-space: nowrap;
+    }
+
+    .simple-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #78A85B;
+        display: inline-block;
+    }
+
+    .simple-section {
+        margin: 16px 0 7px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #263028;
+        color: #F4F1E8;
+        font-size: 1rem;
+        font-weight: 760;
+        letter-spacing: -.01em;
+    }
+
+    .hwfc-card, .hwfc-mini-card, .hwfc-check-card, .hwfc-result, .hwfc-equation {
+        border-radius: 7px !important;
+        box-shadow: none !important;
+    }
+
+    .hwfc-card {
+        min-height: 86px !important;
+        padding: 11px 13px !important;
+        background: #121815 !important;
+        border-color: #2B352E !important;
+    }
+
+    .hwfc-card-value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+        font-size: 1.20rem !important;
+        color: #F4F1E8 !important;
+    }
+
+    .hwfc-card-label, .hwfc-section-label {
+        color: #8E9A91 !important;
+    }
+
+    .hwfc-result {
+        padding: 11px 13px !important;
+        margin: 8px 0 12px !important;
+    }
+
+    div[data-testid="stFileUploader"],
+    div[data-testid="stDataFrame"],
+    div[data-baseweb="input"],
+    div[data-baseweb="select"],
+    div[data-testid="stExpander"],
+    div[data-testid="stExpander"] details,
+    div[data-testid="stAlert"] {
+        border-radius: 7px !important;
+        box-shadow: none !important;
+    }
+
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 6px !important;
+        min-height: 36px !important;
+        font-weight: 760 !important;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0 !important;
+        border-bottom: 1px solid #2B352E;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 0 !important;
+        padding: 9px 13px !important;
+        font-size: .82rem !important;
+    }
+
+    @media (max-width: 760px) {
+        .simple-header { align-items: flex-start; flex-direction: column; }
+        .simple-status { white-space: normal; }
     }
     </style>
     """,
@@ -1279,39 +1431,34 @@ def status_word(value: Optional[bool]) -> str:
 # Header
 # ---------------------------------------------------------------------
 
+if "file_uploader_key" not in st.session_state:
+    st.session_state["file_uploader_key"] = 0
+
+has_results = "run_result" in st.session_state
+ops_state = "Review Results" if has_results else "Ready for Files"
+
 st.markdown(
-    """
-    <div class="hwfc-hero">
-      <div class="hwfc-kicker">Honest Weight Food Co-op · Finance</div>
-      <div class="hwfc-title">Daily Deposit Reconciliation</div>
-      <div class="hwfc-subtitle">
-        Upload the completed daily workbook, validate the full deposit, then review the QuickBooks entry before import.
+    f"""
+    <div class="simple-header">
+      <div>
+        <div class="simple-eyebrow">Honest Weight Food Co-op · Finance</div>
+        <div class="simple-title">Daily Deposit</div>
       </div>
+      <div class="simple-status"><span class="simple-dot"></span>Status: {ops_state}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-if "file_uploader_key" not in st.session_state:
-    st.session_state["file_uploader_key"] = 0
 
-action_left, action_right = st.columns([0.80, 0.20])
+action_left, action_right = st.columns([0.84, 0.16])
 with action_right:
-    if st.button("↻ Start Over", use_container_width=True, help="Clear the current upload and results. Run History is preserved."):
+    if st.button("Start Over", use_container_width=True, help="Clear the current upload and results. Run History is preserved."):
         reset_current_work()
         st.rerun()
 
-has_results = "run_result" in st.session_state
-
 st.markdown(
-    f"""
-    <div class="hwfc-stepbar">
-      <div class="hwfc-step {'active' if not has_results else ''}">1 · Upload</div>
-      <div class="hwfc-step {'active' if not has_results else ''}">2 · Validate</div>
-      <div class="hwfc-step {'active' if has_results else ''}">3 · Review</div>
-      <div class="hwfc-step {'active' if has_results else ''}">4 · Download</div>
-    </div>
-    """,
+    '<div class="simple-section">Prepare Source Files</div>',
     unsafe_allow_html=True,
 )
 
@@ -1604,7 +1751,7 @@ with st.sidebar:
             except Exception:
                 report_label = record.get("report_date", "—")
             try:
-                run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
+                run_label = format_history_time_eastern(record.get("run_at", ""), include_date=True)
             except Exception:
                 run_label = record.get("run_at", "—")
 
@@ -1674,7 +1821,12 @@ with st.sidebar:
 # Input area
 # ---------------------------------------------------------------------
 
-setup_col, workbook_col, settlement_col = st.columns([0.22, 0.39, 0.39], gap="medium")
+st.markdown(
+    '<div class="simple-section">Load Files</div>',
+    unsafe_allow_html=True,
+)
+
+setup_col, workbook_col, settlement_col = st.columns([0.19, 0.405, 0.405], gap="medium")
 
 roles = {}
 date_info = {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
@@ -1703,6 +1855,11 @@ with settlement_col:
         help="Uses ONLY Processed Net Amount for VISA/MC, Discover, AMEX, Debit Card, and EBT.",
         key=f"card_settlement_{st.session_state['file_uploader_key']}",
     )
+
+st.markdown(
+    '<div class="simple-section">Validate Inputs</div>',
+    unsafe_allow_html=True,
+)
 
 if uploaded:
     upload_bytes = uploaded.getvalue()
@@ -1757,6 +1914,7 @@ else:
             '<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">Upload workbook</div></div>',
             unsafe_allow_html=True,
         )
+    st.caption("Waiting for the daily workbook and card settlement report.")
     missing_roles = []
 
 settlement_date_info = None
@@ -1813,8 +1971,13 @@ if settlement_file is not None:
             icon="⚠️",
         )
 
+st.markdown(
+    '<div class="simple-section">Run Deposit</div>',
+    unsafe_allow_html=True,
+)
+
 run_clicked = st.button(
-    "🌿  Validate & Build Deposit",
+    "Validate & Build Deposit",
     type="primary",
     use_container_width=True,
     disabled=uploaded is None or settlement_file is None or deposit_date is None or not settlement_source_ok,
@@ -1841,6 +2004,10 @@ if run_clicked:
 # ---------------------------------------------------------------------
 
 if "run_result" in st.session_state:
+    st.markdown(
+        '<div class="simple-section">Review Results</div>',
+        unsafe_allow_html=True,
+    )
     result = st.session_state["run_result"]
     v = result["validation"]
     lines = result["lines"]
@@ -1960,7 +2127,7 @@ if "run_result" in st.session_state:
         st.warning("No card settlement reconciliation was found in the engine output.", icon="⚠️")
 
     overview_tab, sales_tab, bs_tab, qb_tab, log_tab = st.tabs(
-        ["🌿 Overview", "🛒 Sales & Discounts", "💰 Balance Sheet & Tenders", "📘 QuickBooks Preview", "🧾 Run Log"]
+        ["Reconciliation", "Sales & Discounts", "Balance Sheet & Tenders", "QuickBooks", "Run Log"]
     )
 
     with overview_tab:
@@ -2043,6 +2210,10 @@ if "run_result" in st.session_state:
             st.dataframe(display, use_container_width=True, hide_index=True)
 
     with qb_tab:
+        st.markdown(
+            '<div class="simple-section">QuickBooks Handoff</div>',
+            unsafe_allow_html=True,
+        )
         st.subheader("QuickBooks IIF preview")
         st.caption("This is the actual generated transaction detail that will be imported into QuickBooks.")
 

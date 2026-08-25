@@ -79,10 +79,12 @@ In **SMS (POS System)** go to:
    - End: **4 (Interstore Sales)**
 4. Select **Launch**.
 5. Export the report to Excel.
-6. In the exported report, copy **Columns B–H**, starting with the sub-department codes and ending with Quantity.
-7. Paste those columns into the **SubDept Single** tab of the Daily Deposit template.
+6. In the exported Excel report, copy the sales data beginning with the first sub-department code and continuing through the final department shown for the day. In the example below, this is the highlighted report area from **Columns B–H**.
+7. Open the Daily Deposit template and go to the **SubDept Single** tab.
+8. Paste the copied sales data starting in **cell A1**.
+9. Confirm that the pasted table begins with the same first row as the exported report and that all rows through the final department were included.
 
-Do not paste over the template formulas outside of the intended data-entry area.
+Do not paste over template formulas outside of the intended data-entry area.
 """.strip(),
     },
     {
@@ -1327,6 +1329,50 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         with st.expander(step["title"], expanded=expanded):
             st.markdown(step["body"])
 
+            if step["title"].startswith("Step 2A"):
+                step2a_export_image = ROOT / "assets" / "step2a_sms_sales_export.png"
+                step2a_paste_image = ROOT / "assets" / "step2a_subdept_single_paste.png"
+
+                if step2a_export_image.exists():
+                    st.image(
+                        str(step2a_export_image),
+                        caption=(
+                            "Step 2A · SMS export: after launching the Sub-department Single Total report, "
+                            "export it to Excel and copy the report data from the first sub-department through the final department."
+                        ),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 2A SMS export example is not installed. "
+                        "Add assets/step2a_sms_sales_export.png to show it here."
+                    )
+
+                if step2a_paste_image.exists():
+                    st.image(
+                        str(step2a_paste_image),
+                        caption=(
+                            "Step 2A · Daily Deposit template: paste the exported sales data starting in cell A1 "
+                            "of the SubDept Single tab."
+                        ),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 2A paste example is not installed. "
+                        "Add assets/step2a_subdept_single_paste.png to show it here."
+                    )
+
+                st.warning(
+                    "**⚠️ Unexpected / Unique Item**\n\n"
+                    "The example report contains **23 · Refunded Discounts**. This is not a normal Sales item and "
+                    "would ordinarily be expected in the **HASH** process. If an unexpected item appears in the "
+                    "Sub-department Single Total report, do not assume it should simply be kept or deleted. "
+                    "Drill into the activity in SMS to determine why it appeared, confirm whether it is also represented "
+                    "in the HASH report, and ask the Finance team for help if the source is unclear before completing the deposit.",
+                    icon="⚠️",
+                )
+
             if step["title"].startswith("Step 2B"):
                 sales_check_images = [
                     ROOT / "assets" / "sub_department_sales_report.png",
@@ -1379,20 +1425,21 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
 
             if step["title"].startswith("Step 3"):
                 milk_bottle_returns_example = ROOT / "assets" / "milk_bottle_returns_example.png"
-
                 if milk_bottle_returns_example.exists():
                     st.caption(
-                        "Milk Bottle Returns example from SMS. Add together the highlighted Net Sales return amounts "
-                        "for all Milk Bottle Return items, then enter the combined total into cell M1 on SubDept Sales Report."
+                        "Milk Bottle Returns example from SMS. Add together the highlighted return amounts for all "
+                        "Milk Bottle Return items, then enter the combined total into cell M1 on SubDept Sales Report."
                     )
                     st.image(
                         str(milk_bottle_returns_example),
-                        caption="Example: add all highlighted Milk Bottle Return amounts before entering the total in M1.",
+                        caption=(
+                            "Step 3 · Add all highlighted Milk Bottle Return amounts before entering the total in M1."
+                        ),
                         use_container_width=True,
                     )
                 else:
                     st.info(
-                        "Milk Bottle Returns example image is not installed in the repo assets folder. "
+                        "Milk Bottle Returns example image is not installed. "
                         "Add assets/milk_bottle_returns_example.png to show it here."
                     )
 
@@ -1448,50 +1495,50 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         """
     )
 
-
 # ---------------------------------------------------------------------
-# Tips / known exceptions (WIP)
+# Tips / known exceptions
 # ---------------------------------------------------------------------
 
 with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
     st.caption(
-        "Work in progress — this section will grow as Finance documents more recurring exceptions and review tips."
+        "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
     )
 
     st.warning(
-        "**Unique / unexpected items are coded as TBA**\n\n"
-        "If the automation encounters an item it does not recognize, it will place that item at the **bottom of the generated IIF** with **TBA** coding. "
-        "These lines are intentionally flagged for manual review and must be recoded to the correct QuickBooks account **before final posting**.\n\n"
-        "Use the item description and memo to research the source in SMS. If the correct account is not clear, ask the Finance team before posting.",
+        "**Unique / unrecognized items → TBA**\n\n"
+        "Any unique item that the automation does not recognize will be coded as **TBA** at the bottom of the "
+        "automated IIF. These lines require manual review and must be changed to the correct QuickBooks account "
+        "before final posting. Use the item description and memo to research the source. If the correct coding is "
+        "unclear, review SMS/source reports and ask the Finance team before posting.",
         icon="⚠️",
     )
 
     st.info(
         "**Unexpected SMS items**\n\n"
-        "Do not assume an unusual line belongs in the normal Sales import just because it appears on the report. "
-        "For example, **Refunded Discounts** normally belongs to the HASH process. If it appears unexpectedly in the Sales report, drill into SMS to determine why and ask Finance for help if needed. "
-        "Do not manually remove or recode the item until the source activity is understood.",
+        "If an item appears in a report where it normally does not belong — for example, Refunded Discounts appearing "
+        "in the Step 2A Sales report — investigate the source activity in SMS before manually changing the workbook. "
+        "Check whether the item is also represented in HASH and involve Finance if the reason is unclear.",
         icon="🔎",
     )
 
     st.success(
         "**Before importing the IIF**\n\n"
-        "Review the reconciliation results, scan the QuickBooks preview for any **TBA** lines, confirm the IIF difference is $0.00, and make any required manual account changes in QuickBooks before final posting.",
+        "Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, and confirm "
+        "the IIF difference is $0.00 before final QuickBooks posting.",
         icon="✅",
     )
 
     st.markdown(
         """
-        **More tips to add later**
-
+        **Future tips to document**
         - Date mismatch handling
-        - Card settlement differences and cash over/short review
+        - Card settlement differences and Cash Over/Short
         - When to stop and ask Finance
-        - Common SMS exceptions
-        - QuickBooks import review steps
-        - Items that should never be manually overridden in Excel
+        - Common TBA mappings once approved
+        - QuickBooks pre-post review reminders
         """
     )
+
 
 # ---------------------------------------------------------------------
 # Input area

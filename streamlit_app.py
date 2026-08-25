@@ -1523,18 +1523,45 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
             st.markdown(step["body"])
 
             if step["title"].startswith("Step 2B"):
-                sales_check_example = ROOT / "assets" / "sales_total_match_example.png"
-                if sales_check_example.exists():
+                sales_check_single = ROOT / "assets" / "sales_total_match_example.png"
+                sales_check_split = [
+                    ROOT / "assets" / "sales_total_match_example_part1.png",
+                    ROOT / "assets" / "sales_total_match_example_part2.png",
+                ]
+                sales_check_alternates = [
+                    ROOT / "assets" / "sales_total_match_example_1.png",
+                    ROOT / "assets" / "sales_total_match_example_2.png",
+                    ROOT / "assets" / "sales_total_match_example_top.png",
+                    ROOT / "assets" / "sales_total_match_example_bottom.png",
+                ]
+
+                if sales_check_single.exists():
                     st.image(
-                        str(sales_check_example),
+                        str(sales_check_single),
                         caption="Example: the green Sales Total should match the SMS report total exactly.",
                         use_container_width=True,
                     )
                 else:
-                    st.info(
-                        "Sales-total example image is not installed yet. The check is still required: "
-                        "the green Sales Total must match the SMS Sub-department Single Total report exactly."
-                    )
+                    split_images = [path for path in sales_check_split if path.exists()]
+                    if not split_images:
+                        split_images = [path for path in sales_check_alternates if path.exists()]
+
+                    if split_images:
+                        st.caption(
+                            "Sales-check example from SMS (shown in split images because the source report is longer than one screen). "
+                            "The highlighted total at the bottom must match the green Sales Total in the Daily Deposit workbook exactly."
+                        )
+                        for idx, image_path in enumerate(split_images, start=1):
+                            st.image(
+                                str(image_path),
+                                caption=f"Sales-check example · Part {idx}",
+                                use_container_width=True,
+                            )
+                    else:
+                        st.info(
+                            "Sales-total example image is not installed yet. The check is still required: "
+                            "the green Sales Total must match the SMS Sub-department Single Total report exactly."
+                        )
 
             if step["title"].startswith("Step 7"):
                 daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"

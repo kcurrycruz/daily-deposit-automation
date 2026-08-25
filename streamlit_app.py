@@ -1448,6 +1448,51 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         """
     )
 
+
+# ---------------------------------------------------------------------
+# Tips / known exceptions (WIP)
+# ---------------------------------------------------------------------
+
+with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
+    st.caption(
+        "Work in progress — this section will grow as Finance documents more recurring exceptions and review tips."
+    )
+
+    st.warning(
+        "**Unique / unexpected items are coded as TBA**\n\n"
+        "If the automation encounters an item it does not recognize, it will place that item at the **bottom of the generated IIF** with **TBA** coding. "
+        "These lines are intentionally flagged for manual review and must be recoded to the correct QuickBooks account **before final posting**.\n\n"
+        "Use the item description and memo to research the source in SMS. If the correct account is not clear, ask the Finance team before posting.",
+        icon="⚠️",
+    )
+
+    st.info(
+        "**Unexpected SMS items**\n\n"
+        "Do not assume an unusual line belongs in the normal Sales import just because it appears on the report. "
+        "For example, **Refunded Discounts** normally belongs to the HASH process. If it appears unexpectedly in the Sales report, drill into SMS to determine why and ask Finance for help if needed. "
+        "Do not manually remove or recode the item until the source activity is understood.",
+        icon="🔎",
+    )
+
+    st.success(
+        "**Before importing the IIF**\n\n"
+        "Review the reconciliation results, scan the QuickBooks preview for any **TBA** lines, confirm the IIF difference is $0.00, and make any required manual account changes in QuickBooks before final posting.",
+        icon="✅",
+    )
+
+    st.markdown(
+        """
+        **More tips to add later**
+
+        - Date mismatch handling
+        - Card settlement differences and cash over/short review
+        - When to stop and ask Finance
+        - Common SMS exceptions
+        - QuickBooks import review steps
+        - Items that should never be manually overridden in Excel
+        """
+    )
+
 # ---------------------------------------------------------------------
 # Input area
 # ---------------------------------------------------------------------

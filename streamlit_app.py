@@ -194,8 +194,12 @@ In **SMS (POS System)** go to:
 1. Change the report date to the deposit date.
 2. Select **Launch**.
 3. Export the report to Excel.
-4. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
-5. Rename the copied tab **xxxxxx BS**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 BS`).
+4. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
+5. Move or copy the entire worksheet into the Daily Deposit template workbook.
+6. Place it in the **`XXXXXX BS`** position/tab.
+7. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
+
+Example: for an August 21, 2026 deposit, rename the tab **`082126 BS`**.
 """.strip(),
     },
     {
@@ -1543,6 +1547,23 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     st.info(
                         "Step 5 HASH Move or Copy example is not installed. "
                         "Add assets/step5_hash_move_copy.png to show it here."
+                    )
+
+            if step["title"].startswith("Step 6"):
+                step6_bs_image = ROOT / "assets" / "step6_bs_move_copy.png"
+                if step6_bs_image.exists():
+                    st.image(
+                        str(step6_bs_image),
+                        caption=(
+                            "Step 6 · Move or copy the exported Balance Sheet worksheet into the XXXXXX BS "
+                            "location, then rename it to the current deposit date."
+                        ),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 6 Balance Sheet Move or Copy example is not installed. "
+                        "Add assets/step6_bs_move_copy.png to show it here."
                     )
 
             if step["title"].startswith("Step 7"):

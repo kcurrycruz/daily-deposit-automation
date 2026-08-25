@@ -824,7 +824,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         "amex": 0.0, "discover": 0.0, "debit": 0.0, "ebt_cash": 0.0,
         "ebt_food": 0.0, "dufb": 0.0, "cash": 0.0, "check": 0.0,
         "vendor_coupon": 0.0, "charge": 0.0, "prepaid_card": 0.0,
-        "donation": 0.0, "subscription": 0.0,
+        "donation": 0.0, "subscription": 0.0, "paid_out": 0.0,
     }
 
     for row in ws.iter_rows(values_only=True):
@@ -861,6 +861,9 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 1117: bs["prepaid_card"] = round(bs["prepaid_card"] + to_float(amt), 2)
         if code == 906: bs["charge"] = to_float(amt)
         if code == 908: bs["vendor_coupon"] = to_float(amt)
+        if code == 1114:
+            bs["paid_out"] = to_float(amt)
+            log.info(f"    Paid Out (1114 PkUp Paid out): ${bs['paid_out']:,.2f} — reduces the QuickBooks deposit")
         if code == 1122: bs["donation"] = to_float(amt)
         if code == 3420: bs["subscription"] = to_float(amt)
 
@@ -1192,7 +1195,10 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4444 · TBA Purchases", "", ""),
         ("8506000 · Outreach - Donations", "", "", -bs("donation") if bs("donation") else None),
         ("4444 · TBA Purchases", "", "PAID IN:", abs(paid_in_total) if paid_in_total else None),
-        ("4444 · TBA Purchases", "", "PAID OUT:"),
+        # Paid Out is stored as a positive BS pickup amount, but it reduces the QuickBooks deposit.
+        # MANUAL_LINES inverts the source amount for IIF sign convention, so pass a negative source
+        # value here to produce a positive IIF SPL that displays as a negative deposit line in QB.
+        ("4444 · TBA Purchases", "", "PAID OUT:", -bs("paid_out") if bs("paid_out") else None),
         ("1240001 · Credit Card Payments Receivable", "", "Visa/MC", -tender_source("visa_mc", bs("visa_mc")) if tender_source("visa_mc", bs("visa_mc")) else None),
         ("1240001 · Credit Card Payments Receivable", "", "Discover", -tender_source("discover", bs("discover")) if tender_source("discover", bs("discover")) else None),
         ("1240001 · Credit Card Payments Receivable", "", "AMEX", -tender_source("amex", bs("amex")) if tender_source("amex", bs("amex")) else None),

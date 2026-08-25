@@ -602,6 +602,35 @@ st.markdown(
         font-size: .82rem;
         font-weight: 650;
     }
+
+    .hwfc-tip-card {
+        background: #161B22;
+        border: 1px solid #30363D;
+        border-left: 3px solid #49604B;
+        border-radius: 10px;
+        padding: 13px 15px;
+        margin: 9px 0;
+    }
+    .hwfc-tip-card.attention { border-left-color: #C7952B; }
+    .hwfc-tip-card.info { border-left-color: #5E7F93; }
+    .hwfc-tip-card.success { border-left-color: #78A85B; }
+    .hwfc-tip-title {
+        color: #F4F1E8;
+        font-weight: 800;
+        font-size: .92rem;
+        margin-bottom: 5px;
+    }
+    .hwfc-tip-body {
+        color: #D9DFD7;
+        font-size: .86rem;
+        line-height: 1.5;
+    }
+    .hwfc-tip-body strong { color: #F4F1E8; }
+    .hwfc-tip-example {
+        margin-top: 7px;
+        color: #DDE7D5;
+        font-weight: 750;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1522,59 +1551,65 @@ with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
         "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
     )
 
-    st.warning(
-        "**Unique / unrecognized items → TBA**\n\n"
-        "Any unique item that the automation does not recognize will be coded as **TBA** at the bottom of the "
-        "automated IIF. These lines require manual review and must be changed to the correct QuickBooks account "
-        "before final posting. Use the item description and memo to research the source. If the correct coding is "
-        "unclear, review SMS/source reports and ask the Finance team before posting.",
-        icon="⚠️",
-    )
+    st.markdown(
+        """
+        <div class="hwfc-tip-card attention">
+          <div class="hwfc-tip-title">⚠️ Unique / unrecognized items → TBA</div>
+          <div class="hwfc-tip-body">
+            Any unique item the automation does not recognize is coded as <strong>TBA</strong> at the bottom of the generated IIF.
+            Review those lines and change them to the correct QuickBooks account before final posting. If the correct coding is unclear,
+            research the SMS/source reports and ask Finance before posting.
+          </div>
+        </div>
 
-    st.info(
-        "**Unexpected SMS items**\n\n"
-        "If an item appears in a report where it normally does not belong — for example, Refunded Discounts appearing "
-        "in the Step 2A Sales report — investigate the source activity in SMS before manually changing the workbook. "
-        "Check whether the item is also represented in HASH and involve Finance if the reason is unclear.",
-        icon="🔎",
-    )
+        <div class="hwfc-tip-card info">
+          <div class="hwfc-tip-title">🔎 Unexpected SMS items</div>
+          <div class="hwfc-tip-body">
+            If an item appears in a report where it normally does not belong, investigate the source activity in SMS before manually
+            changing the workbook. For example, if Refunded Discounts appears in the Step 2A Sales report, confirm whether it is also
+            represented in HASH and involve Finance if the reason is unclear.
+          </div>
+        </div>
 
-    st.info(
-        "**Paid Out**\n\n"
-        "Paid Out does not appear every day. When it is detected on the **Balance Sheet**, the automation carries "
-        "that amount into the generated IIF, similar to how **Paid-Ins** and **Pass Through Donations** are handled. "
-        "Paid Out is treated as a **negative amount**, so it reduces the QuickBooks deposit total. Example: if the "
-        "Balance Sheet shows **$47.06 Paid Out**, the QuickBooks deposit effect is **-$47.06**.",
-        icon="💵",
-    )
+        <div class="hwfc-tip-card info">
+          <div class="hwfc-tip-title">💵 Paid Out</div>
+          <div class="hwfc-tip-body">
+            Paid Out does not appear every day. When it is detected on the <strong>Balance Sheet</strong>, the automation carries that
+            amount into the generated IIF, similar to <strong>Paid-Ins</strong> and <strong>Pass Through Donations</strong>.
+            Paid Out is treated as a <strong>negative amount</strong>, so it reduces the QuickBooks deposit total.
+            <div class="hwfc-tip-example">Example: $47.06 Paid Out → -$47.06 deposit effect</div>
+          </div>
+        </div>
 
-    st.warning(
-        "**Important Disclosures & Automation Limitations**\n\n"
-        "**1. SMS-Based Automation**\n\n"
-        "The automated IIF is built from **SMS data**. It does **not** automatically include every actual daily adjustment "
-        "documented on the **Store Closeout** sheet provided by the Front End Manager.\n\n"
-        "**2. Store Closeout Review Is Required**\n\n"
-        "Import the generated IIF into **QuickBooks first**, then compare the deposit to the Store Closeout and manually adjust "
-        "the deposit in QuickBooks for items such as:\n\n"
-        "- **Cash Over / Short**\n"
-        "- additional cash differences\n"
-        "- **Plants / Dept. Market Purchases**\n"
-        "- **Payroll** cash activity\n"
-        "- **Comments / Notes / Issues** from Front End\n"
-        "- **safe overage or shortage**\n"
-        "- any other documented amount that changes the actual daily deposit\n\n"
-        "**3. Automation Does Not Replace Final Review**\n\n"
-        "A successfully generated and balanced IIF does **not** necessarily mean the final QuickBooks deposit matches the actual "
-        "Store Closeout. The deposit is not complete until the required Store Closeout adjustments have been made in QuickBooks "
-        "and the final deposit has been reviewed for accuracy.",
-        icon="⚠️",
-    )
+        <div class="hwfc-tip-card attention">
+          <div class="hwfc-tip-title">⚠️ Important Disclosures &amp; Automation Limitations</div>
+          <div class="hwfc-tip-body">
+            <strong>1. SMS-Based Automation</strong><br>
+            The automated IIF is built from <strong>SMS data</strong>. It does not automatically include every actual daily adjustment
+            documented on the <strong>Store Closeout</strong> sheet provided by the Front End Manager.<br><br>
 
-    st.success(
-        "**QuickBooks final review**\n\n"
-        "Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, "
-        "apply the Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.",
-        icon="✅",
+            <strong>2. Store Closeout Review Is Required</strong><br>
+            Import the generated IIF into <strong>QuickBooks first</strong>, then compare the deposit to the Store Closeout and manually
+            adjust the deposit in QuickBooks for Cash Over / Short, additional cash differences, Plants / Dept. Market Purchases,
+            Payroll cash activity, Comments / Notes / Issues from Front End, safe overage or shortage, and any other documented amount
+            that changes the actual daily deposit.<br><br>
+
+            <strong>3. Automation Does Not Replace Final Review</strong><br>
+            A successfully generated and balanced IIF does not necessarily mean the final QuickBooks deposit matches the actual Store
+            Closeout. The deposit is not complete until required Store Closeout adjustments are made in QuickBooks and the final deposit
+            has been reviewed for accuracy.
+          </div>
+        </div>
+
+        <div class="hwfc-tip-card success">
+          <div class="hwfc-tip-title">✅ QuickBooks final review</div>
+          <div class="hwfc-tip-body">
+            Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, apply the
+            Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.markdown(

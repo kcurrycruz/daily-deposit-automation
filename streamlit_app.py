@@ -24,7 +24,8 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +36,24 @@ import streamlit as st
 # Self-contained UI helpers and SOP content
 # ---------------------------------------------------------------------
 
+EASTERN_TZ = ZoneInfo("America/New_York")
+
+def format_history_run_time(value: str, include_date: bool = False) -> str:
+    """Display stored Run History timestamps in HWFC local Eastern Time.
+
+    Existing history timestamps are stored without a timezone by the Streamlit
+    server. Treat those naive values as UTC, then convert only the display to
+    America/New_York. Timezone-aware timestamps are converted directly.
+    """
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(EASTERN_TZ)
+        return local_dt.strftime("%m/%d/%Y %I:%M %p" if include_date else "%I:%M %p")
+    except Exception:
+        return "—"
+
 def build_history_option_label(record: dict) -> str:
     """Return a compact label for the Run History select box."""
     try:
@@ -42,10 +61,7 @@ def build_history_option_label(record: dict) -> str:
     except Exception:
         report_label = record.get("report_date", "—") or "—"
 
-    try:
-        run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%I:%M %p")
-    except Exception:
-        run_label = "—"
+    run_label = format_history_run_time(record.get("run_at", ""))
 
     status = record.get("status", "—") or "—"
     return f"{report_label} · {status} · {run_label}"
@@ -1603,10 +1619,7 @@ with st.sidebar:
                 report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
             except Exception:
                 report_label = record.get("report_date", "—")
-            try:
-                run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
-            except Exception:
-                run_label = record.get("run_at", "—")
+            run_label = format_history_run_time(record.get("run_at", ""), include_date=True)
 
             status_icon = "✓" if record.get("status") == "Passed" else "⚠"
             st.markdown(

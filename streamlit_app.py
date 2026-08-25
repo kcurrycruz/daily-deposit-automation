@@ -48,8 +48,7 @@ def build_history_option_label(record: dict) -> str:
         run_label = "—"
 
     status = record.get("status", "—") or "—"
-    filename = record.get("uploaded_filename", "Workbook") or "Workbook"
-    return f"{report_label} · {status} · {run_label} · {filename}"
+    return f"{report_label} · {status} · {run_label}"
 
 
 SOP_STEPS = [
@@ -1977,14 +1976,9 @@ else:
         run_label = record.get("run_at", "—")
 
     status_icon = "✓" if record.get("status") == "Passed" else "⚠"
-    st.markdown(f"### {status_icon} {html.escape(str(report_label))} · {html.escape(str(record.get('status', '—')))}")
-    st.caption(
-        f"Run {run_label} · "
-        f"Workbook: {record.get('uploaded_filename', '—')} · "
-        f"Card Settlement: {record.get('settlement_filename', '—')}"
-    )
+    st.markdown(f"### {status_icon} {html.escape(str(report_label))}")
+    st.caption(f"{record.get('status', '—')} · Run {run_label}")
 
-    check_cols = st.columns(5)
     history_checks = [
         ("Sales", record.get("sales_status", "N/A")),
         ("Discounts", record.get("discount_status", "N/A")),
@@ -1992,10 +1986,30 @@ else:
         ("IIF", record.get("iif_status", "N/A")),
         ("Card Settlement", record.get("card_settlement_status", "N/A")),
     ]
-    for col, (label, status) in zip(check_cols, history_checks):
-        with col:
-            icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
-            st.metric(label, f"{icon} {status}")
+
+    status_parts = []
+    for label, status in history_checks:
+        icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
+        tone = "#78A85B" if status == "MATCH" else ("#C7952B" if status == "REVIEW" else "#8B949E")
+        status_parts.append(
+            f'<span style="display:inline-block;margin:0 14px 6px 0;white-space:nowrap;">'
+            f'<strong>{html.escape(label)}</strong> '
+            f'<span style="color:{tone};font-weight:800;">{icon} {html.escape(status)}</span>'
+            f'</span>'
+        )
+
+    st.markdown(
+        '<div class="history-status-row" style="padding:10px 12px;background:#161B22;'
+        'border:1px solid #30363D;border-radius:10px;margin:8px 0 10px;">'
+        + ''.join(status_parts)
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        f"Workbook: {record.get('uploaded_filename', '—')}  •  "
+        f"Card Settlement: {record.get('settlement_filename', '—')}"
+    )
 
     if record.get("date_mismatch"):
         st.warning("This run was saved with a workbook date mismatch warning.", icon="⚠️")

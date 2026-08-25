@@ -1587,13 +1587,11 @@ with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
             <strong>1. SMS-Based Automation</strong><br>
             The automated IIF is built from <strong>SMS data</strong>. It does not automatically include every actual daily adjustment
             documented on the <strong>Store Closeout</strong> sheet provided by the Front End Manager.<br><br>
-
             <strong>2. Store Closeout Review Is Required</strong><br>
             Import the generated IIF into <strong>QuickBooks first</strong>, then compare the deposit to the Store Closeout and manually
             adjust the deposit in QuickBooks for Cash Over / Short, additional cash differences, Plants / Dept. Market Purchases,
             Payroll cash activity, Comments / Notes / Issues from Front End, safe overage or shortage, and any other documented amount
             that changes the actual daily deposit.<br><br>
-
             <strong>3. Automation Does Not Replace Final Review</strong><br>
             A successfully generated and balanced IIF does not necessarily mean the final QuickBooks deposit matches the actual Store
             Closeout. The deposit is not complete until required Store Closeout adjustments are made in QuickBooks and the final deposit

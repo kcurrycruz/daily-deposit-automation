@@ -616,13 +616,18 @@ st.markdown(
 
     .block-container {
         max-width: 1100px !important;
-        padding-top: 1rem !important;
+        padding-top: 2.25rem !important;
         padding-bottom: 3rem !important;
     }
 
     section[data-testid="stSidebar"] {
         background: #101612 !important;
         border-right: 1px solid #2B352E;
+    }
+
+    /* Single-file uploaders: once a file is present, hide the secondary add/browse control. */
+    div[data-testid="stFileUploader"]:has(div[data-testid="stFileUploaderFile"]) section[data-testid="stFileUploaderDropzone"] button {
+        display: none !important;
     }
 
     .simple-header {
@@ -1442,7 +1447,7 @@ st.markdown(
     <div class="simple-header">
       <div>
         <div class="simple-eyebrow">Honest Weight Food Co-op · Finance</div>
-        <div class="simple-title">Daily Deposit</div>
+        <div class="simple-title">HWFC Daily Deposit</div>
       </div>
       <div class="simple-status"><span class="simple-dot"></span>Status: {ops_state}</div>
     </div>
@@ -1843,6 +1848,7 @@ with workbook_col:
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
         help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
+        accept_multiple_files=False,
         key=f"daily_workbook_{st.session_state['file_uploader_key']}",
     )
 
@@ -1853,6 +1859,7 @@ with settlement_col:
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
         help="Uses ONLY Processed Net Amount for VISA/MC, Discover, AMEX, Debit Card, and EBT.",
+        accept_multiple_files=False,
         key=f"card_settlement_{st.session_state['file_uploader_key']}",
     )
 

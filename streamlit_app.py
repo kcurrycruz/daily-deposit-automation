@@ -176,8 +176,12 @@ In **SMS (POS System)** go to:
    - End: **6 (HASH Sales)**
 3. Select **Launch**.
 4. Export the report to Excel.
-5. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
-6. Rename the copied tab **xxxxxx HASH**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 HASH`).
+5. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
+6. Move or copy the entire worksheet into the Daily Deposit template workbook.
+7. Place it in the **`XXXXXX HASH`** position/tab.
+8. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
+
+Example: for an August 21, 2026 deposit, rename the tab **`082126 HASH`**.
 """.strip(),
     },
     {
@@ -1522,6 +1526,23 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     st.info(
                         "Step 4 Discounts Move or Copy example is not installed. "
                         "Add assets/step4_discounts_move_copy.png to show it here."
+                    )
+
+            if step["title"].startswith("Step 5"):
+                step5_hash_image = ROOT / "assets" / "step5_hash_move_copy.png"
+                if step5_hash_image.exists():
+                    st.image(
+                        str(step5_hash_image),
+                        caption=(
+                            "Step 5 · Move or copy the exported HASH worksheet into the XXXXXX HASH "
+                            "location, then rename it to the current deposit date."
+                        ),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 5 HASH Move or Copy example is not installed. "
+                        "Add assets/step5_hash_move_copy.png to show it here."
                     )
 
             if step["title"].startswith("Step 7"):

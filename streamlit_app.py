@@ -1494,76 +1494,81 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         """
     )
 
+
+# ---------------------------------------------------------------------
+# Main-page tips and known exceptions
+# ---------------------------------------------------------------------
+
+with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
+    st.caption(
+        "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
+    )
+
+    st.warning(
+        "**Unique / unrecognized items → TBA**\n\n"
+        "Any unique item that the automation does not recognize will be coded as **TBA** at the bottom of the "
+        "automated IIF. These lines require manual review and must be changed to the correct QuickBooks account "
+        "before final posting. Use the item description and memo to research the source. If the correct coding is "
+        "unclear, review SMS/source reports and ask the Finance team before posting.",
+        icon="⚠️",
+    )
+
+    st.info(
+        "**Unexpected SMS items**\n\n"
+        "If an item appears in a report where it normally does not belong — for example, Refunded Discounts appearing "
+        "in the Step 2A Sales report — investigate the source activity in SMS before manually changing the workbook. "
+        "Check whether the item is also represented in HASH and involve Finance if the reason is unclear.",
+        icon="🔎",
+    )
+
+    st.warning(
+        "**Important Disclosures & Automation Limitations**\n\n"
+        "**1. SMS-Based Automation**\n\n"
+        "The automated IIF is built from **SMS data**. It does **not** automatically include every actual daily adjustment "
+        "documented on the **Store Closeout** sheet provided by the Front End Manager.\n\n"
+        "**2. Store Closeout Review Is Required**\n\n"
+        "Import the generated IIF into **QuickBooks first**, then compare the deposit to the Store Closeout and manually adjust "
+        "the deposit in QuickBooks for items such as:\n\n"
+        "- **Cash Over / Short**\n"
+        "- additional cash differences\n"
+        "- **Plants / Dept. Market Purchases**\n"
+        "- **Payroll** cash activity\n"
+        "- **Comments / Notes / Issues** from Front End\n"
+        "- **safe overage or shortage**\n"
+        "- any other documented amount that changes the actual daily deposit\n\n"
+        "**3. Automation Does Not Replace Final Review**\n\n"
+        "A successfully generated and balanced IIF does **not** necessarily mean the final QuickBooks deposit matches the actual "
+        "Store Closeout. The deposit is not complete until the required Store Closeout adjustments have been made in QuickBooks "
+        "and the final deposit has been reviewed for accuracy.",
+        icon="⚠️",
+    )
+
+    st.success(
+        "**QuickBooks final review**\n\n"
+        "Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, "
+        "apply the Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.",
+        icon="✅",
+    )
+
+    st.markdown(
+        """
+        **Future tips to document**
+        - Date mismatch handling
+        - When to stop and ask Finance
+        - Common TBA mappings once approved
+        - QuickBooks pre-post review reminders
+        """
+    )
+
+
 # ---------------------------------------------------------------------
 # Sidebar: optional guidance and run history
 # ---------------------------------------------------------------------
 
 with st.sidebar:
     st.markdown("## 🌿 HWFC Daily Deposit")
-    st.caption("Optional tools and reference information")
+    st.caption("Prior deposit records")
 
-    with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
-        st.caption(
-            "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
-        )
-
-        st.warning(
-            "**Unique / unrecognized items → TBA**\n\n"
-            "Any unique item that the automation does not recognize will be coded as **TBA** at the bottom of the "
-            "automated IIF. These lines require manual review and must be changed to the correct QuickBooks account "
-            "before final posting. Use the item description and memo to research the source. If the correct coding is "
-            "unclear, review SMS/source reports and ask the Finance team before posting.",
-            icon="⚠️",
-        )
-
-        st.info(
-            "**Unexpected SMS items**\n\n"
-            "If an item appears in a report where it normally does not belong — for example, Refunded Discounts appearing "
-            "in the Step 2A Sales report — investigate the source activity in SMS before manually changing the workbook. "
-            "Check whether the item is also represented in HASH and involve Finance if the reason is unclear.",
-            icon="🔎",
-        )
-
-        st.warning(
-            "**Important Disclosures & Automation Limitations**\n\n"
-            "**1. SMS-Based Automation**\n\n"
-            "The automated IIF is built from **SMS data**. It does **not** automatically include every actual daily adjustment "
-            "documented on the **Store Closeout** sheet provided by the Front End Manager.\n\n"
-            "**2. Store Closeout Review Is Required**\n\n"
-            "Import the generated IIF into **QuickBooks first**, then compare the deposit to the Store Closeout and manually adjust "
-            "the deposit in QuickBooks for items such as:\n\n"
-            "- **Cash Over / Short**\n"
-            "- additional cash differences\n"
-            "- **Plants / Dept. Market Purchases**\n"
-            "- **Payroll** cash activity\n"
-            "- **Comments / Notes / Issues** from Front End\n"
-            "- **safe overage or shortage**\n"
-            "- any other documented amount that changes the actual daily deposit\n\n"
-            "**3. Automation Does Not Replace Final Review**\n\n"
-            "A successfully generated and balanced IIF does **not** necessarily mean the final QuickBooks deposit matches the actual "
-            "Store Closeout. The deposit is not complete until the required Store Closeout adjustments have been made in QuickBooks "
-            "and the final deposit has been reviewed for accuracy.",
-            icon="⚠️",
-        )
-
-        st.success(
-            "**QuickBooks final review**\n\n"
-            "Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, "
-            "apply the Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.",
-            icon="✅",
-        )
-
-        st.markdown(
-            """
-            **Future tips to document**
-            - Date mismatch handling
-            - When to stop and ask Finance
-            - Common TBA mappings once approved
-            - QuickBooks pre-post review reminders
-            """
-        )
-
-    st.markdown("---")
     with st.expander("📜 Run History", expanded=False):
         st.caption("Open only when you need to review a prior deposit.")
 

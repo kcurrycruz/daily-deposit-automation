@@ -24,8 +24,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -36,19 +35,6 @@ import streamlit as st
 # Self-contained UI helpers and SOP content
 # ---------------------------------------------------------------------
 
-def format_history_time_eastern(value: str, include_date: bool = True) -> str:
-    """Format a stored Run History timestamp in HWFC Eastern Time.
-
-    Existing history records were written as naive server timestamps on
-    Streamlit Cloud, whose server clock is UTC. Offset-aware timestamps are
-    respected as written.
-    """
-    dt = datetime.fromisoformat(value)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    eastern = dt.astimezone(ZoneInfo("America/New_York"))
-    return eastern.strftime("%m/%d/%Y %I:%M %p" if include_date else "%I:%M %p")
-
 def build_history_option_label(record: dict) -> str:
     """Return a compact label for the Run History select box."""
     try:
@@ -57,7 +43,7 @@ def build_history_option_label(record: dict) -> str:
         report_label = record.get("report_date", "—") or "—"
 
     try:
-        run_label = format_history_time_eastern(record.get("run_at", ""), include_date=False)
+        run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%I:%M %p")
     except Exception:
         run_label = "—"
 
@@ -615,19 +601,14 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 1100px !important;
-        padding-top: 2.25rem !important;
+        max-width: 1180px !important;
+        padding-top: 1.15rem !important;
         padding-bottom: 3rem !important;
     }
 
     section[data-testid="stSidebar"] {
         background: #101612 !important;
         border-right: 1px solid #2B352E;
-    }
-
-    /* Single-file uploaders: once a file is present, hide the secondary add/browse control. */
-    div[data-testid="stFileUploader"]:has(div[data-testid="stFileUploaderFile"]) section[data-testid="stFileUploaderDropzone"] button {
-        display: none !important;
     }
 
     .simple-header {
@@ -675,7 +656,7 @@ st.markdown(
     }
 
     .simple-section {
-        margin: 16px 0 7px;
+        margin: 20px 0 9px;
         padding-bottom: 6px;
         border-bottom: 1px solid #263028;
         color: #F4F1E8;
@@ -724,7 +705,7 @@ st.markdown(
 
     .stButton > button, .stDownloadButton > button {
         border-radius: 6px !important;
-        min-height: 36px !important;
+        min-height: 40px !important;
         font-weight: 760 !important;
     }
 
@@ -1440,16 +1421,16 @@ if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = 0
 
 has_results = "run_result" in st.session_state
-ops_state = "Review Results" if has_results else "Ready for Files"
+ops_state = "RECONCILE / REVIEW" if has_results else "READY FOR SOURCE FILES"
 
 st.markdown(
     f"""
     <div class="simple-header">
       <div>
         <div class="simple-eyebrow">Honest Weight Food Co-op · Finance</div>
-        <div class="simple-title">HWFC Daily Deposit</div>
+        <div class="simple-title">Daily Deposit</div>
       </div>
-      <div class="simple-status"><span class="simple-dot"></span>Status: {ops_state}</div>
+      <div class="simple-status"><span class="simple-dot"></span>{ops_state.title()}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1756,7 +1737,7 @@ with st.sidebar:
             except Exception:
                 report_label = record.get("report_date", "—")
             try:
-                run_label = format_history_time_eastern(record.get("run_at", ""), include_date=True)
+                run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
             except Exception:
                 run_label = record.get("run_at", "—")
 
@@ -1831,7 +1812,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-setup_col, workbook_col, settlement_col = st.columns([0.19, 0.405, 0.405], gap="medium")
+setup_col, workbook_col, settlement_col = st.columns([0.22, 0.39, 0.39], gap="medium")
 
 roles = {}
 date_info = {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
@@ -1848,7 +1829,6 @@ with workbook_col:
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
         help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
-        accept_multiple_files=False,
         key=f"daily_workbook_{st.session_state['file_uploader_key']}",
     )
 
@@ -1859,7 +1839,6 @@ with settlement_col:
         type=["xlsx", "xlsm"],
         label_visibility="collapsed",
         help="Uses ONLY Processed Net Amount for VISA/MC, Discover, AMEX, Debit Card, and EBT.",
-        accept_multiple_files=False,
         key=f"card_settlement_{st.session_state['file_uploader_key']}",
     )
 
@@ -1921,7 +1900,6 @@ else:
             '<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">Upload workbook</div></div>',
             unsafe_allow_html=True,
         )
-    st.caption("Waiting for the daily workbook and card settlement report.")
     missing_roles = []
 
 settlement_date_info = None

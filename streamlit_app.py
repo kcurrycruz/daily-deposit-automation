@@ -153,8 +153,12 @@ In **SMS (POS System)** go to:
 1. Change the report date to the deposit date.
 2. Select **Launch**.
 3. Export the report to Excel.
-4. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
-5. Rename the copied tab **xxxxxx Discounts**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 Discounts`).
+4. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
+5. Move or copy the entire worksheet into the Daily Deposit template workbook.
+6. Place it in the **`XXXXXX Discounts`** position/tab.
+7. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
+
+Example: for an August 21, 2026 deposit, rename the tab **`082126 Discounts`**.
 """.strip(),
     },
     {
@@ -1501,6 +1505,23 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     st.info(
                         "Milk Bottle Returns example image is not installed. "
                         "Add assets/milk_bottle_returns_example.png to show it here."
+                    )
+
+            if step["title"].startswith("Step 4"):
+                step4_discounts_image = ROOT / "assets" / "step4_discounts_move_copy.png"
+                if step4_discounts_image.exists():
+                    st.image(
+                        str(step4_discounts_image),
+                        caption=(
+                            "Step 4 · Move or copy the exported Discounts worksheet into the XXXXXX Discounts "
+                            "location, then rename it to the current deposit date."
+                        ),
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 4 Discounts Move or Copy example is not installed. "
+                        "Add assets/step4_discounts_move_copy.png to show it here."
                     )
 
             if step["title"].startswith("Step 7"):

@@ -81,7 +81,7 @@ Use this workbook as the master file for the deposit you are preparing. Do not b
 """.strip(),
     },
     {
-        "title": "Step 2A · Import daily sales from SMS",
+        "title": "Step 2 · Import daily sales from SMS",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -103,7 +103,7 @@ Do not paste over template formulas outside of the intended data-entry area.
 """.strip(),
     },
     {
-        "title": "Step 2B · Import store coupons from SMS",
+        "title": "Step 2a · Import store coupons from SMS",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -120,7 +120,7 @@ In **SMS (POS System)** go to:
 7. Paste those columns into **SubDept Coupon (Local Discount)** in the Daily Deposit template.
 
 ### Sales check
-After Steps 2A and 2B, the **SubDept Sales Report** should be complete. Confirm that the green-filled **Sales Total** in the template matches the total at the bottom of the SMS **Sub-department Single Total** report **exactly**. If the totals do not match, stop and correct the workbook before continuing.
+After Steps 2 and 2a, the **SubDept Sales Report** should be complete. Confirm that the green-filled **Sales Total** in the template matches the total at the bottom of the SMS **Sub-department Single Total** report **exactly**. If the totals do not match, stop and correct the workbook before continuing.
 """.strip(),
     },
     {
@@ -1375,7 +1375,7 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         with st.expander(step["title"], expanded=expanded):
             st.markdown(step["body"])
 
-            if step["title"].startswith("Step 2A"):
+            if step["title"].startswith("Step 2 ·"):
                 step2a_export_image = ROOT / "assets" / "step2a_sms_sales_export.png"
                 step2a_paste_image = ROOT / "assets" / "step2a_subdept_single_paste.png"
 
@@ -1383,14 +1383,14 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     st.image(
                         str(step2a_export_image),
                         caption=(
-                            "Step 2A · SMS export: after launching the Sub-department Single Total report, "
+                            "Step 2 · SMS export: after launching the Sub-department Single Total report, "
                             "export it to Excel and copy the report data from the first sub-department through the final department."
                         ),
                         use_container_width=True,
                     )
                 else:
                     st.info(
-                        "Step 2A SMS export example is not installed. "
+                        "Step 2 SMS export example is not installed. "
                         "Add assets/step2a_sms_sales_export.png to show it here."
                     )
 
@@ -1398,14 +1398,14 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     st.image(
                         str(step2a_paste_image),
                         caption=(
-                            "Step 2A · Daily Deposit template: paste the exported sales data starting in cell A1 "
+                            "Step 2 · Daily Deposit template: paste the exported sales data starting in cell A1 "
                             "of the SubDept Single tab."
                         ),
                         use_container_width=True,
                     )
                 else:
                     st.info(
-                        "Step 2A paste example is not installed. "
+                        "Step 2 paste example is not installed. "
                         "Add assets/step2a_subdept_single_paste.png to show it here."
                     )
 
@@ -1419,7 +1419,7 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                     icon="⚠️",
                 )
 
-            if step["title"].startswith("Step 2B"):
+            if step["title"].startswith("Step 2a"):
                 sales_check_images = [
                     ROOT / "assets" / "sub_department_sales_report.png",
                     ROOT / "assets" / "department_sales_summary_report.png",
@@ -1566,7 +1566,7 @@ with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
           <div class="hwfc-tip-title">🔎 Unexpected SMS items</div>
           <div class="hwfc-tip-body">
             If an item appears in a report where it normally does not belong, investigate the source activity in SMS before manually
-            changing the workbook. For example, if Refunded Discounts appears in the Step 2A Sales report, confirm whether it is also
+            changing the workbook. For example, if Refunded Discounts appears in the Step 2 Sales report, confirm whether it is also
             represented in HASH and involve Finance if the reason is unclear.
           </div>
         </div>

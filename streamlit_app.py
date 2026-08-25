@@ -1540,11 +1540,11 @@ with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
     )
 
     st.info(
-        "**Paid Out — Balance Sheet code 1114**\n\n"
-        "Paid Out does not appear every day. When the Balance Sheet includes **1114 PkUp Paid out**, the automation "
-        "maps that amount into the IIF as **PAID OUT:**. Paid Out is treated as a **negative amount in the QuickBooks "
-        "deposit**, so it reduces the deposit total. Example: a Balance Sheet Paid Out of **$47.06** results in a "
-        "**-$47.06** deposit effect in QuickBooks.",
+        "**Paid Out**\n\n"
+        "Paid Out does not appear every day. When it is detected on the **Balance Sheet**, the automation carries "
+        "that amount into the generated IIF, similar to how **Paid-Ins** and **Pass Through Donations** are handled. "
+        "Paid Out is treated as a **negative amount**, so it reduces the QuickBooks deposit total. Example: if the "
+        "Balance Sheet shows **$47.06 Paid Out**, the QuickBooks deposit effect is **-$47.06**.",
         icon="💵",
     )
 

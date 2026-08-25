@@ -31,6 +31,168 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+# ---------------------------------------------------------------------
+# Self-contained UI helpers and SOP content
+# ---------------------------------------------------------------------
+
+def build_history_option_label(record: dict) -> str:
+    """Return a compact label for the Run History select box."""
+    try:
+        report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
+    except Exception:
+        report_label = record.get("report_date", "—") or "—"
+
+    try:
+        run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%I:%M %p")
+    except Exception:
+        run_label = "—"
+
+    status = record.get("status", "—") or "—"
+    filename = record.get("uploaded_filename", "Workbook") or "Workbook"
+    return f"{report_label} · {status} · {run_label} · {filename}"
+
+
+SOP_STEPS = [
+    {
+        "title": "Step 1 · Open the Daily Deposit template",
+        "body": r"""
+Open the approved Excel template from:
+
+`S:\Finance & Payroll Forms\Finance Work Files\Daily Deposit`
+
+File name: **TEMPLATE - SubDept Single Total Report**
+
+Use this workbook as the master file for the deposit you are preparing. Do not build the deposit from a blank workbook.
+""".strip(),
+    },
+    {
+        "title": "Step 2A · Import daily sales from SMS",
+        "body": """
+In **SMS (POS System)** go to:
+
+**Reports → Sub-department Single Total**
+
+1. Change the report date to the date of the deposit you are preparing.
+2. Leave the **Sub-department Range** as-is.
+3. Set the **Totalizer Range** to:
+   - Start: **3 (Net Sales)**
+   - End: **4 (Interstore Sales)**
+4. Select **Launch**.
+5. Export the report to Excel.
+6. In the exported report, copy **Columns B–H**, starting with the sub-department codes and ending with Quantity.
+7. Paste those columns into the **SubDept Single** tab of the Daily Deposit template.
+
+Do not paste over the template formulas outside of the intended data-entry area.
+""".strip(),
+    },
+    {
+        "title": "Step 2B · Import store coupons from SMS",
+        "body": """
+In **SMS (POS System)** go to:
+
+**Reports → Sub-department Single Total**
+
+1. Change the report date to the date of the deposit.
+2. Leave the **Sub-department Range** as-is.
+3. Set the **Totalizer Range** to:
+   - Start: **3542 (Elect. Store Coupon Distribution)**
+   - End: **3542 (Elect. Store Coupon Distribution)**
+4. Select **Launch**.
+5. Export the report to Excel.
+6. Copy **Columns B–H**, starting with the sub-department codes and ending with Quantity.
+7. Paste those columns into **SubDept Coupon (Local Discount)** in the Daily Deposit template.
+
+### Sales check
+After Steps 2A and 2B, the **SubDept Sales Report** should be complete. Confirm that the green-filled **Sales Total** in the template matches the total at the bottom of the SMS **Sub-department Single Total** report **exactly**. If the totals do not match, stop and correct the workbook before continuing.
+""".strip(),
+    },
+    {
+        "title": "Step 3 · Enter Milk Bottle Returns",
+        "body": """
+In **SMS (POS System)** go to:
+
+**Reports → SubDepartments → Items → Item Multi Totals by Sub-department**
+
+1. Change the report date to the corresponding deposit date.
+2. Set the **Sub Department Range** to:
+   - Start: **27 (Store Coupons)**
+   - End: **27 (Store Coupons)**
+3. Select **Launch**.
+4. Scroll through the report and find all Milk Bottle Return items, such as:
+   - **MILK BOTTLE 1 - RETURNED**
+   - **MILK BOTTLE 2 - RETURNED**
+   - any additional **MILK BOTTLE ... - RETURNED** lines for that day
+5. Add together all Milk Bottle Returns for the day.
+6. Enter the total into cell **M1** on **SubDept Sales Report**.
+""".strip(),
+    },
+    {
+        "title": "Step 4 · Import the Discounts worksheet",
+        "body": """
+In **SMS (POS System)** go to:
+
+**Reports → Customers → Totals → Sub-department Discounts by Shopper**
+
+1. Change the report date to the deposit date.
+2. Select **Launch**.
+3. Export the report to Excel.
+4. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
+5. Rename the copied tab **xxxxxx Discounts**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 Discounts`).
+""".strip(),
+    },
+    {
+        "title": "Step 5 · Import the HASH worksheet",
+        "body": """
+The HASH report supplies **Refunded Discounts, Pass Through/Charity Donations, and Paid-Ins**.
+
+In **SMS (POS System)** go to:
+
+**Reports → Sub-department Single Total**
+
+1. Change the report date to the deposit date.
+2. Set the **Totalizer Range** to:
+   - Start: **6 (HASH Sales)**
+   - End: **6 (HASH Sales)**
+3. Select **Launch**.
+4. Export the report to Excel.
+5. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
+6. Rename the copied tab **xxxxxx HASH**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 HASH`).
+""".strip(),
+    },
+    {
+        "title": "Step 6 · Import the Balance Sheet (BS)",
+        "body": """
+In **SMS (POS System)** go to:
+
+**Reports → Balance Sheet**
+
+1. Change the report date to the deposit date.
+2. Select **Launch**.
+3. Export the report to Excel.
+4. In Excel, use **Move or Copy** to copy the entire worksheet into the Daily Deposit template workbook.
+5. Rename the copied tab **xxxxxx BS**, using the deposit-date numbers in place of `xxxxxx` (for example, `082526 BS`).
+""".strip(),
+    },
+    {
+        "title": "Step 7 · Final Workbook Check",
+        "body": """
+Before uploading the workbook to the Daily Deposit app, confirm all of the following:
+
+- **SubDept Sales Report** is complete.
+- **SubDept Coupon (Local Discount)** is complete.
+- The green **Sales Total** matches the SMS Sub-department Single Total report exactly.
+- Milk Bottle Returns are entered in **M1**.
+- The dated **Discounts** tab is present.
+- The dated **HASH** tab is present.
+- The dated **BS** tab is present.
+- All tabs are for the same deposit date.
+
+Then compare your workbook against the approved example shown below. The workbook should follow the same tab structure before you run the deposit automation.
+""".strip(),
+    },
+]
+
+
 
 # ---------------------------------------------------------------------
 # Paths
@@ -1345,39 +1507,64 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.expander("📘 How to Build the Daily Workbook", expanded=False):
+with st.expander("📘 Daily Workbook SOP", expanded=False):
     st.markdown(
         """
-        **Use this guide when preparing the files for a daily deposit.**
+        ### How to Build the Daily Workbook
+        Follow these steps in order for each deposit date. The Daily Deposit template is the master workbook; SMS reports supply the source data that is copied or moved into it.
 
-        **1. Build the Daily Workbook**
-
-        The workbook should contain these five worksheets:
-
-        - **SubDept Sales Report** — daily sales by sub-department.
-        - **SubDept Coupon (Local Discount)** — store/local coupons.
-        - **MMDDYY Discounts** — Discounts by Shopper Level. The date prefix should match the report date.
-        - **MMDDYY BS** — Balance Sheet and tender control totals.
-        - **MMDDYY Hash** — Refunded Discounts, Pass Through Donations, and Paid-Ins.
+        **Important:** keep every report on the same deposit date, and do not continue past the Sales check if the totals do not match exactly.
         """
     )
 
-    with st.expander("View Daily Workbook Example", expanded=False):
-        st.caption(
-            "Your completed Daily Workbook should look like this. "
-            "Confirm the required Sales, Coupons, Discounts, HASH, and BS tabs are present."
-        )
-        daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
-        if daily_workbook_example.exists():
-            st.image(str(daily_workbook_example), use_container_width=True)
-        else:
-            st.info("Daily Workbook example image is not installed in the repo assets folder.")
+    for index, step in enumerate(SOP_STEPS):
+        expanded = index == 0
+        with st.expander(step["title"], expanded=expanded):
+            st.markdown(step["body"])
 
+            if step["title"].startswith("Step 2B"):
+                sales_check_example = ROOT / "assets" / "sales_total_match_example.png"
+                if sales_check_example.exists():
+                    st.image(
+                        str(sales_check_example),
+                        caption="Example: the green Sales Total should match the SMS report total exactly.",
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Sales-total example image is not installed yet. The check is still required: "
+                        "the green Sales Total must match the SMS Sub-department Single Total report exactly."
+                    )
+
+            if step["title"].startswith("Step 7"):
+                daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
+                daily_workbook_example_pdf = ROOT / "assets" / "daily_workbook_example.pdf"
+                if daily_workbook_example.exists():
+                    st.image(
+                        str(daily_workbook_example),
+                        caption="Approved Daily Workbook example",
+                        use_container_width=True,
+                    )
+                elif daily_workbook_example_pdf.exists():
+                    st.caption("Use the approved PDF in the assets folder for the final visual comparison.")
+                    st.download_button(
+                        "Open approved workbook example PDF",
+                        data=daily_workbook_example_pdf.read_bytes(),
+                        file_name=daily_workbook_example_pdf.name,
+                        mime="application/pdf",
+                        key="daily_workbook_example_pdf",
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "The Daily Workbook example is not installed in the repo assets folder. "
+                        "Add assets/daily_workbook_example.png or assets/daily_workbook_example.pdf to show it here."
+                    )
+
+    st.markdown("### Daily Card Settlement Report")
     st.markdown(
         """
-        **2. Prepare the Daily Card Settlement Report**
-
-        Upload the separate Daily Card Settlement Report for the same date. The automation uses only the **Processed Net Amount** column for **VISA/MC, Discover, AMEX, Debit Card, and EBT Cash/Food Stamp**.
+        After the Daily Workbook is complete, prepare the separate **Daily Card Settlement Report** for the same date. The automation uses only the **Processed Net Amount** column for **VISA/MC, Discover, AMEX, Debit Card, and EBT Cash/Food Stamp**.
         """
     )
 
@@ -1394,13 +1581,10 @@ with st.expander("📘 How to Build the Daily Workbook", expanded=False):
 
     st.markdown(
         """
-        **3. Before You Run**
+        ### Before You Run
+        Confirm that the Daily Workbook and Daily Card Settlement Report are for the same date, all five required workbook roles are detected, and the settlement report shows as verified. Then select **Validate & Build Deposit**.
 
-        Confirm that the daily workbook and settlement report are for the same date, all five required workbook tabs are detected, and the settlement report shows as verified. Then select **Validate & Build Deposit**.
-
-        **4. Review Differences**
-
-        The app compares each card settlement amount with the matching BS tender total. If they differ, the adjustment is posted to **8314000 · FE - Cash Over/Shorts** with a memo identifying the tender and the difference between First Data and BS. Review any red **✕** before importing the IIF into QuickBooks.
+        The app compares each card settlement amount with the matching BS tender total. Review any red **✕** before importing the IIF into QuickBooks.
         """
     )
 
@@ -1894,7 +2078,8 @@ if "run_result" in st.session_state:
 st.markdown("---")
 st.subheader("Run History")
 st.caption(
-    "Successful app runs are recorded here, including the Daily Card Settlement Report used for each run. Start Over clears only the current work, not this history. "
+    "Choose a completed run to review its checks and download its archived files. "
+    "Start Over clears only the current work, not this history. "
     "History is stored in the app's local runtime and may be cleared by a Streamlit Cloud redeploy or restart."
 )
 
@@ -1902,74 +2087,95 @@ history_records = load_run_history()
 if not history_records:
     st.info("No completed deposit runs have been recorded yet.")
 else:
-    summary_rows = []
-    for record in history_records[:12]:
-        try:
-            report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
-        except Exception:
-            report_label = record.get("report_date", "—")
-        try:
-            run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
-        except Exception:
-            run_label = record.get("run_at", "—")
-        summary_rows.append({
-            "Report Date": report_label,
-            "Run Time": run_label,
-            "Workbook": record.get("uploaded_filename", "—"),
-                "Card Settlement": record.get("settlement_filename", "—"),
-            "Status": record.get("status", "—"),
-            "Date Check": "MISMATCH WARNING" if record.get("date_mismatch") else "MATCH",
-        })
+    selectable_history = history_records[:25]
+    history_ids = [record.get("id", str(idx)) for idx, record in enumerate(selectable_history)]
+    history_by_id = dict(zip(history_ids, selectable_history))
 
-    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    selected_history_id = st.selectbox(
+        "Select a completed deposit run",
+        options=history_ids,
+        format_func=lambda record_id: build_history_option_label(history_by_id[record_id]),
+        key="run_history_selection",
+    )
+    record = history_by_id[selected_history_id]
 
-    with st.expander("View run files and details", expanded=False):
-        for idx, record in enumerate(history_records[:25]):
-            try:
-                report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
-            except Exception:
-                report_label = record.get("report_date", "—")
-            title = f"{report_label} · {record.get('uploaded_filename', 'Workbook')} · {record.get('status', '—')}"
-            st.markdown(f"**{html.escape(title)}**")
-            st.caption(
-                f"Sales {record.get('sales_status', 'N/A')} · "
-                f"Discounts {record.get('discount_status', 'N/A')} · "
-                f"HASH {record.get('hash_status', 'N/A')} · "
-                f"IIF {record.get('iif_status', 'N/A')}"
-            )
+    try:
+        report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%A, %B %d, %Y")
+    except Exception:
+        report_label = record.get("report_date", "—")
+    try:
+        run_label = datetime.fromisoformat(record.get("run_at", "")).strftime("%m/%d/%Y %I:%M %p")
+    except Exception:
+        run_label = record.get("run_at", "—")
 
-            download_cols = st.columns(2)
-            archived_upload = Path(record.get("archived_upload", ""))
-            archived_iif = Path(record.get("archived_iif", ""))
+    status_icon = "✓" if record.get("status") == "Passed" else "⚠"
+    st.markdown(f"### {status_icon} {html.escape(str(report_label))} · {html.escape(str(record.get('status', '—')))}")
+    st.caption(
+        f"Run {run_label} · "
+        f"Workbook: {record.get('uploaded_filename', '—')} · "
+        f"Card Settlement: {record.get('settlement_filename', '—')}"
+    )
 
-            with download_cols[0]:
-                if archived_upload.is_file():
-                    st.download_button(
-                        "Download uploaded workbook",
-                        data=archived_upload.read_bytes(),
-                        file_name=record.get("uploaded_filename", archived_upload.name),
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"history_upload_{record.get('id', idx)}",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption("Uploaded workbook archive is no longer available.")
+    check_cols = st.columns(5)
+    history_checks = [
+        ("Sales", record.get("sales_status", "N/A")),
+        ("Discounts", record.get("discount_status", "N/A")),
+        ("HASH", record.get("hash_status", "N/A")),
+        ("IIF", record.get("iif_status", "N/A")),
+        ("Card Settlement", record.get("card_settlement_status", "N/A")),
+    ]
+    for col, (label, status) in zip(check_cols, history_checks):
+        with col:
+            icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
+            st.metric(label, f"{icon} {status}")
 
-            with download_cols[1]:
-                if archived_iif.is_file():
-                    st.download_button(
-                        "Download IIF",
-                        data=archived_iif.read_bytes(),
-                        file_name=record.get("iif_filename", archived_iif.name),
-                        mime="text/plain",
-                        key=f"history_iif_{record.get('id', idx)}",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption("IIF archive is no longer available.")
+    if record.get("date_mismatch"):
+        st.warning("This run was saved with a workbook date mismatch warning.", icon="⚠️")
 
-            if idx < min(len(history_records[:25]) - 1, 24):
-                st.markdown("---")
+    with st.expander("Files from this run", expanded=False):
+        archived_upload = Path(record.get("archived_upload", ""))
+        archived_settlement = Path(record.get("archived_settlement", ""))
+        archived_iif = Path(record.get("archived_iif", ""))
+
+        download_cols = st.columns(3)
+        with download_cols[0]:
+            if archived_upload.is_file():
+                st.download_button(
+                    "Download Daily Workbook",
+                    data=archived_upload.read_bytes(),
+                    file_name=record.get("uploaded_filename", archived_upload.name),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"history_upload_{selected_history_id}",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("Daily Workbook archive is no longer available.")
+
+        with download_cols[1]:
+            if archived_settlement.is_file():
+                st.download_button(
+                    "Download Card Settlement",
+                    data=archived_settlement.read_bytes(),
+                    file_name=record.get("settlement_filename", archived_settlement.name),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"history_settlement_{selected_history_id}",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("Card Settlement archive is no longer available.")
+
+        with download_cols[2]:
+            if archived_iif.is_file():
+                st.download_button(
+                    "Download IIF",
+                    data=archived_iif.read_bytes(),
+                    file_name=record.get("iif_filename", archived_iif.name),
+                    mime="text/plain",
+                    key=f"history_iif_{selected_history_id}",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("IIF archive is no longer available.")
 
 
 st.markdown(

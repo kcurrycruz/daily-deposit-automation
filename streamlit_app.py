@@ -1375,6 +1375,20 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         with st.expander(step["title"], expanded=expanded):
             st.markdown(step["body"])
 
+            if step["title"].startswith("Step 1 ·"):
+                step1_folder_image = ROOT / "assets" / "step1_daily_deposit_folder.png"
+                if step1_folder_image.exists():
+                    st.image(
+                        str(step1_folder_image),
+                        caption="Step 1 · Daily Deposit folder — open TEMPLATE - SubDept Single Total Report.",
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Step 1 Daily Deposit folder image is not installed. "
+                        "Add assets/step1_daily_deposit_folder.png to show it here."
+                    )
+
             if step["title"].startswith("Step 2 ·"):
                 step2a_export_image = ROOT / "assets" / "step2a_sms_sales_export.png"
                 step2a_paste_image = ROOT / "assets" / "step2a_subdept_single_paste.png"

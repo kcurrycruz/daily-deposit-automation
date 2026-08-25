@@ -1377,6 +1377,25 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                         icon="🚫",
                     )
 
+            if step["title"].startswith("Step 3"):
+                milk_bottle_returns_example = ROOT / "assets" / "milk_bottle_returns_example.png"
+
+                if milk_bottle_returns_example.exists():
+                    st.caption(
+                        "Milk Bottle Returns example from SMS. Add together the highlighted Net Sales return amounts "
+                        "for all Milk Bottle Return items, then enter the combined total into cell M1 on SubDept Sales Report."
+                    )
+                    st.image(
+                        str(milk_bottle_returns_example),
+                        caption="Example: add all highlighted Milk Bottle Return amounts before entering the total in M1.",
+                        use_container_width=True,
+                    )
+                else:
+                    st.info(
+                        "Milk Bottle Returns example image is not installed in the repo assets folder. "
+                        "Add assets/milk_bottle_returns_example.png to show it here."
+                    )
+
             if step["title"].startswith("Step 7"):
                 daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
                 daily_workbook_example_pdf = ROOT / "assets" / "daily_workbook_example.pdf"

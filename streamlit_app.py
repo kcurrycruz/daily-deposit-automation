@@ -192,8 +192,6 @@ Then compare your workbook against the approved example shown below. The workboo
     },
 ]
 
-
-
 # ---------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------
@@ -232,7 +230,6 @@ for folder in (
     HISTORY_IIF_DIR,
 ):
     folder.mkdir(parents=True, exist_ok=True)
-
 
 # ---------------------------------------------------------------------
 # Page / brand
@@ -593,7 +590,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -643,7 +639,6 @@ BALANCE_SHEET_KEYWORDS = (
     "outreach",
 )
 
-
 def money(value: Optional[float]) -> str:
     if value is None:
         return "—"
@@ -652,12 +647,10 @@ def money(value: Optional[float]) -> str:
         return f"(${abs(value):,.2f})"
     return f"${value:,.2f}"
 
-
 def abs_money(value: Optional[float]) -> str:
     if value is None:
         return "—"
     return f"${abs(float(value)):,.2f}"
-
 
 def parse_money(text: str) -> Optional[float]:
     if not text:
@@ -672,7 +665,6 @@ def parse_money(text: str) -> Optional[float]:
         return None
     return -abs(v) if neg else v
 
-
 def last_amount_after_label(log_text: str, labels: list[str]) -> Optional[float]:
     for label in labels:
         matches = re.findall(
@@ -683,7 +675,6 @@ def last_amount_after_label(log_text: str, labels: list[str]) -> Optional[float]
         if matches:
             return parse_money(matches[-1])
     return None
-
 
 def section_status(log_text: str, section_name: str) -> Optional[bool]:
     upper = log_text.upper()
@@ -697,53 +688,29 @@ def section_status(log_text: str, section_name: str) -> Optional[bool]:
         return True
     return None
 
-
 def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
-    """Detect workbook roles for the UI checklist.
-
-    Stable worksheet-name patterns are authoritative. Content scanning is only
-    a fallback so a sales sheet can never steal the HASH role when a real
-    ``... HASH`` sheet exists.
-    """
     try:
         from io import BytesIO
         import openpyxl
 
         wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
-        detected = {
-            "sales": None,
-            "coupons": None,
-            "discounts": None,
-            "bs": None,
-            "hash": None,
-        }
+        detected = {"sales": None, "coupons": None, "discounts": None, "bs": None, "hash": None}
 
-        # Name-first detection. Date prefixes can change every day, so match
-        # the stable role words case-insensitively.
         for name in wb.sheetnames:
             low = name.strip().lower()
-
             if detected["hash"] is None and "hash" in low:
                 detected["hash"] = name
                 continue
-
             if detected["coupons"] is None and "coupon" in low:
                 detected["coupons"] = name
                 continue
-
-            if detected["bs"] is None and (
-                low == "bs" or low.endswith(" bs") or "balance sheet" in low
-            ):
+            if detected["bs"] is None and (low == "bs" or low.endswith(" bs") or "balance sheet" in low):
                 detected["bs"] = name
                 continue
-
             if detected["discounts"] is None and "discount" in low and "coupon" not in low:
                 detected["discounts"] = name
                 continue
-
-            if detected["sales"] is None and (
-                "subdept sales" in low or "sales report" in low
-            ):
+            if detected["sales"] is None and ("subdept sales" in low or "sales report" in low):
                 detected["sales"] = name
 
         previews = {}
@@ -780,11 +747,7 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
                 if name in used:
                     continue
                 markers = ("member discounts", "shopper level", "discounts by shopper level", "senior", "owner")
-                if (
-                    "member discounts" in preview
-                    or "discounts by shopper level" in preview
-                    or sum(m in preview for m in markers) >= 3
-                ):
+                if ("member discounts" in preview or "discounts by shopper level" in preview or sum(m in preview for m in markers) >= 3):
                     detected["discounts"] = name
                     used.add(name)
                     break
@@ -814,21 +777,9 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
 
         return detected
     except Exception:
-        return {
-            "sales": None,
-            "coupons": None,
-            "discounts": None,
-            "bs": None,
-            "hash": None,
-        }
-
-
+        return {"sales": None, "coupons": None, "discounts": None, "bs": None, "hash": None}
 
 def validate_settlement_processed_net_header(upload_bytes: bytes) -> tuple[bool, Optional[str]]:
-    """Require the Daily Card Settlement Report to contain the exact Processed Net Amount header.
-
-    Returns (is_valid, sheet_name). No fallback to Gross, Submitted, or other amount columns.
-    """
     try:
         from io import BytesIO
         import openpyxl
@@ -845,12 +796,6 @@ def validate_settlement_processed_net_header(upload_bytes: bytes) -> tuple[bool,
         return False, None
 
 def detect_workbook_dates(upload_bytes: bytes) -> dict:
-    """Inspect workbook headers/sheet names and choose an automatic report date.
-
-    The main sales sheet is the primary date when available. If it does not
-    contain a readable date, the most common date found across supporting
-    sheets is used. Conflicting dates are reported but do not prevent running.
-    """
     try:
         from collections import Counter
         from io import BytesIO
@@ -868,11 +813,7 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
                 return None
 
             s = str(value).strip()
-            for fmt in (
-                "%m/%d/%Y", "%m/%d/%y",
-                "%m-%d-%Y", "%m-%d-%y",
-                "%m.%d.%Y", "%m.%d.%y",
-            ):
+            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y", "%m.%d.%Y", "%m.%d.%y"):
                 try:
                     return datetime.strptime(s, fmt).date()
                 except ValueError:
@@ -880,8 +821,7 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
             return None
 
         def date_from_sheet_name(name):
-            # Supports 082326, 82326, 08-23-26 and 8-23-26 style prefixes.
-            compact = re.search(r"(?<!\\d)(\\d{5,6})(?!\\d)", name)
+            compact = re.search(r"(?<!\d)(\d{5,6})(?!\d)", name)
             if compact:
                 digits = compact.group(1)
                 candidates = [digits]
@@ -893,7 +833,7 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
                     except ValueError:
                         pass
 
-            separated = re.search(r"(?<!\\d)(\\d{1,2})[-_/](\\d{1,2})[-_/](\\d{2,4})(?!\\d)", name)
+            separated = re.search(r"(?<!\d)(\d{1,2})[-_/](\d{1,2})[-_/](\d{2,4})(?!\d)", name)
             if separated:
                 m, d, y = separated.groups()
                 y = ("20" + y) if len(y) == 2 else y
@@ -906,14 +846,11 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             found = None
-
-            # Prefer an explicit Date label in the workbook header.
             rows = list(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 15), values_only=True))
             for row in rows:
                 for idx, value in enumerate(row):
                     label = str(value).strip().lower() if value is not None else ""
                     if label in {"date", "date:"} or label.startswith("date:"):
-                        # Date can be in the label itself or in the next few cells.
                         if ":" in label and label.split(":", 1)[1].strip():
                             found = parse_date_value(label.split(":", 1)[1].strip())
                         if found is None:
@@ -934,18 +871,9 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
                 dates_by_sheet[sheet_name] = found
 
         if not dates_by_sheet:
-            return {
-                "detected_date": None,
-                "dates_by_sheet": {},
-                "has_mismatch": False,
-                "unique_dates": [],
-                "source_sheet": None,
-            }
+            return {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
 
-        sales_sheet = next(
-            (name for name in wb.sheetnames if "subdept sales" in name.lower() or "sales report" in name.lower()),
-            None,
-        )
+        sales_sheet = next((name for name in wb.sheetnames if "subdept sales" in name.lower() or "sales report" in name.lower()), None)
 
         source_sheet = sales_sheet if sales_sheet in dates_by_sheet else None
         if source_sheet:
@@ -964,21 +892,13 @@ def detect_workbook_dates(upload_bytes: bytes) -> dict:
             "source_sheet": source_sheet,
         }
     except Exception:
-        return {
-            "detected_date": None,
-            "dates_by_sheet": {},
-            "has_mismatch": False,
-            "unique_dates": [],
-            "source_sheet": None,
-        }
-
+        return {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
 
 # ---------------------------------------------------------------------
 # Reset / run history helpers
 # ---------------------------------------------------------------------
 
 def load_run_history() -> list[dict]:
-    """Return saved deposit run history, newest first."""
     if not HISTORY_FILE.exists():
         return []
     try:
@@ -989,30 +909,15 @@ def load_run_history() -> list[dict]:
     except Exception:
         return []
 
-
 def save_run_history(records: list[dict]) -> None:
-    """Persist run history to the local Streamlit runtime."""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(
-        json.dumps(records, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
+    HISTORY_FILE.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def _safe_history_name(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).name).strip("._")
     return cleaned or "uploaded_workbook.xlsx"
 
-
-def archive_run(
-    uploaded_file,
-    settlement_file,
-    result: dict,
-    report_date: date,
-    roles: dict,
-    date_info: dict,
-) -> dict:
-    """Archive a successful run and append one record to history."""
+def archive_run(uploaded_file, settlement_file, result: dict, report_date: date, roles: dict, date_info: dict) -> dict:
     run_at = datetime.now()
     stamp = run_at.strftime("%Y%m%d_%H%M%S_%f")
     upload_name = _safe_history_name(uploaded_file.name)
@@ -1022,8 +927,7 @@ def archive_run(
     iif_name = Path(result["iif_path"]).name
     iif_path = HISTORY_IIF_DIR / f"{stamp}_{iif_name}"
 
-    upload_bytes = uploaded_file.getvalue()
-    upload_path.write_bytes(upload_bytes)
+    upload_path.write_bytes(uploaded_file.getvalue())
     if settlement_path is not None:
         settlement_path.write_bytes(settlement_file.getvalue())
     iif_path.write_bytes(result["iif_bytes"])
@@ -1051,24 +955,13 @@ def archive_run(
 
     records = load_run_history()
     records.insert(0, record)
-    # Keep the index reasonably small while retaining a useful audit trail.
     save_run_history(records[:250])
     return record
 
-
 def reset_current_work() -> None:
-    """Clear only the active run; saved history remains untouched."""
-    for key in (
-        "run_result",
-        "run_date",
-        "run_filename",
-        "run_date_mismatch",
-        "run_settlement_filename",
-        "last_history_id",
-    ):
+    for key in ("run_result", "run_date", "run_filename", "run_date_mismatch", "run_settlement_filename", "last_history_id"):
         st.session_state.pop(key, None)
     st.session_state["file_uploader_key"] = st.session_state.get("file_uploader_key", 0) + 1
-
 
 @dataclass
 class IIFLine:
@@ -1081,7 +974,6 @@ class IIFLine:
     memo: str
     qb_class: str
 
-
 def parse_iif(path: Path) -> tuple[list[IIFLine], pd.DataFrame]:
     lines: list[IIFLine] = []
     headers: dict[str, list[str]] = {}
@@ -1093,7 +985,6 @@ def parse_iif(path: Path) -> tuple[list[IIFLine], pd.DataFrame]:
                 continue
 
             first = row[0].strip()
-
             if first.startswith("!"):
                 headers[first[1:].upper()] = [x.strip().upper() for x in row]
                 continue
@@ -1103,11 +994,8 @@ def parse_iif(path: Path) -> tuple[list[IIFLine], pd.DataFrame]:
                 continue
 
             header = headers.get(line_type)
-            data = {}
-
             if header and len(header) == len(row):
-                for key, val in zip(header, row):
-                    data[key.lstrip("!")] = val
+                data = {key.lstrip("!"): val for key, val in zip(header, row)}
                 trns_type = data.get("TRNSTYPE", "")
                 dt = data.get("DATE", "")
                 account = data.get("ACCNT", "")
@@ -1124,39 +1012,16 @@ def parse_iif(path: Path) -> tuple[list[IIFLine], pd.DataFrame]:
                 memo = row[6].strip() if len(row) > 6 else ""
                 qb_class = row[7].strip() if len(row) > 7 else ""
 
-            lines.append(
-                IIFLine(
-                    line_type=line_type,
-                    trns_type=trns_type,
-                    date=dt,
-                    account=account,
-                    name=name,
-                    amount=amount,
-                    memo=memo,
-                    qb_class=qb_class,
-                )
-            )
+            lines.append(IIFLine(line_type, trns_type, dt, account, name, amount, memo, qb_class))
 
     df = pd.DataFrame(
-        [
-            {
-                "Type": x.line_type,
-                "Account": x.account,
-                "Memo": x.memo,
-                "Amount": x.amount,
-                "Name": x.name,
-                "Class": x.qb_class,
-            }
-            for x in lines
-        ]
+        [{"Type": x.line_type, "Account": x.account, "Memo": x.memo, "Amount": x.amount, "Name": x.name, "Class": x.qb_class} for x in lines]
     )
     return lines, df
-
 
 def account_code(account: str) -> str:
     m = re.match(r"\s*(\d+)", account or "")
     return m.group(1) if m else ""
-
 
 def classify_line(line: IIFLine) -> str:
     acct = (line.account or "").lower()
@@ -1165,25 +1030,19 @@ def classify_line(line: IIFLine) -> str:
 
     if line.line_type == "TRNS":
         return "Deposit"
-
     if code.startswith("711"):
         return "Sales"
-
     if code.startswith(DISCOUNT_PREFIXES):
         return "Discounts"
-
     if code == "8515000" or "store coupon" in memo:
         return "Store Coupons"
 
     combined = f"{acct} {memo}"
     if any(k in combined for k in TENDER_KEYWORDS):
         return "Tenders"
-
     if any(k in combined for k in BALANCE_SHEET_KEYWORDS):
         return "Balance Sheet"
-
     return "Other"
-
 
 def build_detail_df(lines: list[IIFLine], categories: set[str]) -> pd.DataFrame:
     rows = []
@@ -1193,20 +1052,10 @@ def build_detail_df(lines: list[IIFLine], categories: set[str]) -> pd.DataFrame:
             continue
         if x.amount is None and not x.memo and not x.account:
             continue
-        rows.append(
-            {
-                "Category": cat,
-                "Account": x.account,
-                "Memo": x.memo or "—",
-                "Amount": x.amount,
-            }
-        )
+        rows.append({"Category": cat, "Account": x.account, "Memo": x.memo or "—", "Amount": x.amount})
     return pd.DataFrame(rows)
 
-
-
 def parse_card_settlement_rows(log_text: str) -> list[dict]:
-    """Parse structured card-settlement reconciliation rows from engine logs."""
     pattern = re.compile(
         r"CARD SETTLEMENT \| (?P<tender>[^|]+?) \| "
         r"Settlement=(?P<settlement>-?[0-9.]+) \| "
@@ -1224,11 +1073,7 @@ def parse_card_settlement_rows(log_text: str) -> list[dict]:
             "Difference": float(match.group("diff")),
             "Adjustment": float(match.group("adjustment")),
             "Status": match.group("status").upper(),
-            "Resolution": (
-                "Matched"
-                if match.group("status").upper() == "MATCH"
-                else "Adjusted to BS via 8314000"
-            ),
+            "Resolution": "Matched" if match.group("status").upper() == "MATCH" else "Adjusted to BS via 8314000",
         })
     return rows
 
@@ -1243,10 +1088,8 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
     milk_bottle = last_amount_after_label(log_text, ["Milk Btl", "Milk Bottle Returns", "Milk Bottle Return"])
     script_net = last_amount_after_label(log_text, ["Script Net", "Script Net Sales"])
     excel_sales = last_amount_after_label(log_text, ["Excel Sales", "Excel Sales Total"])
-
     script_discounts = last_amount_after_label(log_text, ["Script Discounts"])
     excel_discounts = last_amount_after_label(log_text, ["Excel Disc Total", "Excel Discount Total"])
-
     refunded = last_amount_after_label(log_text, ["Refunded Discounts"])
     pass_through = last_amount_after_label(log_text, ["Pass Thru Donations", "Pass Through Donations"])
     hash_script = last_amount_after_label(log_text, ["Script Total"])
@@ -1261,8 +1104,7 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
     iif_ok = iif_difference < 0.02
 
     warning_count = sum(
-        1
-        for ln in log_text.splitlines()
+        1 for ln in log_text.splitlines()
         if "WARNING" in ln.upper() or "MISMATCH" in ln.upper() or "FAILED" in ln.upper()
     )
 
@@ -1299,15 +1141,7 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
         "card_settlement_ok": card_settlement_ok,
     }
 
-
 def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, Optional[float]]:
-    """Build overview values from the generated IIF wherever possible.
-
-    The IIF is the source of truth for amounts that are actually posted.
-    Pass Through Donations remains sourced from the HASH validation because
-    the IIF combines it with the BS charity amount on one payable line.
-    """
-
     def total_for(*, account_starts: str | None = None, memo_contains: str | None = None) -> Optional[float]:
         matches = []
         for line in lines:
@@ -1337,8 +1171,6 @@ def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, O
         card_adjustment_iif += float(line.amount)
         card_adjustment_found = True
 
-    # Engine intentionally inverts the IIF sign so QuickBooks displays the
-    # requested cash over/short sign. Show the QuickBooks-facing adjustment.
     card_adjustment = round(-card_adjustment_iif, 2) if card_adjustment_found else 0.0
 
     return {
@@ -1350,7 +1182,6 @@ def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, O
         "Card Settlement Adjustment": card_adjustment,
         "IIF Difference": float(validation.get("iif_difference", 0.0)),
     }
-
 
 def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
     if not ENGINE_PATH.exists():
@@ -1364,8 +1195,6 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
     if ext not in {".xlsx", ".xlsm"}:
         raise ValueError("Please upload an .xlsx or .xlsm workbook.")
 
-    # Give the engine a date-explicit filename so it doesn't depend on the
-    # user's local workbook naming convention.
     safe_name = f"SubDept Single Total Report {deposit_date.strftime('%m-%d-%y')}{ext}"
     input_path = INPUT_DIR / safe_name
     input_path.write_bytes(uploaded_file.getvalue())
@@ -1381,29 +1210,12 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
     if expected_iif.exists():
         expected_iif.unlink()
 
-    cmd = [
-        sys.executable,
-        str(ENGINE_PATH),
-        "--date",
-        deposit_date.strftime("%m/%d/%y"),
-    ]
+    cmd = [sys.executable, str(ENGINE_PATH), "--date", deposit_date.strftime("%m/%d/%y")]
 
-    proc = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-
+    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
     log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
-    # Some versions write the status separately; append it for easier parsing.
-    status_candidates = [
-        LOG_DIR / "last_run_status.txt",
-        QB_IMPORT_DIR / "last_run_status.txt",
-    ]
-    for status_path in status_candidates:
+    for status_path in [LOG_DIR / "last_run_status.txt", QB_IMPORT_DIR / "last_run_status.txt"]:
         if status_path.exists():
             try:
                 status_text = status_path.read_text(encoding="utf-8", errors="replace")
@@ -1417,11 +1229,7 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
         raise RuntimeError(log_text.strip() or f"Deposit engine exited with code {proc.returncode}.")
 
     if not expected_iif.exists():
-        candidates = sorted(
-            QB_IMPORT_DIR.glob("deposit_*.iif"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        candidates = sorted(QB_IMPORT_DIR.glob("deposit_*.iif"), key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
             expected_iif = candidates[0]
 
@@ -1445,7 +1253,6 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
         "log_text": log_text,
     }
 
-
 def card(label: str, value: str, foot: str = ""):
     st.markdown(
         f"""
@@ -1458,14 +1265,12 @@ def card(label: str, value: str, foot: str = ""):
         unsafe_allow_html=True,
     )
 
-
 def status_word(value: Optional[bool]) -> str:
     if value is True:
         return '<span class="hwfc-match">✓</span>'
     if value is False:
         return '<span class="hwfc-mismatch">✕</span>'
     return '<span style="color:#777">—</span>'
-
 
 # ---------------------------------------------------------------------
 # Header
@@ -1523,45 +1328,54 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
             st.markdown(step["body"])
 
             if step["title"].startswith("Step 2B"):
-                sales_check_single = ROOT / "assets" / "sales_total_match_example.png"
-                sales_check_split = [
-                    ROOT / "assets" / "sales_total_match_example_part1.png",
-                    ROOT / "assets" / "sales_total_match_example_part2.png",
-                ]
-                sales_check_alternates = [
-                    ROOT / "assets" / "sales_total_match_example_1.png",
-                    ROOT / "assets" / "sales_total_match_example_2.png",
-                    ROOT / "assets" / "sales_total_match_example_top.png",
-                    ROOT / "assets" / "sales_total_match_example_bottom.png",
+                sales_check_images = [
+                    ROOT / "assets" / "sub_department_sales_report.png",
+                    ROOT / "assets" / "department_sales_summary_report.png",
                 ]
 
-                if sales_check_single.exists():
-                    st.image(
-                        str(sales_check_single),
-                        caption="Example: the green Sales Total should match the SMS report total exactly.",
-                        use_container_width=True,
+                available_sales_check_images = [
+                    image_path for image_path in sales_check_images if image_path.exists()
+                ]
+
+                if available_sales_check_images:
+                    st.caption(
+                        "Sales-check example from SMS. "
+                        "The source report is shown in multiple images because the report is longer than one screen. "
+                        "The highlighted total at the bottom must match the green Sales Total in the Daily Deposit workbook exactly."
                     )
-                else:
-                    split_images = [path for path in sales_check_split if path.exists()]
-                    if not split_images:
-                        split_images = [path for path in sales_check_alternates if path.exists()]
 
-                    if split_images:
-                        st.caption(
-                            "Sales-check example from SMS (shown in split images because the source report is longer than one screen). "
-                            "The highlighted total at the bottom must match the green Sales Total in the Daily Deposit workbook exactly."
+                    image_captions = {
+                        "sub_department_sales_report.png":
+                            "SMS Sub-department Single Total Report · Part 1",
+                        "department_sales_summary_report.png":
+                            "SMS Sub-department Single Total Report · Part 2 · Verify the highlighted Total",
+                    }
+
+                    for image_path in available_sales_check_images:
+                        st.image(
+                            str(image_path),
+                            caption=image_captions.get(image_path.name, "SMS Sales-check example"),
+                            use_container_width=True,
                         )
-                        for idx, image_path in enumerate(split_images, start=1):
-                            st.image(
-                                str(image_path),
-                                caption=f"Sales-check example · Part {idx}",
-                                use_container_width=True,
-                            )
-                    else:
-                        st.info(
-                            "Sales-total example image is not installed yet. The check is still required: "
-                            "the green Sales Total must match the SMS Sub-department Single Total report exactly."
+
+                    missing_images = [
+                        image_path.name for image_path in sales_check_images if not image_path.exists()
+                    ]
+
+                    if missing_images:
+                        st.warning(
+                            "One Sales Check example image is missing from the assets folder:\n\n"
+                            + "\n".join(f"• {name}" for name in missing_images),
+                            icon="⚠️",
                         )
+                else:
+                    st.error(
+                        "Sales Check example images could not be found.\n\n"
+                        "The app expects these files inside the assets folder:\n\n"
+                        "• sub_department_sales_report.png\n\n"
+                        "• department_sales_summary_report.png",
+                        icon="🚫",
+                    )
 
             if step["title"].startswith("Step 7"):
                 daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
@@ -1615,8 +1429,6 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         """
     )
 
-
-
 # ---------------------------------------------------------------------
 # Input area
 # ---------------------------------------------------------------------
@@ -1624,13 +1436,7 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
 setup_col, workbook_col, settlement_col = st.columns([0.22, 0.39, 0.39], gap="medium")
 
 roles = {}
-date_info = {
-    "detected_date": None,
-    "dates_by_sheet": {},
-    "has_mismatch": False,
-    "unique_dates": [],
-    "source_sheet": None,
-}
+date_info = {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
 deposit_date = None
 
 with setup_col:
@@ -1673,10 +1479,7 @@ if uploaded:
             date_placeholder.error("Report date not detected", icon="⚠️")
 
     if date_info["has_mismatch"]:
-        detail_lines = [
-            f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
-            for sheet, dt in date_info["dates_by_sheet"].items()
-        ]
+        detail_lines = [f"**{sheet}:** {dt.strftime('%m/%d/%Y')}" for sheet, dt in date_info["dates_by_sheet"].items()]
         source = date_info.get("source_sheet") or "workbook"
         st.warning(
             "**DATE MISMATCH WARNING**\n\n"
@@ -1719,6 +1522,7 @@ settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
 settlement_source_sheet = None
+
 if settlement_file is not None:
     settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(settlement_file.getvalue())
     try:
@@ -1791,7 +1595,6 @@ if run_clicked:
         st.error("The deposit could not be completed.")
         st.code(str(exc), language="text")
 
-
 # ---------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------
@@ -1831,60 +1634,26 @@ if "run_result" in st.session_state:
         unsafe_allow_html=True,
     )
 
-    # Summary cards
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        card(
-            "Gross sales",
-            abs_money(v["gross_sales"]),
-            status_word(v["sales_ok"]),
-        )
+        card("Gross sales", abs_money(v["gross_sales"]), status_word(v["sales_ok"]))
     with c2:
-        card(
-            "Discounts",
-            abs_money(v["script_discounts"]),
-            status_word(v["discounts_ok"]),
-        )
+        card("Discounts", abs_money(v["script_discounts"]), status_word(v["discounts_ok"]))
     with c3:
-        card(
-            "Net sales",
-            abs_money(v["script_net"]),
-            status_word(v["sales_ok"]),
-        )
+        card("Net sales", abs_money(v["script_net"]), status_word(v["sales_ok"]))
     with c4:
-        card(
-            "Deposit total",
-            abs_money(v["deposit_total"]),
-            "QuickBooks TRNS amount",
-        )
+        card("Deposit total", abs_money(v["deposit_total"]), "QuickBooks TRNS amount")
 
     c5, c6, c7, c8 = st.columns(4)
     with c5:
-        card(
-            "Excel sales total",
-            abs_money(v["excel_sales"]),
-            "Workbook J3 comparison",
-        )
+        card("Excel sales total", abs_money(v["excel_sales"]), "Workbook J3 comparison")
     with c6:
-        card(
-            "Excel discount total",
-            abs_money(v["excel_discounts"]),
-            "Workbook discount report",
-        )
+        card("Excel discount total", abs_money(v["excel_discounts"]), "Workbook discount report")
     with c7:
-        card(
-            "HASH Sales 6",
-            abs_money(v["hash_excel"]),
-            status_word(v["hash_ok"]),
-        )
+        card("HASH Sales 6", abs_money(v["hash_excel"]), status_word(v["hash_ok"]))
     with c8:
-        card(
-            "IIF difference",
-            money(v["iif_difference"]),
-            status_word(v["iif_ok"]),
-        )
+        card("IIF difference", money(v["iif_difference"]), status_word(v["iif_ok"]))
 
-    # Reconciliation line
     if v["script_net"] is not None and v["excel_sales"] is not None:
         sales_diff = round(abs(abs(v["script_net"]) - abs(v["excel_sales"])), 2)
         st.markdown(
@@ -1901,34 +1670,13 @@ if "run_result" in st.session_state:
             unsafe_allow_html=True,
         )
 
-    # Validation checklist
     st.subheader("Validation checks")
     validation_rows = [
-        {
-            "Check": "Sales total",
-            "Source / comparison": "Script Net Sales vs Excel Sales Total",
-            "Status": "✓" if v["sales_ok"] is True else ("✕" if v["sales_ok"] is False else "—"),
-        },
-        {
-            "Check": "Discount total",
-            "Source / comparison": "Script Discounts vs Excel Discount Total",
-            "Status": "✓" if v["discounts_ok"] is True else ("✕" if v["discounts_ok"] is False else "—"),
-        },
-        {
-            "Check": "HASH sales",
-            "Source / comparison": "Script HASH total vs HASH Sales 6",
-            "Status": "✓" if v["hash_ok"] is True else ("✕" if v["hash_ok"] is False else "—"),
-        },
-        {
-            "Check": "IIF balance",
-            "Source / comparison": "Positive vs negative IIF amounts",
-            "Status": "✓" if v["iif_ok"] else "✕",
-        },
-        {
-            "Check": "Card settlement",
-            "Source / comparison": "Daily Card Settlement Report vs BS tender totals",
-            "Status": "✓" if v.get("card_settlement_ok") else "✕",
-        },
+        {"Check": "Sales total", "Source / comparison": "Script Net Sales vs Excel Sales Total", "Status": "✓" if v["sales_ok"] is True else ("✕" if v["sales_ok"] is False else "—")},
+        {"Check": "Discount total", "Source / comparison": "Script Discounts vs Excel Discount Total", "Status": "✓" if v["discounts_ok"] is True else ("✕" if v["discounts_ok"] is False else "—")},
+        {"Check": "HASH sales", "Source / comparison": "Script HASH total vs HASH Sales 6", "Status": "✓" if v["hash_ok"] is True else ("✕" if v["hash_ok"] is False else "—")},
+        {"Check": "IIF balance", "Source / comparison": "Positive vs negative IIF amounts", "Status": "✓" if v["iif_ok"] else "✕"},
+        {"Check": "Card settlement", "Source / comparison": "Daily Card Settlement Report vs BS tender totals", "Status": "✓" if v.get("card_settlement_ok") else "✕"},
     ]
     validation_df = pd.DataFrame(validation_rows)
     validation_styled = validation_df.style.map(
@@ -1939,24 +1687,16 @@ if "run_result" in st.session_state:
         ),
         subset=["Status"],
     )
-    st.dataframe(
-        validation_styled,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(validation_styled, use_container_width=True, hide_index=True)
 
     st.subheader("Card Settlement Reconciliation")
     settlement_rows = v.get("card_settlement_rows", [])
     if settlement_rows:
         settlement_df = pd.DataFrame(settlement_rows)
         if "Status" in settlement_df.columns:
-            settlement_df["Status"] = settlement_df["Status"].map(
-                lambda value: "✓" if str(value).upper() == "MATCH" else "✕"
-            )
+            settlement_df["Status"] = settlement_df["Status"].map(lambda value: "✓" if str(value).upper() == "MATCH" else "✕")
         for col in ["Daily Card Settlement", "BS", "Difference", "Adjustment"]:
-            settlement_df[col] = settlement_df[col].map(
-                lambda x: f"(${abs(x):,.2f})" if x < 0 else f"${x:,.2f}"
-            )
+            settlement_df[col] = settlement_df[col].map(lambda x: f"(${abs(x):,.2f})" if x < 0 else f"${x:,.2f}")
         settlement_styled = settlement_df.style.map(
             lambda value: (
                 "color: #78A85B; font-weight: 900; font-size: 1.05rem;" if value == "✓"
@@ -1978,20 +1718,12 @@ if "run_result" in st.session_state:
     else:
         st.warning("No card settlement reconciliation was found in the engine output.", icon="⚠️")
 
-    # Detail tabs
     overview_tab, sales_tab, bs_tab, qb_tab, log_tab = st.tabs(
-        [
-            "🌿 Overview",
-            "🛒 Sales & Discounts",
-            "💰 Balance Sheet & Tenders",
-            "📘 QuickBooks Preview",
-            "🧾 Run Log",
-        ]
+        ["🌿 Overview", "🛒 Sales & Discounts", "💰 Balance Sheet & Tenders", "📘 QuickBooks Preview", "🧾 Run Log"]
     )
 
     with overview_tab:
         st.subheader("Deposit Summary")
-
         summary = build_deposit_summary(lines, v)
         primary_items = [
             ("Store Coupons", summary["Store Coupons"]),
@@ -2002,7 +1734,6 @@ if "run_result" in st.session_state:
             ("IIF Difference", summary["IIF Difference"]),
         ]
 
-        # Hide truly unavailable values instead of filling the overview with dashes.
         visible_items = [(label, value) for label, value in primary_items if value is not None]
         for row_start in range(0, len(visible_items), 3):
             row_items = visible_items[row_start:row_start + 3]
@@ -2096,7 +1827,6 @@ if "run_result" in st.session_state:
     if st.button("Run another deposit", use_container_width=False):
         reset_current_work()
         st.rerun()
-
 
 # ---------------------------------------------------------------------
 # Run history
@@ -2203,7 +1933,6 @@ else:
                 )
             else:
                 st.caption("IIF archive is no longer available.")
-
 
 st.markdown(
     """

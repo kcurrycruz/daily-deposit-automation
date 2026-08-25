@@ -48,7 +48,8 @@ def build_history_option_label(record: dict) -> str:
         run_label = "—"
 
     status = record.get("status", "—") or "—"
-    return f"{report_label} · {status} · {run_label}"
+    filename = record.get("uploaded_filename", "Workbook") or "Workbook"
+    return f"{report_label} · {status} · {run_label} · {filename}"
 
 
 SOP_STEPS = [
@@ -78,12 +79,10 @@ In **SMS (POS System)** go to:
    - End: **4 (Interstore Sales)**
 4. Select **Launch**.
 5. Export the report to Excel.
-6. In the exported Excel report, copy the sales data beginning with the first sub-department code and continuing through the final department shown for the day. In the example below, this is the highlighted report area from **Columns B–H**.
-7. Open the Daily Deposit template and go to the **SubDept Single** tab.
-8. Paste the copied sales data starting in **cell A1**.
-9. Confirm that the pasted table begins with the same first row as the exported report and that all rows through the final department were included.
+6. In the exported report, copy **Columns B–H**, starting with the sub-department codes and ending with Quantity.
+7. Paste those columns into the **SubDept Single** tab of the Daily Deposit template.
 
-Do not paste over template formulas outside of the intended data-entry area.
+Do not paste over the template formulas outside of the intended data-entry area.
 """.strip(),
     },
     {
@@ -1328,50 +1327,6 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         with st.expander(step["title"], expanded=expanded):
             st.markdown(step["body"])
 
-            if step["title"].startswith("Step 2A"):
-                step2a_export_image = ROOT / "assets" / "step2a_sms_sales_export.png"
-                step2a_paste_image = ROOT / "assets" / "step2a_subdept_single_paste.png"
-
-                if step2a_export_image.exists():
-                    st.image(
-                        str(step2a_export_image),
-                        caption=(
-                            "Step 2A · SMS export: after launching the Sub-department Single Total report, "
-                            "export it to Excel and copy the report data from the first sub-department through the final department."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 2A SMS export example is not installed. "
-                        "Add assets/step2a_sms_sales_export.png to show it here."
-                    )
-
-                if step2a_paste_image.exists():
-                    st.image(
-                        str(step2a_paste_image),
-                        caption=(
-                            "Step 2A · Daily Deposit template: paste the exported sales data starting in cell A1 "
-                            "of the SubDept Single tab."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 2A paste example is not installed. "
-                        "Add assets/step2a_subdept_single_paste.png to show it here."
-                    )
-
-                st.warning(
-                    "**⚠️ Unexpected / Unique Item**\n\n"
-                    "The example report contains **23 · Refunded Discounts**. This is not a normal Sales item and "
-                    "would ordinarily be expected in the **HASH** process. If an unexpected item appears in the "
-                    "Sub-department Single Total report, do not assume it should simply be kept or deleted. "
-                    "Drill into the activity in SMS to determine why it appeared, confirm whether it is also represented "
-                    "in the HASH report, and ask the Finance team for help if the source is unclear before completing the deposit.",
-                    icon="⚠️",
-                )
-
             if step["title"].startswith("Step 2B"):
                 sales_check_images = [
                     ROOT / "assets" / "sub_department_sales_report.png",
@@ -1420,26 +1375,6 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
                         "• sub_department_sales_report.png\n\n"
                         "• department_sales_summary_report.png",
                         icon="🚫",
-                    )
-
-            if step["title"].startswith("Step 3"):
-                milk_bottle_returns_example = ROOT / "assets" / "milk_bottle_returns_example.png"
-                if milk_bottle_returns_example.exists():
-                    st.caption(
-                        "Milk Bottle Returns example from SMS. Add together the highlighted return amounts for all "
-                        "Milk Bottle Return items, then enter the combined total into cell M1 on SubDept Sales Report."
-                    )
-                    st.image(
-                        str(milk_bottle_returns_example),
-                        caption=(
-                            "Step 3 · Add all highlighted Milk Bottle Return amounts before entering the total in M1."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Milk Bottle Returns example image is not installed. "
-                        "Add assets/milk_bottle_returns_example.png to show it here."
                     )
 
             if step["title"].startswith("Step 7"):
@@ -1493,51 +1428,6 @@ with st.expander("📘 Daily Workbook SOP", expanded=False):
         The app compares each card settlement amount with the matching BS tender total. Review any red **✕** before importing the IIF into QuickBooks.
         """
     )
-
-# ---------------------------------------------------------------------
-# Tips / known exceptions
-# ---------------------------------------------------------------------
-
-with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
-    st.caption(
-        "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
-    )
-
-    st.warning(
-        "**Unique / unrecognized items → TBA**\n\n"
-        "Any unique item that the automation does not recognize will be coded as **TBA** at the bottom of the "
-        "automated IIF. These lines require manual review and must be changed to the correct QuickBooks account "
-        "before final posting. Use the item description and memo to research the source. If the correct coding is "
-        "unclear, review SMS/source reports and ask the Finance team before posting.",
-        icon="⚠️",
-    )
-
-    st.info(
-        "**Unexpected SMS items**\n\n"
-        "If an item appears in a report where it normally does not belong — for example, Refunded Discounts appearing "
-        "in the Step 2A Sales report — investigate the source activity in SMS before manually changing the workbook. "
-        "Check whether the item is also represented in HASH and involve Finance if the reason is unclear.",
-        icon="🔎",
-    )
-
-    st.success(
-        "**Before importing the IIF**\n\n"
-        "Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, and confirm "
-        "the IIF difference is $0.00 before final QuickBooks posting.",
-        icon="✅",
-    )
-
-    st.markdown(
-        """
-        **Future tips to document**
-        - Date mismatch handling
-        - Card settlement differences and Cash Over/Short
-        - When to stop and ask Finance
-        - Common TBA mappings once approved
-        - QuickBooks pre-post review reminders
-        """
-    )
-
 
 # ---------------------------------------------------------------------
 # Input area
@@ -1976,9 +1866,14 @@ else:
         run_label = record.get("run_at", "—")
 
     status_icon = "✓" if record.get("status") == "Passed" else "⚠"
-    st.markdown(f"### {status_icon} {html.escape(str(report_label))}")
-    st.caption(f"{record.get('status', '—')} · Run {run_label}")
+    st.markdown(f"### {status_icon} {html.escape(str(report_label))} · {html.escape(str(record.get('status', '—')))}")
+    st.caption(
+        f"Run {run_label} · "
+        f"Workbook: {record.get('uploaded_filename', '—')} · "
+        f"Card Settlement: {record.get('settlement_filename', '—')}"
+    )
 
+    check_cols = st.columns(5)
     history_checks = [
         ("Sales", record.get("sales_status", "N/A")),
         ("Discounts", record.get("discount_status", "N/A")),
@@ -1986,30 +1881,10 @@ else:
         ("IIF", record.get("iif_status", "N/A")),
         ("Card Settlement", record.get("card_settlement_status", "N/A")),
     ]
-
-    status_parts = []
-    for label, status in history_checks:
-        icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
-        tone = "#78A85B" if status == "MATCH" else ("#C7952B" if status == "REVIEW" else "#8B949E")
-        status_parts.append(
-            f'<span style="display:inline-block;margin:0 14px 6px 0;white-space:nowrap;">'
-            f'<strong>{html.escape(label)}</strong> '
-            f'<span style="color:{tone};font-weight:800;">{icon} {html.escape(status)}</span>'
-            f'</span>'
-        )
-
-    st.markdown(
-        '<div class="history-status-row" style="padding:10px 12px;background:#161B22;'
-        'border:1px solid #30363D;border-radius:10px;margin:8px 0 10px;">'
-        + ''.join(status_parts)
-        + '</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        f"Workbook: {record.get('uploaded_filename', '—')}  •  "
-        f"Card Settlement: {record.get('settlement_filename', '—')}"
-    )
+    for col, (label, status) in zip(check_cols, history_checks):
+        with col:
+            icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
+            st.metric(label, f"{icon} {status}")
 
     if record.get("date_mismatch"):
         st.warning("This run was saved with a workbook date mismatch warning.", icon="⚠️")

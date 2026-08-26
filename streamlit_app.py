@@ -1976,9 +1976,8 @@ if subscription_total > 0:
         with st.expander("View Ownership Payments & Plan Guide"):
             st.markdown("**Ownership Payments sheet example**")
             st.image(
-                Path(__file__).parent / "assets" / "ownership_payments_example.png",
+                str(Path(__file__).parent / "assets" / "ownership_payments_example.png"),
                 caption="Use the actual paper sheet for the current deposit.",
-                use_column_width=True,
             )
             st.markdown("**Plan payment guide**")
             st.dataframe(

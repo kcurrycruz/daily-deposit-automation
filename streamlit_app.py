@@ -39,10 +39,10 @@ from app.membership_payments import (
     exclusive_run_lock,
     membership_editor_key,
     membership_mode_from_choice,
+    normalize_membership_editor_rows,
     plan_reference_rows,
     prepare_membership_editor_rows,
     read_subscription_total,
-    remove_selected_membership_rows,
     subscription_action_status,
     write_membership_payments_file,
 )
@@ -1985,7 +1985,6 @@ if subscription_total > 0:
             key=f"membership_payoff_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
         editor_columns = [
-            "delete",
             "member_name",
             "member_number",
             "member_number_pending",
@@ -1993,7 +1992,6 @@ if subscription_total > 0:
             "amount",
         ]
         editor_row = {
-            "delete": False,
             "member_name": "",
             "member_number": "",
             "member_number_pending": False,
@@ -2001,11 +1999,6 @@ if subscription_total > 0:
             "amount": None,
         }
         editor_config = {
-            "delete": st.column_config.CheckboxColumn(
-                "Delete",
-                help="Select this row, then use Delete selected row(s).",
-                default=False,
-            ),
             "member_name": st.column_config.TextColumn("Member Name", help="Existing QuickBooks name."),
             "member_number": st.column_config.TextColumn(
                 "Member #",
@@ -2049,11 +2042,10 @@ if subscription_total > 0:
 
         editor_frame = pd.DataFrame(st.session_state[editor_draft_key])
         editor_frame = editor_frame.reindex(columns=editor_columns)
-        editor_frame["delete"] = editor_frame["delete"].fillna(False).astype(bool)
         membership_editor = st.data_editor(
             editor_frame,
             num_rows="dynamic",
-            hide_index=True,
+            hide_index=False,
             use_container_width=True,
             column_order=editor_columns,
             key=f"v3_{editor_base_key}_{st.session_state[editor_version_key]}",
@@ -2061,19 +2053,14 @@ if subscription_total > 0:
         )
 
         current_editor_rows = membership_editor.to_dict(orient="records")
-        st.session_state[editor_draft_key] = current_editor_rows
-        has_selected_rows = any(
-            row.get("delete") is True for row in current_editor_rows
+        normalized_editor_rows, refresh_editor = normalize_membership_editor_rows(
+            current_editor_rows
         )
-        if st.button(
-            "Delete selected row(s)",
-            disabled=not has_selected_rows,
-            key=f"delete_membership_rows_{editor_base_key}",
-        ):
-            remaining_rows = remove_selected_membership_rows(current_editor_rows)
-            st.session_state[editor_draft_key] = remaining_rows or [editor_row]
+        if refresh_editor:
+            st.session_state[editor_draft_key] = normalized_editor_rows
             st.session_state[editor_version_key] += 1
             st.rerun()
+        st.caption("To remove a row, select its row number and press Delete.")
 
         prepared_editor_rows = prepare_membership_editor_rows(
             current_editor_rows,

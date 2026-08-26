@@ -91,21 +91,30 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertNotIn("payment_type", prepared[0])
         self.assertNotIn("plan", prepared[0])
 
-    def test_selected_membership_editor_rows_can_be_deleted(self):
+    def test_editor_rows_refresh_only_to_autofill_paid_in_full(self):
         try:
-            from app.membership_payments import remove_selected_membership_rows
+            from app.membership_payments import normalize_membership_editor_rows
         except ImportError as exc:
-            self.fail(f"membership row deletion helper is missing: {exc}")
+            self.fail(f"membership editor normalization is missing: {exc}")
 
-        rows = [
-            {"member_name": "Keep Me", "delete": False},
-            {"member_name": "Remove Me", "delete": True},
-        ]
+        ordinary_rows = [{
+            "member_name": "Still Typing",
+            "payment_option": "Existing plan — 1 year",
+            "amount": 8.45,
+        }]
+        paid_in_full_rows = [{
+            "member_name": "Fully Paid Member",
+            "payment_option": "Paid in full — $100",
+            "amount": None,
+        }]
 
-        self.assertEqual(
-            remove_selected_membership_rows(rows),
-            [{"member_name": "Keep Me"}],
-        )
+        normalized, refresh_required = normalize_membership_editor_rows(ordinary_rows)
+        self.assertEqual(normalized, ordinary_rows)
+        self.assertFalse(refresh_required)
+
+        normalized, refresh_required = normalize_membership_editor_rows(paid_in_full_rows)
+        self.assertEqual(normalized[0]["amount"], 100.00)
+        self.assertTrue(refresh_required)
 
     def test_plan_reference_rows_match_the_staff_payment_guide(self):
         try:

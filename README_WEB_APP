@@ -27,7 +27,7 @@ Automatic entry includes an expandable plan guide for new staff with the deposit
 
 In automatic mode, enter the member name, payment option, and amount for every payment. Installment payments also require either a member number or Member # pending; when pending is selected, the memo will use `#Pending`. Paid-in-full payments do not require a member number. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
 
-To remove a mistaken entry, select Delete on its row and click Delete selected row(s) below the table.
+To remove a mistaken entry, select its row number in the table and press Delete. Selecting Paid in full automatically fills the amount with $100.00.
 
 Payment type and plan are combined into one Payment Option. Paid in full is a single $100 option with no plan selector, so a fully paid member cannot accidentally be assigned an installment plan.
 

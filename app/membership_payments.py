@@ -96,18 +96,21 @@ def prepare_membership_editor_rows(
     return prepared_rows
 
 
-def remove_selected_membership_rows(rows: list[dict]) -> list[dict]:
-    remaining_rows = []
-    for source_row in rows:
-        row = dict(source_row)
-        delete_value = row.pop("delete", False)
-        selected = (
-            delete_value is True
-            or str(delete_value).strip().lower() in {"true", "yes", "1"}
-        )
-        if not selected:
-            remaining_rows.append(row)
-    return remaining_rows
+def normalize_membership_editor_rows(rows: list[dict]) -> tuple[list[dict], bool]:
+    normalized_rows = [dict(row) for row in rows]
+    refresh_required = False
+    for row in normalized_rows:
+        if row.get("payment_option") != "Paid in full — $100":
+            continue
+        try:
+            current_amount = Decimal(str(row.get("amount")))
+            is_hundred = current_amount.is_finite() and current_amount == Decimal("100.00")
+        except (InvalidOperation, TypeError, ValueError):
+            is_hundred = False
+        if not is_hundred:
+            row["amount"] = 100.00
+            refresh_required = True
+    return normalized_rows, refresh_required
 
 
 def subscription_action_status(subscription_total: float) -> dict:

@@ -4,12 +4,17 @@ on:
   push:
     paths:
       - 'app/**'
+      - 'streamlit_app.py'
+      - 'tests/**'
       - 'requirements.txt'
       - '.github/workflows/validate.yml'
   pull_request:
     paths:
       - 'app/**'
+      - 'streamlit_app.py'
+      - 'tests/**'
       - 'requirements.txt'
+      - '.github/workflows/validate.yml'
 
 jobs:
   validate:
@@ -20,4 +25,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - run: python -m py_compile app/pos_to_quickbooks_v2.py
+      - run: python -m py_compile app/membership_payments.py app/pos_to_quickbooks_v2.py streamlit_app.py
+      - run: python -m unittest tests.test_membership_payments -v

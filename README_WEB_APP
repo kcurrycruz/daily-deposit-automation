@@ -14,6 +14,20 @@ This version wraps the existing Daily Deposit accounting engine in a Streamlit w
 
 No terminal commands are required for normal users.
 
+## Member share payments
+
+When the workbook contains Subscription Revenue (BS code 3420), the app asks for each member payment before it builds the deposit.
+
+For every payment, enter the member name, member number, payment type, plan, and amount. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
+
+- Paid in full: $100 posts to 6100000 Member Shares (Paid-In Equity).
+- New plan: creates the offsetting $100 receivable setup for every plan, then applies the interest-free deposit ($10 for 1- and 5-year plans; $15 for the 3-year plan).
+- Existing plan: splits principal to 1260000 Member Shares Receivable and interest to 9104000 Interest Income.
+- Interest lines use the Admin class.
+- Installment memos use `Share Installments - Paid #MEMBER_NUMBER`.
+
+Leave Interest Periods blank for automatic calculation. Enter a whole-number override only when an unusual payoff requires fewer interest periods.
+
 ## Test in Codespaces
 
 Install requirements:

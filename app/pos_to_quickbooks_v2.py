@@ -13,6 +13,11 @@ from datetime import date, datetime, timedelta
 from datetime import date, datetime
 from pathlib import Path
 
+try:
+    from .membership_payments import build_membership_lines, load_membership_payments_file
+except ImportError:
+    from membership_payments import build_membership_lines, load_membership_payments_file
+
 
 def get_project_root() -> Path:
     """Return repository root for Codespaces/source runs."""
@@ -955,7 +960,7 @@ def find_todays_files(deposit_date=None):
 
 def spl(date_str, acct, name, amount, memo, class_name=""):
     amt_str = f"{amount:.2f}" if amount is not None else ""
-    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t"
+    return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t{class_name}"
 
 
 def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> list[dict]:
@@ -998,7 +1003,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1008,6 +1013,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         bs_data = {}
     if settlement_data is None:
         settlement_data = {}
+    if membership_payments is None:
+        membership_payments = []
 
     def bs(key, default=None):
         v = bs_data.get(key, 0.0)
@@ -1169,12 +1176,30 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             return abs(settlement_data.get(key, 0.0)) or None
         return fallback
 
+    membership_lines = build_membership_lines(
+        membership_payments,
+        expected_subscription_total=abs(bs_data.get("subscription", 0.0)),
+    )
+    for membership_line in membership_lines:
+        iif_amt = -membership_line["amount"]
+        spl_total += iif_amt
+        spls.append(
+            spl(
+                date_str,
+                membership_line["account"],
+                membership_line["name"],
+                iif_amt,
+                membership_line["memo"],
+                membership_line["class_name"],
+            )
+        )
+        log.info(
+            f"    Member share: {membership_line['name']} | "
+            f"{membership_line['account']} | {membership_line['memo']} | "
+            f"${membership_line['amount']:,.2f}"
+        )
+
     MANUAL_LINES = [
-        ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Paid", bs("subscription") if bs("subscription") else None),
-        ("6100000 · Member Shares (Paid-In Equity)", "", "Member Shares - Receivable"),
-        ("1260000 · Member Shares Receivable", "", "Share Installments - Receivable"),
-        ("1260000 · Member Shares Receivable", "", "Share Installments - Paid"),
-        ("9104000 · Interest Income", "", "Share Installments - Paid"),
         ("4150100 · Sales Tax Payable", "New York State Sales Tax", "", bs("sales_tax")),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Sales", bs("bottle_sales")),
         ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Fee", bs("milk_bottle_fee")),
@@ -1474,7 +1499,14 @@ def main():
                             help="Deposit date in MM/DD/YY or MM/DD/YYYY format")
         parser.add_argument("--auto", action="store_true",
                             help="Use yesterday without prompting")
+        parser.add_argument("--membership-payments-file",
+                            help="JSON file containing manually entered membership payments")
         args, _unknown = parser.parse_known_args()
+
+        membership_payments = (
+            load_membership_payments_file(args.membership_payments_file)
+            if args.membership_payments_file else []
+        )
 
         if args.deposit_date:
             parsed = None
@@ -1606,7 +1638,7 @@ def main():
             milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines,
             excel_sales_total, excel_discount_total, bs_data, pass_through_total,
             dust_bunnies_total, milk_bottles_returns, refunded_discounts,
-            hash_sales_total, paid_in_total, settlement_data
+            hash_sales_total, paid_in_total, settlement_data, membership_payments
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)
@@ -1626,7 +1658,7 @@ def main():
         log.info("  QB import: File → Utilities → Import → IIF Files")
         log.info("  Then check: Banking → Make Deposits")
         log.info("")
-        log.info("  Still manual: Sales Tax, Member Shares, Gift Cards,")
+        log.info("  Still manual: Sales Tax, Gift Cards,")
         log.info("  Bottle Deposits, NCG Coupons, Petty Cash, Donations,")
         log.info("  In-House Purchases, Cash Over/Short")
 

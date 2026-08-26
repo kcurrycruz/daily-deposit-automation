@@ -23,6 +23,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -31,6 +32,14 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+
+from app.membership_payments import (
+    build_membership_lines,
+    exclusive_run_lock,
+    membership_editor_key,
+    read_subscription_total,
+    write_membership_payments_file,
+)
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -249,6 +258,8 @@ HISTORY_DIR = ROOT / "output" / "history"
 HISTORY_FILE = HISTORY_DIR / "run_history.json"
 HISTORY_UPLOAD_DIR = HISTORY_DIR / "uploads"
 HISTORY_IIF_DIR = HISTORY_DIR / "iif"
+RUNTIME_TEMP_DIR = Path(tempfile.gettempdir()) / "hwfc_daily_deposit"
+RUN_LOCK_PATH = RUNTIME_TEMP_DIR / "deposit_run.lock"
 
 for folder in (
     INPUT_DIR,
@@ -257,6 +268,7 @@ for folder in (
     HISTORY_DIR,
     HISTORY_UPLOAD_DIR,
     HISTORY_IIF_DIR,
+    RUNTIME_TEMP_DIR,
 ):
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -1243,7 +1255,7 @@ def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, O
         "IIF Difference": float(validation.get("iif_difference", 0.0)),
     }
 
-def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
+def run_engine(uploaded_file, settlement_file, deposit_date: date, membership_payments: list[dict]) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
             "Deposit engine is missing from this Streamlit repository. "
@@ -1270,9 +1282,20 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date) -> dict:
     if expected_iif.exists():
         expected_iif.unlink()
 
-    cmd = [sys.executable, str(ENGINE_PATH), "--date", deposit_date.strftime("%m/%d/%y")]
+    membership_path = write_membership_payments_file(RUNTIME_TEMP_DIR, membership_payments)
+    cmd = [
+        sys.executable,
+        str(ENGINE_PATH),
+        "--date",
+        deposit_date.strftime("%m/%d/%y"),
+        "--membership-payments-file",
+        str(membership_path),
+    ]
 
-    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
+    try:
+        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
+    finally:
+        membership_path.unlink(missing_ok=True)
     log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
     for status_path in [LOG_DIR / "last_run_status.txt", QB_IMPORT_DIR / "last_run_status.txt"]:
@@ -1882,6 +1905,109 @@ else:
         )
     missing_roles = []
 
+subscription_total = 0.0
+membership_payments: list[dict] = []
+membership_valid = True
+
+if uploaded:
+    try:
+        subscription_total = read_subscription_total(upload_bytes, roles.get("bs"))
+    except Exception as exc:
+        membership_valid = False
+        st.error(f"Could not read Subscription Revenue from the Balance Sheet: {exc}", icon="🚫")
+
+if subscription_total > 0:
+    st.markdown("---")
+    st.markdown("### Member share payments")
+    st.caption(
+        f"Subscription Revenue from the workbook: ${subscription_total:,.2f}. "
+        "Enter every member payment below; the total must match before the deposit can run."
+    )
+    st.info(
+        "Enter the member name and member number manually. New plans create the offsetting $100 receivable lines. "
+        "Deposits are $10 for 1- and 5-year plans and $15 for the 3-year plan. Leave Interest Periods blank "
+        "for automatic calculation, or enter a whole number to override it for a payoff situation.",
+        icon="ℹ️",
+    )
+
+    membership_editor = st.data_editor(
+        pd.DataFrame(
+            [{
+                "member_name": "",
+                "member_number": "",
+                "payment_type": "Existing plan",
+                "plan": "1 year",
+                "amount": None,
+                "interest_periods": None,
+            }]
+        ),
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key=membership_editor_key(
+            upload_bytes,
+            st.session_state["file_uploader_key"],
+        ),
+        column_config={
+            "member_name": st.column_config.TextColumn("Member Name", help="QuickBooks member/customer name."),
+            "member_number": st.column_config.TextColumn("Member Number", help="Enter digits only or include #."),
+            "payment_type": st.column_config.SelectboxColumn(
+                "Payment Type",
+                options=["Paid in full", "New plan", "Existing plan"],
+            ),
+            "plan": st.column_config.SelectboxColumn(
+                "Plan",
+                options=["", "1 year", "3 year", "5 year"],
+            ),
+            "amount": st.column_config.NumberColumn("Amount", min_value=0.01, format="$%.2f"),
+            "interest_periods": st.column_config.NumberColumn(
+                "Interest Periods",
+                min_value=0,
+                step=1,
+                help="Optional override. Leave blank to calculate automatically.",
+            ),
+        },
+    )
+
+    for raw_row in membership_editor.to_dict(orient="records"):
+        amount_value = raw_row.get("amount")
+        has_amount = amount_value is not None and not pd.isna(amount_value)
+        if not any([
+            str(raw_row.get("member_name") or "").strip(),
+            str(raw_row.get("member_number") or "").strip(),
+            has_amount,
+        ]):
+            continue
+        membership_payments.append({
+            key: None if pd.isna(value) else value
+            for key, value in raw_row.items()
+        })
+
+    try:
+        membership_preview = build_membership_lines(
+            membership_payments,
+            expected_subscription_total=subscription_total,
+        )
+        st.success(f"Member payments reconcile to ${subscription_total:,.2f}.", icon="✅")
+        preview_frame = pd.DataFrame(membership_preview).rename(columns={
+            "name": "Member Name",
+            "account": "QuickBooks Account",
+            "memo": "Memo",
+            "class_name": "Class",
+            "amount": "QuickBooks Amount",
+        })
+        st.dataframe(
+            preview_frame,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "QuickBooks Amount": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+    except ValueError as exc:
+        membership_valid = False
+        st.warning(str(exc), icon="⚠️")
+
 settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
@@ -1940,20 +2066,29 @@ run_clicked = st.button(
     "🌿  Validate & Build Deposit",
     type="primary",
     use_container_width=True,
-    disabled=uploaded is None or settlement_file is None or deposit_date is None or not settlement_source_ok,
+    disabled=(
+        uploaded is None
+        or settlement_file is None
+        or deposit_date is None
+        or not settlement_source_ok
+        or not membership_valid
+    ),
 )
 
 if run_clicked:
     try:
         with st.spinner("Reading workbook, running deposit automation, and reconciling QuickBooks lines..."):
-            result = run_engine(uploaded, settlement_file, deposit_date)
-            st.session_state["run_result"] = result
-            st.session_state["run_date"] = deposit_date
-            st.session_state["run_filename"] = uploaded.name
-            st.session_state["run_settlement_filename"] = settlement_file.name
-            st.session_state["run_date_mismatch"] = date_info.get("has_mismatch", False)
-            history_record = archive_run(uploaded, settlement_file, result, deposit_date, roles, date_info)
-            st.session_state["last_history_id"] = history_record["id"]
+            with exclusive_run_lock(RUN_LOCK_PATH):
+                result = run_engine(uploaded, settlement_file, deposit_date, membership_payments)
+                st.session_state["run_result"] = result
+                st.session_state["run_date"] = deposit_date
+                st.session_state["run_filename"] = uploaded.name
+                st.session_state["run_settlement_filename"] = settlement_file.name
+                st.session_state["run_date_mismatch"] = date_info.get("has_mismatch", False)
+                history_record = archive_run(
+                    uploaded, settlement_file, result, deposit_date, roles, date_info
+                )
+                st.session_state["last_history_id"] = history_record["id"]
         st.rerun()
     except Exception as exc:
         st.error("The deposit could not be completed.")

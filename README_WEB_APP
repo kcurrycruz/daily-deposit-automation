@@ -25,7 +25,11 @@ The upload area clearly reports whether Subscription Revenue is absent or whethe
 
 Automatic entry includes an expandable plan guide for new staff with the deposit, total paid, number of installments, regular payment, principal, and interest for every plan.
 
-In automatic mode, enter the member name, member number, payment type, plan, and amount for every payment. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
+In automatic mode, enter the member name, payment option, and amount for every payment. Installment payments also require either a member number or Member # pending; when pending is selected, the memo will use `#Pending`. Paid-in-full payments do not require a member number. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
+
+To remove a mistaken entry, select Delete on its row and click Delete selected row(s) below the table.
+
+Payment type and plan are combined into one Payment Option. Paid in full is a single $100 option with no plan selector, so a fully paid member cannot accidentally be assigned an installment plan.
 
 - Paid in full: $100 posts to 6100000 Member Shares (Paid-In Equity).
 - New plan: creates the offsetting $100 receivable setup for every plan, then applies the interest-free deposit ($10 for 1- and 5-year plans; $15 for the 3-year plan).

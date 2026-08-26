@@ -2,6 +2,111 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_pending_member_number_rejects_a_typed_number(self):
+        from app.membership_payments import build_membership_lines
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Enter a member number or select Member # pending, not both",
+        ):
+            build_membership_lines([{
+                "member_name": "New Member",
+                "member_number": "12345",
+                "member_number_pending": True,
+                "payment_type": "Existing plan",
+                "plan": "1 year",
+                "amount": 8.45,
+            }])
+
+    def test_pending_member_number_uses_pending_memo(self):
+        from app.membership_payments import build_membership_lines
+
+        try:
+            lines = build_membership_lines([{
+                "member_name": "New Member",
+                "member_number": "",
+                "member_number_pending": True,
+                "payment_type": "Existing plan",
+                "plan": "1 year",
+                "amount": 8.45,
+            }])
+        except ValueError as exc:
+            self.fail(f"pending member number was rejected: {exc}")
+
+        self.assertEqual(lines[0]["memo"], "Share Installments - Paid #Pending")
+        self.assertEqual(lines[1]["memo"], "Share Installments - Paid #Pending")
+
+    def test_paid_in_full_does_not_require_member_number_or_plan(self):
+        from app.membership_payments import build_membership_lines
+
+        try:
+            lines = build_membership_lines([{
+                "member_name": "Fully Paid Member",
+                "member_number": "",
+                "payment_type": "Paid in full",
+                "plan": "5 year",
+                "amount": 100.00,
+            }])
+        except ValueError as exc:
+            self.fail(f"paid-in-full member number should be optional: {exc}")
+
+        self.assertEqual(lines, [{
+            "account": "6100000 · Member Shares (Paid-In Equity)",
+            "name": "Fully Paid Member",
+            "memo": "Member Shares - Paid",
+            "class_name": "",
+            "amount": 100.00,
+        }])
+
+    def test_combined_payment_option_prevents_a_plan_for_paid_in_full(self):
+        try:
+            from app.membership_payments import payment_fields_from_option
+        except ImportError as exc:
+            self.fail(f"combined payment option mapping is missing: {exc}")
+
+        self.assertEqual(
+            payment_fields_from_option("Paid in full — $100"),
+            {"payment_type": "Paid in full", "plan": ""},
+        )
+        self.assertEqual(
+            payment_fields_from_option("New plan — 3 year"),
+            {"payment_type": "New plan", "plan": "3 year"},
+        )
+        self.assertEqual(
+            payment_fields_from_option("Existing plan — 5 year"),
+            {"payment_type": "Existing plan", "plan": "5 year"},
+        )
+
+    def test_blank_dynamic_editor_row_does_not_require_a_payment_option(self):
+        from app.membership_payments import prepare_membership_editor_rows
+
+        try:
+            prepared = prepare_membership_editor_rows(
+                [{"payment_option": float("nan"), "interest_periods": None}],
+                allow_interest_override=False,
+            )
+        except ValueError as exc:
+            self.fail(f"blank dynamic editor row was treated as a payment: {exc}")
+
+        self.assertNotIn("payment_type", prepared[0])
+        self.assertNotIn("plan", prepared[0])
+
+    def test_selected_membership_editor_rows_can_be_deleted(self):
+        try:
+            from app.membership_payments import remove_selected_membership_rows
+        except ImportError as exc:
+            self.fail(f"membership row deletion helper is missing: {exc}")
+
+        rows = [
+            {"member_name": "Keep Me", "delete": False},
+            {"member_name": "Remove Me", "delete": True},
+        ]
+
+        self.assertEqual(
+            remove_selected_membership_rows(rows),
+            [{"member_name": "Keep Me"}],
+        )
+
     def test_plan_reference_rows_match_the_staff_payment_guide(self):
         try:
             from app.membership_payments import plan_reference_rows

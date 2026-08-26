@@ -34,6 +34,7 @@ import pandas as pd
 import streamlit as st
 
 from app.membership_payments import (
+    PAYMENT_OPTIONS,
     build_membership_lines,
     exclusive_run_lock,
     membership_editor_key,
@@ -41,6 +42,7 @@ from app.membership_payments import (
     plan_reference_rows,
     prepare_membership_editor_rows,
     read_subscription_total,
+    remove_selected_membership_rows,
     subscription_action_status,
     write_membership_payments_file,
 )
@@ -1982,24 +1984,45 @@ if subscription_total > 0:
             help="Most deposits do not need this. Leave it off to calculate interest automatically.",
             key=f"membership_payoff_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
-        editor_columns = ["member_name", "member_number", "payment_type", "plan", "amount"]
+        editor_columns = [
+            "delete",
+            "member_name",
+            "member_number",
+            "member_number_pending",
+            "payment_option",
+            "amount",
+        ]
         editor_row = {
+            "delete": False,
             "member_name": "",
             "member_number": "",
-            "payment_type": "Existing plan",
-            "plan": "1 year",
+            "member_number_pending": False,
+            "payment_option": "Existing plan — 1 year",
             "amount": None,
         }
         editor_config = {
-            "member_name": st.column_config.TextColumn("Member Name", help="Existing QuickBooks name."),
-            "member_number": st.column_config.TextColumn("Member #", help="Digits only; # is optional."),
-            "payment_type": st.column_config.SelectboxColumn(
-                "Payment",
-                options=["Paid in full", "New plan", "Existing plan"],
+            "delete": st.column_config.CheckboxColumn(
+                "Delete",
+                help="Select this row, then use Delete selected row(s).",
+                default=False,
             ),
-            "plan": st.column_config.SelectboxColumn(
-                "Plan",
-                options=["", "1 year", "3 year", "5 year"],
+            "member_name": st.column_config.TextColumn("Member Name", help="Existing QuickBooks name."),
+            "member_number": st.column_config.TextColumn(
+                "Member #",
+                help=(
+                    "Digits only. Leave blank for Paid in full or when "
+                    "Member # pending is selected."
+                ),
+            ),
+            "member_number_pending": st.column_config.CheckboxColumn(
+                "Member # pending",
+                help="Use when the member has not received a number yet. Memo will use #Pending.",
+                default=False,
+            ),
+            "payment_option": st.column_config.SelectboxColumn(
+                "Payment Option",
+                options=list(PAYMENT_OPTIONS),
+                help="Paid in full has no plan selection because the share is fully paid.",
             ),
             "amount": st.column_config.NumberColumn("Amount", min_value=0.01, format="$%.2f"),
         }
@@ -2013,21 +2036,47 @@ if subscription_total > 0:
                 help="Optional payoff override.",
             )
 
+        editor_base_key = membership_editor_key(
+            upload_bytes,
+            st.session_state["file_uploader_key"],
+        )
+        editor_draft_key = f"membership_draft_{editor_base_key}"
+        editor_version_key = f"membership_editor_version_{editor_base_key}"
+        if editor_draft_key not in st.session_state:
+            st.session_state[editor_draft_key] = [editor_row]
+        if editor_version_key not in st.session_state:
+            st.session_state[editor_version_key] = 0
+
+        editor_frame = pd.DataFrame(st.session_state[editor_draft_key])
+        editor_frame = editor_frame.reindex(columns=editor_columns)
+        editor_frame["delete"] = editor_frame["delete"].fillna(False).astype(bool)
         membership_editor = st.data_editor(
-            pd.DataFrame([editor_row]),
+            editor_frame,
             num_rows="dynamic",
             hide_index=True,
             use_container_width=True,
             column_order=editor_columns,
-            key=membership_editor_key(
-                upload_bytes,
-                st.session_state["file_uploader_key"],
-            ),
+            key=f"v3_{editor_base_key}_{st.session_state[editor_version_key]}",
             column_config=editor_config,
         )
 
+        current_editor_rows = membership_editor.to_dict(orient="records")
+        st.session_state[editor_draft_key] = current_editor_rows
+        has_selected_rows = any(
+            row.get("delete") is True for row in current_editor_rows
+        )
+        if st.button(
+            "Delete selected row(s)",
+            disabled=not has_selected_rows,
+            key=f"delete_membership_rows_{editor_base_key}",
+        ):
+            remaining_rows = remove_selected_membership_rows(current_editor_rows)
+            st.session_state[editor_draft_key] = remaining_rows or [editor_row]
+            st.session_state[editor_version_key] += 1
+            st.rerun()
+
         prepared_editor_rows = prepare_membership_editor_rows(
-            membership_editor.to_dict(orient="records"),
+            current_editor_rows,
             allow_interest_override=show_payoff_adjustment,
         )
         for raw_row in prepared_editor_rows:

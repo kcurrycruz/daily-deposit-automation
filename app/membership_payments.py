@@ -36,6 +36,22 @@ HANDLING_CHOICES = {
     "Split automatically": "automatic",
     "Finish manually in QuickBooks": "manual",
 }
+PAYMENT_OPTIONS = {
+    "Paid in full — $100": {"payment_type": "Paid in full", "plan": ""},
+    "New plan — 1 year": {"payment_type": "New plan", "plan": "1 year"},
+    "New plan — 3 year": {"payment_type": "New plan", "plan": "3 year"},
+    "New plan — 5 year": {"payment_type": "New plan", "plan": "5 year"},
+    "Existing plan — 1 year": {"payment_type": "Existing plan", "plan": "1 year"},
+    "Existing plan — 3 year": {"payment_type": "Existing plan", "plan": "3 year"},
+    "Existing plan — 5 year": {"payment_type": "Existing plan", "plan": "5 year"},
+}
+
+
+def payment_fields_from_option(option: str) -> dict:
+    try:
+        return dict(PAYMENT_OPTIONS[option])
+    except KeyError:
+        raise ValueError("Unknown membership payment option") from None
 
 
 def membership_mode_from_choice(choice: str | None) -> str | None:
@@ -69,10 +85,29 @@ def prepare_membership_editor_rows(
     rows: list[dict], allow_interest_override: bool
 ) -> list[dict]:
     prepared_rows = [dict(row) for row in rows]
+    for row in prepared_rows:
+        row.pop("delete", None)
+        payment_option = row.pop("payment_option", None)
+        if isinstance(payment_option, str) and payment_option.strip():
+            row.update(payment_fields_from_option(payment_option))
     if not allow_interest_override:
         for row in prepared_rows:
             row["interest_periods"] = None
     return prepared_rows
+
+
+def remove_selected_membership_rows(rows: list[dict]) -> list[dict]:
+    remaining_rows = []
+    for source_row in rows:
+        row = dict(source_row)
+        delete_value = row.pop("delete", False)
+        selected = (
+            delete_value is True
+            or str(delete_value).strip().lower() in {"true", "yes", "1"}
+        )
+        if not selected:
+            remaining_rows.append(row)
+    return remaining_rows
 
 
 def subscription_action_status(subscription_total: float) -> dict:
@@ -226,20 +261,34 @@ def _validate_payment(payment: dict) -> dict:
     if not member_name:
         raise ValueError("Member name is required")
 
+    payment_type = str(payment.get("payment_type") or "").strip()
+    if payment_type not in PAYMENT_TYPES:
+        raise ValueError("Payment type must be Paid in full, New plan, or Existing plan")
+
     raw_member_number = str(payment.get("member_number") or "")
     if any(delimiter in raw_member_number for delimiter in ("\t", "\r", "\n")):
         raise ValueError("Member number cannot contain tabs or line breaks")
     member_number = raw_member_number.strip()
     if member_number.startswith("#"):
         member_number = member_number[1:]
-    if not member_number:
-        raise ValueError("Member number is required")
-    if not member_number.isascii() or not member_number.isdigit():
-        raise ValueError("Member number must contain digits only")
-
-    payment_type = str(payment.get("payment_type") or "").strip()
-    if payment_type not in PAYMENT_TYPES:
-        raise ValueError("Payment type must be Paid in full, New plan, or Existing plan")
+    pending_value = payment.get("member_number_pending", False)
+    member_number_pending = (
+        pending_value is True
+        or str(pending_value).strip().lower() in {"true", "yes", "1"}
+    )
+    if payment_type == "Paid in full":
+        member_number = ""
+    elif member_number_pending:
+        if member_number:
+            raise ValueError(
+                "Enter a member number or select Member # pending, not both"
+            )
+        member_number = "Pending"
+    else:
+        if not member_number:
+            raise ValueError("Member number is required unless Member # pending is selected")
+        if not member_number.isascii() or not member_number.isdigit():
+            raise ValueError("Member number must contain digits only")
 
     try:
         amount = Decimal(str(payment.get("amount"))).quantize(Decimal("0.01"))

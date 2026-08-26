@@ -1964,6 +1964,14 @@ if subscription_total > 0:
             "Enter each payment below. For a brand-new member whose name does not exist in QuickBooks, "
             "choose Finish manually in QuickBooks instead."
         )
+        st.info(
+            "**Use the Ownership Payments sheet**\n\n"
+            "Before splitting automatically, use the Ownership Payments sheet to find "
+            "the member's name, member number (or select Member # pending when the sheet "
+            "says \"New\"), plan type (1, 3, or 5 year), and amount paid. Enter those "
+            "details below exactly as shown on the sheet.",
+            icon="📄",
+        )
         st.caption("Deposits are interest-free; installment payments include interest.")
         with st.expander("View plan payment guide"):
             st.dataframe(

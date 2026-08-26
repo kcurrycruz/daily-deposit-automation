@@ -2,6 +2,138 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_plan_reference_rows_match_the_staff_payment_guide(self):
+        try:
+            from app.membership_payments import plan_reference_rows
+        except ImportError as exc:
+            self.fail(f"staff plan reference is missing: {exc}")
+
+        self.assertEqual(plan_reference_rows(), [
+            {
+                "Plan": "1 year",
+                "Deposit": 10.00,
+                "Total Paid": 102.95,
+                "Payments": 11,
+                "Installment": 8.45,
+                "Principal": 8.18,
+                "Interest": 0.27,
+            },
+            {
+                "Plan": "3 year",
+                "Deposit": 15.00,
+                "Total Paid": 109.14,
+                "Payments": 6,
+                "Installment": 15.69,
+                "Principal": 14.17,
+                "Interest": 1.52,
+            },
+            {
+                "Plan": "5 year",
+                "Deposit": 10.00,
+                "Total Paid": 115.50,
+                "Payments": 10,
+                "Installment": 10.55,
+                "Principal": 9.00,
+                "Interest": 1.55,
+            },
+        ])
+
+    def test_membership_choice_requires_a_selection_and_maps_to_engine_mode(self):
+        try:
+            from app.membership_payments import membership_mode_from_choice
+        except ImportError as exc:
+            self.fail(f"membership workflow choice mapping is missing: {exc}")
+
+        self.assertIsNone(membership_mode_from_choice(None))
+        self.assertEqual(membership_mode_from_choice("Split automatically"), "automatic")
+        self.assertEqual(
+            membership_mode_from_choice("Finish manually in QuickBooks"),
+            "manual",
+        )
+
+    def test_hidden_payoff_override_is_cleared_before_automatic_split(self):
+        try:
+            from app.membership_payments import prepare_membership_editor_rows
+        except ImportError as exc:
+            self.fail(f"membership editor row preparation is missing: {exc}")
+
+        rows = [{
+            "member_name": "A Member",
+            "member_number": "12345",
+            "payment_type": "Existing plan",
+            "plan": "1 year",
+            "amount": 20.00,
+            "interest_periods": 1,
+        }]
+
+        self.assertEqual(
+            prepare_membership_editor_rows(rows, allow_interest_override=False)[0]["interest_periods"],
+            None,
+        )
+        self.assertEqual(
+            prepare_membership_editor_rows(rows, allow_interest_override=True)[0]["interest_periods"],
+            1,
+        )
+
+    def test_manual_quickbooks_mode_posts_one_balancing_member_share_line(self):
+        from app.membership_payments import build_membership_lines
+
+        try:
+            lines = build_membership_lines(
+                [],
+                expected_subscription_total=8.45,
+                handling_mode="manual",
+            )
+        except TypeError as exc:
+            self.fail(f"manual QuickBooks handling mode is missing: {exc}")
+
+        self.assertEqual(lines, [{
+            "account": "6100000 · Member Shares (Paid-In Equity)",
+            "name": "",
+            "memo": "Member Shares - Paid",
+            "class_name": "",
+            "amount": 8.45,
+        }])
+
+    def test_automatic_mode_still_requires_member_details(self):
+        from app.membership_payments import build_membership_lines
+
+        try:
+            with self.assertRaisesRegex(ValueError, "no membership payments were supplied"):
+                build_membership_lines(
+                    [],
+                    expected_subscription_total=8.45,
+                    handling_mode="automatic",
+                )
+        except TypeError as exc:
+            self.fail(f"automatic membership handling mode is missing: {exc}")
+
+    def test_subscription_action_status_distinguishes_clear_and_action_required(self):
+        try:
+            from app.membership_payments import subscription_action_status
+        except ImportError as exc:
+            self.fail(f"subscription action status helper is missing: {exc}")
+
+        self.assertEqual(
+            subscription_action_status(0),
+            {
+                "needs_action": False,
+                "title": "No Subscription Revenue",
+                "message": "No member-share action is needed for this deposit.",
+            },
+        )
+        self.assertEqual(
+            subscription_action_status(8.45),
+            {
+                "needs_action": True,
+                "title": "Subscription Revenue found: $8.45",
+                "message": (
+                    "Choose automatic splitting or finish manually in QuickBooks "
+                    "before building the deposit."
+                ),
+            },
+        )
+
     def test_iif_delimiters_are_rejected_in_member_identity(self):
         from app.membership_payments import build_membership_lines
 
@@ -555,6 +687,46 @@ except RuntimeError:
             iif_text,
         )
 
+    def test_generate_iif_manual_mode_uses_one_unnamed_equity_line(self):
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_manual_membership_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            try:
+                iif_path = engine.generate_iif(
+                    {}, {}, {}, date(2026, 8, 24),
+                    bs_data={"subscription": 8.45},
+                    membership_payments=[],
+                    membership_mode="manual",
+                )
+            except TypeError as exc:
+                self.fail(f"manual membership IIF mode is missing: {exc}")
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+        self.assertIn(
+            "6100000 · Member Shares (Paid-In Equity)\t\t-8.45\tMember Shares - Paid",
+            iif_text,
+        )
+        self.assertNotIn("1260000 · Member Shares Receivable", iif_text)
+        self.assertNotIn("9104000 · Interest Income", iif_text)
+
 
     def test_membership_payment_file_loads_manual_app_rows(self):
         import json
@@ -613,6 +785,51 @@ except RuntimeError:
         workbook.save(content)
 
         self.assertEqual(read_subscription_total(content.getvalue(), "082426 BS"), 28.45)
+
+    def test_subscription_total_rejects_missing_or_malformed_balance_sheet_data(self):
+        from io import BytesIO
+
+        import openpyxl
+
+        from app.membership_payments import read_subscription_total
+
+        missing_bs_workbook = openpyxl.Workbook()
+        missing_bs_workbook.active.title = "Sales"
+        missing_bs_content = BytesIO()
+        missing_bs_workbook.save(missing_bs_content)
+
+        with self.assertRaisesRegex(ValueError, "Balance Sheet"):
+            read_subscription_total(missing_bs_content.getvalue())
+
+        for malformed_amount in ("not a dollar amount", "NaN", "Infinity", "-Infinity"):
+            with self.subTest(malformed_amount=malformed_amount):
+                malformed_workbook = openpyxl.Workbook()
+                malformed_sheet = malformed_workbook.active
+                malformed_sheet.title = "082426 BS"
+                malformed_sheet.append(
+                    [3420, "Subscription Revenue", None, None, malformed_amount]
+                )
+                malformed_content = BytesIO()
+                malformed_workbook.save(malformed_content)
+
+                with self.assertRaisesRegex(ValueError, "3420"):
+                    read_subscription_total(malformed_content.getvalue(), "082426 BS")
+
+    def test_valid_balance_sheet_without_3420_means_no_subscription_activity(self):
+        from io import BytesIO
+
+        import openpyxl
+
+        from app.membership_payments import read_subscription_total
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "082426 BS"
+        sheet.append([901, "Cash", None, None, 250.00])
+        content = BytesIO()
+        workbook.save(content)
+
+        self.assertEqual(read_subscription_total(content.getvalue(), "082426 BS"), 0.0)
 
 
     def test_interest_override_cannot_exceed_automatic_period_count(self):

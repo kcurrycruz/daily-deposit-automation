@@ -37,7 +37,11 @@ from app.membership_payments import (
     build_membership_lines,
     exclusive_run_lock,
     membership_editor_key,
+    membership_mode_from_choice,
+    plan_reference_rows,
+    prepare_membership_editor_rows,
     read_subscription_total,
+    subscription_action_status,
     write_membership_payments_file,
 )
 
@@ -1255,7 +1259,13 @@ def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, O
         "IIF Difference": float(validation.get("iif_difference", 0.0)),
     }
 
-def run_engine(uploaded_file, settlement_file, deposit_date: date, membership_payments: list[dict]) -> dict:
+def run_engine(
+    uploaded_file,
+    settlement_file,
+    deposit_date: date,
+    membership_payments: list[dict],
+    membership_mode: str,
+) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
             "Deposit engine is missing from this Streamlit repository. "
@@ -1290,6 +1300,8 @@ def run_engine(uploaded_file, settlement_file, deposit_date: date, membership_pa
         deposit_date.strftime("%m/%d/%y"),
         "--membership-payments-file",
         str(membership_path),
+        "--membership-mode",
+        membership_mode,
     ]
 
     try:
@@ -1908,6 +1920,7 @@ else:
 subscription_total = 0.0
 membership_payments: list[dict] = []
 membership_valid = True
+membership_mode = "automatic"
 
 if uploaded:
     try:
@@ -1916,43 +1929,72 @@ if uploaded:
         membership_valid = False
         st.error(f"Could not read Subscription Revenue from the Balance Sheet: {exc}", icon="🚫")
 
-if subscription_total > 0:
-    st.markdown("---")
-    st.markdown("### Member share payments")
-    st.caption(
-        f"Subscription Revenue from the workbook: ${subscription_total:,.2f}. "
-        "Enter every member payment below; the total must match before the deposit can run."
-    )
-    st.info(
-        "Enter the member name and member number manually. New plans create the offsetting $100 receivable lines. "
-        "Deposits are $10 for 1- and 5-year plans and $15 for the 3-year plan. Leave Interest Periods blank "
-        "for automatic calculation, or enter a whole number to override it for a payoff situation.",
-        icon="ℹ️",
-    )
+if uploaded and membership_valid:
+    subscription_status = subscription_action_status(subscription_total)
+    status_text = f"**{subscription_status['title']}** — {subscription_status['message']}"
+    if subscription_status["needs_action"]:
+        st.warning(status_text, icon="⚠️")
+    else:
+        st.success(status_text, icon="✅")
 
-    membership_editor = st.data_editor(
-        pd.DataFrame(
-            [{
-                "member_name": "",
-                "member_number": "",
-                "payment_type": "Existing plan",
-                "plan": "1 year",
-                "amount": None,
-                "interest_periods": None,
-            }]
-        ),
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True,
-        key=membership_editor_key(
-            upload_bytes,
-            st.session_state["file_uploader_key"],
-        ),
-        column_config={
-            "member_name": st.column_config.TextColumn("Member Name", help="QuickBooks member/customer name."),
-            "member_number": st.column_config.TextColumn("Member Number", help="Enter digits only or include #."),
+if subscription_total > 0:
+    st.markdown("### Member share payments")
+    handling_choice = st.radio(
+        "How should these payments be handled?",
+        options=["Split automatically", "Finish manually in QuickBooks"],
+        horizontal=True,
+        index=None,
+        key=f"membership_handling_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+    )
+    membership_mode = membership_mode_from_choice(handling_choice)
+
+    if membership_mode is None:
+        membership_valid = False
+        st.caption("Select how you want to handle member shares before building the deposit.")
+    elif membership_mode == "manual":
+        st.info(
+            f"The app will post ${subscription_total:,.2f} as one unnamed Member Shares line. "
+            "In QuickBooks, create or select the member name and complete the principal/interest split.",
+            icon="ℹ️",
+        )
+    else:
+        st.caption(
+            "Enter each payment below. For a brand-new member whose name does not exist in QuickBooks, "
+            "choose Finish manually in QuickBooks instead."
+        )
+        st.caption("Deposits are interest-free; installment payments include interest.")
+        with st.expander("View plan payment guide"):
+            st.dataframe(
+                pd.DataFrame(plan_reference_rows()),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Deposit": st.column_config.NumberColumn(format="$%.2f"),
+                    "Total Paid": st.column_config.NumberColumn(format="$%.2f"),
+                    "Installment": st.column_config.NumberColumn(format="$%.2f"),
+                    "Principal": st.column_config.NumberColumn(format="$%.2f"),
+                    "Interest": st.column_config.NumberColumn(format="$%.2f"),
+                },
+            )
+        show_payoff_adjustment = st.checkbox(
+            "Advanced: adjust interest periods for a payoff",
+            value=False,
+            help="Most deposits do not need this. Leave it off to calculate interest automatically.",
+            key=f"membership_payoff_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        )
+        editor_columns = ["member_name", "member_number", "payment_type", "plan", "amount"]
+        editor_row = {
+            "member_name": "",
+            "member_number": "",
+            "payment_type": "Existing plan",
+            "plan": "1 year",
+            "amount": None,
+        }
+        editor_config = {
+            "member_name": st.column_config.TextColumn("Member Name", help="Existing QuickBooks name."),
+            "member_number": st.column_config.TextColumn("Member #", help="Digits only; # is optional."),
             "payment_type": st.column_config.SelectboxColumn(
-                "Payment Type",
+                "Payment",
                 options=["Paid in full", "New plan", "Existing plan"],
             ),
             "plan": st.column_config.SelectboxColumn(
@@ -1960,53 +2002,74 @@ if subscription_total > 0:
                 options=["", "1 year", "3 year", "5 year"],
             ),
             "amount": st.column_config.NumberColumn("Amount", min_value=0.01, format="$%.2f"),
-            "interest_periods": st.column_config.NumberColumn(
+        }
+        if show_payoff_adjustment:
+            editor_columns.append("interest_periods")
+            editor_row["interest_periods"] = None
+            editor_config["interest_periods"] = st.column_config.NumberColumn(
                 "Interest Periods",
                 min_value=0,
                 step=1,
-                help="Optional override. Leave blank to calculate automatically.",
-            ),
-        },
-    )
+                help="Optional payoff override.",
+            )
 
-    for raw_row in membership_editor.to_dict(orient="records"):
-        amount_value = raw_row.get("amount")
-        has_amount = amount_value is not None and not pd.isna(amount_value)
-        if not any([
-            str(raw_row.get("member_name") or "").strip(),
-            str(raw_row.get("member_number") or "").strip(),
-            has_amount,
-        ]):
-            continue
-        membership_payments.append({
-            key: None if pd.isna(value) else value
-            for key, value in raw_row.items()
-        })
-
-    try:
-        membership_preview = build_membership_lines(
-            membership_payments,
-            expected_subscription_total=subscription_total,
-        )
-        st.success(f"Member payments reconcile to ${subscription_total:,.2f}.", icon="✅")
-        preview_frame = pd.DataFrame(membership_preview).rename(columns={
-            "name": "Member Name",
-            "account": "QuickBooks Account",
-            "memo": "Memo",
-            "class_name": "Class",
-            "amount": "QuickBooks Amount",
-        })
-        st.dataframe(
-            preview_frame,
+        membership_editor = st.data_editor(
+            pd.DataFrame([editor_row]),
+            num_rows="dynamic",
             hide_index=True,
             use_container_width=True,
-            column_config={
-                "QuickBooks Amount": st.column_config.NumberColumn(format="$%.2f"),
-            },
+            column_order=editor_columns,
+            key=membership_editor_key(
+                upload_bytes,
+                st.session_state["file_uploader_key"],
+            ),
+            column_config=editor_config,
         )
-    except ValueError as exc:
-        membership_valid = False
-        st.warning(str(exc), icon="⚠️")
+
+        prepared_editor_rows = prepare_membership_editor_rows(
+            membership_editor.to_dict(orient="records"),
+            allow_interest_override=show_payoff_adjustment,
+        )
+        for raw_row in prepared_editor_rows:
+            amount_value = raw_row.get("amount")
+            has_amount = amount_value is not None and not pd.isna(amount_value)
+            if not any([
+                str(raw_row.get("member_name") or "").strip(),
+                str(raw_row.get("member_number") or "").strip(),
+                has_amount,
+            ]):
+                continue
+            membership_payments.append({
+                key: None if pd.isna(value) else value
+                for key, value in raw_row.items()
+            })
+
+        try:
+            membership_preview = build_membership_lines(
+                membership_payments,
+                expected_subscription_total=subscription_total,
+                handling_mode=membership_mode,
+            )
+            st.success(f"Ready — payments total ${subscription_total:,.2f}.", icon="✅")
+            preview_frame = pd.DataFrame(membership_preview).rename(columns={
+                "name": "Member Name",
+                "account": "QuickBooks Account",
+                "memo": "Memo",
+                "class_name": "Class",
+                "amount": "QuickBooks Amount",
+            })
+            with st.expander("Review QuickBooks breakdown"):
+                st.dataframe(
+                    preview_frame,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "QuickBooks Amount": st.column_config.NumberColumn(format="$%.2f"),
+                    },
+                )
+        except ValueError as exc:
+            membership_valid = False
+            st.warning(str(exc), icon="⚠️")
 
 settlement_date_info = None
 settlement_date_mismatch = False
@@ -2079,7 +2142,13 @@ if run_clicked:
     try:
         with st.spinner("Reading workbook, running deposit automation, and reconciling QuickBooks lines..."):
             with exclusive_run_lock(RUN_LOCK_PATH):
-                result = run_engine(uploaded, settlement_file, deposit_date, membership_payments)
+                result = run_engine(
+                    uploaded,
+                    settlement_file,
+                    deposit_date,
+                    membership_payments,
+                    membership_mode,
+                )
                 st.session_state["run_result"] = result
                 st.session_state["run_date"] = deposit_date
                 st.session_state["run_filename"] = uploaded.name

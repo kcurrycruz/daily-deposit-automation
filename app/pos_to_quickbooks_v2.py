@@ -1003,7 +1003,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic") -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1179,6 +1179,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     membership_lines = build_membership_lines(
         membership_payments,
         expected_subscription_total=abs(bs_data.get("subscription", 0.0)),
+        handling_mode=membership_mode,
     )
     for membership_line in membership_lines:
         iif_amt = -membership_line["amount"]
@@ -1501,6 +1502,9 @@ def main():
                             help="Use yesterday without prompting")
         parser.add_argument("--membership-payments-file",
                             help="JSON file containing manually entered membership payments")
+        parser.add_argument("--membership-mode", choices=("automatic", "manual"),
+                            default="automatic",
+                            help="Split member payments automatically or finish them manually in QuickBooks")
         args, _unknown = parser.parse_known_args()
 
         membership_payments = (
@@ -1638,7 +1642,8 @@ def main():
             milk_bottle_return, store_coupons_xl, owner_apprec_xl, misc_tba_lines,
             excel_sales_total, excel_discount_total, bs_data, pass_through_total,
             dust_bunnies_total, milk_bottles_returns, refunded_discounts,
-            hash_sales_total, paid_in_total, settlement_data, membership_payments
+            hash_sales_total, paid_in_total, settlement_data, membership_payments,
+            args.membership_mode
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)

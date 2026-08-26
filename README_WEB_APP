@@ -16,9 +16,16 @@ No terminal commands are required for normal users.
 
 ## Member share payments
 
-When the workbook contains Subscription Revenue (BS code 3420), the app asks for each member payment before it builds the deposit.
+When the workbook contains Subscription Revenue (BS code 3420), the app asks how the member-share activity should be handled before it builds the deposit.
 
-For every payment, enter the member name, member number, payment type, plan, and amount. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
+The upload area clearly reports whether Subscription Revenue is absent or whether member-share action is required. When action is required, choose one of two workflows:
+
+- Split automatically: enter the existing QuickBooks member name and payment details. The app calculates and previews the accounting split.
+- Finish manually in QuickBooks: use this for a brand-new member whose name does not exist in QuickBooks. The app posts one unnamed balancing line to 6100000, and the user creates/selects the member and finishes the entry in QuickBooks.
+
+Automatic entry includes an expandable plan guide for new staff with the deposit, total paid, number of installments, regular payment, principal, and interest for every plan.
+
+In automatic mode, enter the member name, member number, payment type, plan, and amount for every payment. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
 
 - Paid in full: $100 posts to 6100000 Member Shares (Paid-In Equity).
 - New plan: creates the offsetting $100 receivable setup for every plan, then applies the interest-free deposit ($10 for 1- and 5-year plans; $15 for the 3-year plan).
@@ -26,7 +33,7 @@ For every payment, enter the member name, member number, payment type, plan, and
 - Interest lines use the Admin class.
 - Installment memos use `Share Installments - Paid #MEMBER_NUMBER`.
 
-Leave Interest Periods blank for automatic calculation. Enter a whole-number override only when an unusual payoff requires fewer interest periods.
+The Interest Periods field is hidden under the advanced payoff option. Leave it blank for automatic calculation; enter a whole-number override only when an unusual payoff requires fewer interest periods.
 
 ## Test in Codespaces
 

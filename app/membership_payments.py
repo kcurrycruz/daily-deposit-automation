@@ -31,6 +31,66 @@ PLAN_MAX_PERIODS = {
 }
 
 PAYMENT_TYPES = {"Paid in full", "New plan", "Existing plan"}
+HANDLING_MODES = {"automatic", "manual"}
+HANDLING_CHOICES = {
+    "Split automatically": "automatic",
+    "Finish manually in QuickBooks": "manual",
+}
+
+
+def membership_mode_from_choice(choice: str | None) -> str | None:
+    if choice is None:
+        return None
+    try:
+        return HANDLING_CHOICES[choice]
+    except KeyError:
+        raise ValueError("Unknown membership workflow choice") from None
+
+
+def plan_reference_rows() -> list[dict]:
+    rows = []
+    for plan in ("1 year", "3 year", "5 year"):
+        installment, interest = PLAN_TERMS[plan]
+        deposit = PLAN_DEPOSITS[plan]
+        payments = PLAN_MAX_PERIODS[plan]
+        rows.append({
+            "Plan": plan,
+            "Deposit": float(deposit),
+            "Total Paid": float((deposit + installment * payments).quantize(Decimal("0.01"))),
+            "Payments": payments,
+            "Installment": float(installment),
+            "Principal": float((installment - interest).quantize(Decimal("0.01"))),
+            "Interest": float(interest),
+        })
+    return rows
+
+
+def prepare_membership_editor_rows(
+    rows: list[dict], allow_interest_override: bool
+) -> list[dict]:
+    prepared_rows = [dict(row) for row in rows]
+    if not allow_interest_override:
+        for row in prepared_rows:
+            row["interest_periods"] = None
+    return prepared_rows
+
+
+def subscription_action_status(subscription_total: float) -> dict:
+    total = abs(Decimal(str(subscription_total))).quantize(Decimal("0.01"))
+    if total == Decimal("0.00"):
+        return {
+            "needs_action": False,
+            "title": "No Subscription Revenue",
+            "message": "No member-share action is needed for this deposit.",
+        }
+    return {
+        "needs_action": True,
+        "title": f"Subscription Revenue found: ${total:,.2f}",
+        "message": (
+            "Choose automatic splitting or finish manually in QuickBooks "
+            "before building the deposit."
+        ),
+    }
 
 
 def membership_editor_key(workbook_bytes: bytes, reset_counter: int) -> str:
@@ -125,7 +185,9 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
 
     workbook = openpyxl.load_workbook(BytesIO(workbook_bytes), read_only=True, data_only=True)
     try:
-        if bs_sheet_name and bs_sheet_name in workbook.sheetnames:
+        if bs_sheet_name:
+            if bs_sheet_name not in workbook.sheetnames:
+                raise ValueError(f"Balance Sheet tab '{bs_sheet_name}' was not found")
             sheet = workbook[bs_sheet_name]
         else:
             sheet_name = next(
@@ -133,7 +195,7 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
                 None,
             )
             if sheet_name is None:
-                return 0.0
+                raise ValueError("Balance Sheet tab was not found")
             sheet = workbook[sheet_name]
 
         for row in sheet.iter_rows(values_only=True):
@@ -143,9 +205,14 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
                 continue
             if code == 3420:
                 try:
-                    return round(abs(float(row[4])), 2)
-                except (IndexError, TypeError, ValueError):
-                    return 0.0
+                    amount = Decimal(str(row[4]))
+                    if not amount.is_finite():
+                        raise InvalidOperation
+                    return float(abs(amount).quantize(Decimal("0.01")))
+                except (IndexError, InvalidOperation, TypeError, ValueError):
+                    raise ValueError(
+                        "Subscription Revenue (BS code 3420) does not contain a valid amount"
+                    ) from None
         return 0.0
     finally:
         workbook.close()
@@ -225,8 +292,27 @@ def _validate_payment(payment: dict) -> dict:
 
 
 def build_membership_lines(
-    payments: list[dict], expected_subscription_total: float | None = None
+    payments: list[dict],
+    expected_subscription_total: float | None = None,
+    handling_mode: str = "automatic",
 ) -> list[dict]:
+    if handling_mode not in HANDLING_MODES:
+        raise ValueError("Membership handling mode must be automatic or manual")
+
+    if handling_mode == "manual":
+        if expected_subscription_total is None:
+            raise ValueError("Manual QuickBooks mode requires the Subscription Revenue total")
+        manual_total = abs(Decimal(str(expected_subscription_total))).quantize(Decimal("0.01"))
+        if manual_total == Decimal("0.00"):
+            return []
+        return [{
+            "account": MEMBER_SHARES_EQUITY,
+            "name": "",
+            "memo": "Member Shares - Paid",
+            "class_name": "",
+            "amount": float(manual_total),
+        }]
+
     validated_payments = [_validate_payment(payment) for payment in payments]
     if expected_subscription_total is not None:
         entered_total = sum(

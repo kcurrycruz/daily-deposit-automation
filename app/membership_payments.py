@@ -54,6 +54,36 @@ def payment_fields_from_option(option: str) -> dict:
         raise ValueError("Unknown membership payment option") from None
 
 
+def membership_payment_from_entry(
+    *,
+    member_name: str,
+    member_number_status: str | None,
+    member_number: str,
+    payment_option: str,
+    amount: float,
+    interest_periods: int | None = None,
+) -> dict:
+    if member_number_status not in {"Yes", "No"}:
+        raise ValueError("Select Yes or No for the member number question")
+    payment = {
+        "member_name": member_name,
+        "member_number": member_number if member_number_status == "Yes" else "",
+        "member_number_pending": member_number_status == "No",
+        "payment_option": payment_option,
+        "amount": amount,
+        "interest_periods": interest_periods,
+    }
+    payment.update(payment_fields_from_option(payment_option))
+    payment.pop("payment_option")
+    return payment
+
+
+def remove_membership_payment(payments: list[dict], position: int) -> list[dict]:
+    if position < 0 or position >= len(payments):
+        raise IndexError("Membership payment position is out of range")
+    return [dict(payment) for index, payment in enumerate(payments) if index != position]
+
+
 def membership_mode_from_choice(choice: str | None) -> str | None:
     if choice is None:
         return None

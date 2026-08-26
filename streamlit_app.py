@@ -39,10 +39,10 @@ from app.membership_payments import (
     exclusive_run_lock,
     membership_editor_key,
     membership_mode_from_choice,
-    normalize_membership_editor_rows,
+    membership_payment_from_entry,
     plan_reference_rows,
-    prepare_membership_editor_rows,
     read_subscription_total,
+    remove_membership_payment,
     subscription_action_status,
     write_membership_payments_file,
 )
@@ -1999,101 +1999,154 @@ if subscription_total > 0:
             help="Most deposits do not need this. Leave it off to calculate interest automatically.",
             key=f"membership_payoff_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
-        editor_columns = [
-            "member_name",
-            "member_number",
-            "member_number_pending",
-            "payment_option",
-            "amount",
-        ]
-        editor_row = {
-            "member_name": "",
-            "member_number": "",
-            "member_number_pending": False,
-            "payment_option": "Existing plan — 1 year",
-            "amount": None,
-        }
-        editor_config = {
-            "member_name": st.column_config.TextColumn("Member Name", help="Existing QuickBooks name."),
-            "member_number": st.column_config.TextColumn(
-                "Member #",
-                help=(
-                    "Digits only. Leave blank for Paid in full or when "
-                    "Member # pending is selected."
-                ),
-            ),
-            "member_number_pending": st.column_config.CheckboxColumn(
-                "Member # pending",
-                help="Use when the member has not received a number yet. Memo will use #Pending.",
-                default=False,
-            ),
-            "payment_option": st.column_config.SelectboxColumn(
-                "Payment Option",
-                options=list(PAYMENT_OPTIONS),
-                help="Paid in full has no plan selection because the share is fully paid.",
-            ),
-            "amount": st.column_config.NumberColumn("Amount", min_value=0.01, format="$%.2f"),
-        }
-        if show_payoff_adjustment:
-            editor_columns.append("interest_periods")
-            editor_row["interest_periods"] = None
-            editor_config["interest_periods"] = st.column_config.NumberColumn(
-                "Interest Periods",
-                min_value=0,
-                step=1,
-                help="Optional payoff override.",
-            )
-
-        editor_base_key = membership_editor_key(
+        entry_base_key = membership_editor_key(
             upload_bytes,
             st.session_state["file_uploader_key"],
         )
-        editor_draft_key = f"membership_draft_{editor_base_key}"
-        editor_version_key = f"membership_editor_version_{editor_base_key}"
-        if editor_draft_key not in st.session_state:
-            st.session_state[editor_draft_key] = [editor_row]
-        if editor_version_key not in st.session_state:
-            st.session_state[editor_version_key] = 0
+        saved_payments_key = f"membership_saved_payments_{entry_base_key}"
+        entry_version_key = f"membership_entry_version_{entry_base_key}"
+        if saved_payments_key not in st.session_state:
+            st.session_state[saved_payments_key] = []
+        if entry_version_key not in st.session_state:
+            st.session_state[entry_version_key] = 0
 
-        editor_frame = pd.DataFrame(st.session_state[editor_draft_key])
-        editor_frame = editor_frame.reindex(columns=editor_columns)
-        membership_editor = st.data_editor(
-            editor_frame,
-            num_rows="dynamic",
-            hide_index=False,
+        entry_version = st.session_state[entry_version_key]
+        entry_key = f"membership_entry_{entry_base_key}_{entry_version}"
+        st.markdown("**Add a member payment**")
+        payment_option = st.selectbox(
+            "Payment Option",
+            options=list(PAYMENT_OPTIONS),
+            key=f"{entry_key}_payment_option",
+            help="Paid in full has no plan selection because the share is fully paid.",
+        )
+        member_name = st.text_input(
+            "Member Name",
+            key=f"{entry_key}_member_name",
+            help="Enter the existing QuickBooks member name exactly as shown on the sheet.",
+        )
+        member_number_status = None
+        member_number = ""
+        if payment_option == "Paid in full — $100":
+            st.caption("Member # is not required for a paid-in-full payment.")
+            member_number_status = "No"
+        else:
+            number_status_key = f"{entry_key}_member_number_status"
+            number_value_key = f"{entry_key}_member_number"
+            selected_status = st.session_state.get(number_status_key)
+            selected_number = str(st.session_state.get(number_value_key) or "").strip()
+            if selected_status == "No":
+                member_number_label = "Member #: Pending"
+            elif selected_status == "Yes" and selected_number:
+                member_number_label = f"Member #: {selected_number}"
+            else:
+                member_number_label = "Member #"
+            with st.popover(member_number_label, use_container_width=True):
+                member_number_status = st.radio(
+                    "Does this member have a member number?",
+                    options=["Yes", "No"],
+                    index=None,
+                    horizontal=True,
+                    key=number_status_key,
+                )
+                if member_number_status == "Yes":
+                    member_number = st.text_input(
+                        "Enter member number",
+                        key=number_value_key,
+                        help="Digits only; do not include the # symbol.",
+                    )
+                elif member_number_status == "No":
+                    st.caption("The QuickBooks memo will use #Pending.")
+
+        if payment_option == "Paid in full — $100":
+            amount = st.number_input(
+                "Amount",
+                value=100.00,
+                format="%.2f",
+                disabled=True,
+                key=f"{entry_key}_paid_in_full_amount",
+            )
+        else:
+            amount = st.number_input(
+                "Amount",
+                min_value=0.00,
+                value=0.00,
+                step=0.01,
+                format="%.2f",
+                key=f"{entry_key}_amount",
+            )
+
+        interest_periods = None
+        if show_payoff_adjustment:
+            interest_periods = st.number_input(
+                "Interest Periods (optional payoff override)",
+                min_value=0,
+                step=1,
+                value=None,
+                key=f"{entry_key}_interest_periods",
+            )
+
+        if st.button(
+            "Add member payment",
+            type="primary",
             use_container_width=True,
-            column_order=editor_columns,
-            key=f"v3_{editor_base_key}_{st.session_state[editor_version_key]}",
-            column_config=editor_config,
-        )
+            key=f"{entry_key}_add",
+        ):
+            try:
+                new_payment = membership_payment_from_entry(
+                    member_name=member_name,
+                    member_number_status=member_number_status,
+                    member_number=member_number,
+                    payment_option=payment_option,
+                    amount=amount,
+                    interest_periods=interest_periods,
+                )
+                build_membership_lines([new_payment], handling_mode="automatic")
+            except ValueError as exc:
+                st.error(str(exc), icon="🚫")
+            else:
+                st.session_state[saved_payments_key] = [
+                    *st.session_state[saved_payments_key],
+                    new_payment,
+                ]
+                st.session_state[entry_version_key] += 1
+                st.rerun()
 
-        current_editor_rows = membership_editor.to_dict(orient="records")
-        normalized_editor_rows, refresh_editor = normalize_membership_editor_rows(
-            current_editor_rows
-        )
-        if refresh_editor:
-            st.session_state[editor_draft_key] = normalized_editor_rows
-            st.session_state[editor_version_key] += 1
-            st.rerun()
-        st.caption("To remove a row, select its row number and press Delete.")
+        saved_payments = st.session_state[saved_payments_key]
+        if saved_payments:
+            st.markdown("**Added member payments**")
+            payment_headers = st.columns([2.2, 1.2, 2.0, 1.0, 0.8])
+            payment_headers[0].caption("Member Name")
+            payment_headers[1].caption("Member #")
+            payment_headers[2].caption("Payment Option")
+            payment_headers[3].caption("Amount")
+        for payment_index, payment in enumerate(saved_payments):
+            if payment["payment_type"] == "Paid in full":
+                saved_option = "Paid in full — $100"
+                saved_number = "Not required"
+            else:
+                saved_option = f"{payment['payment_type']} — {payment['plan']}"
+                saved_number = (
+                    "Pending" if payment.get("member_number_pending")
+                    else payment.get("member_number", "")
+                )
+            payment_columns = st.columns([2.2, 1.2, 2.0, 1.0, 0.8])
+            payment_columns[0].write(payment["member_name"])
+            payment_columns[1].write(saved_number)
+            payment_columns[2].write(saved_option)
+            payment_columns[3].write(f"${float(payment['amount']):,.2f}")
+            if payment_columns[4].button(
+                "Remove",
+                key=f"remove_membership_{entry_base_key}_{payment_index}",
+            ):
+                st.session_state[saved_payments_key] = remove_membership_payment(
+                    saved_payments,
+                    payment_index,
+                )
+                st.rerun()
 
-        prepared_editor_rows = prepare_membership_editor_rows(
-            current_editor_rows,
-            allow_interest_override=show_payoff_adjustment,
+        membership_payments.extend(
+            dict(payment) for payment in st.session_state[saved_payments_key]
         )
-        for raw_row in prepared_editor_rows:
-            amount_value = raw_row.get("amount")
-            has_amount = amount_value is not None and not pd.isna(amount_value)
-            if not any([
-                str(raw_row.get("member_name") or "").strip(),
-                str(raw_row.get("member_number") or "").strip(),
-                has_amount,
-            ]):
-                continue
-            membership_payments.append({
-                key: None if pd.isna(value) else value
-                for key, value in raw_row.items()
-            })
 
         try:
             membership_preview = build_membership_lines(

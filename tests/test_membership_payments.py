@@ -2,6 +2,56 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_member_number_question_builds_assigned_and_pending_entries(self):
+        try:
+            from app.membership_payments import membership_payment_from_entry
+        except ImportError as exc:
+            self.fail(f"member payment entry builder is missing: {exc}")
+
+        assigned = membership_payment_from_entry(
+            member_name="Assigned Member",
+            member_number_status="Yes",
+            member_number="12345",
+            payment_option="Existing plan — 1 year",
+            amount=8.45,
+        )
+        pending = membership_payment_from_entry(
+            member_name="Pending Member",
+            member_number_status="No",
+            member_number="",
+            payment_option="New plan — 3 year",
+            amount=15.00,
+        )
+
+        self.assertEqual(assigned["member_number"], "12345")
+        self.assertFalse(assigned["member_number_pending"])
+        self.assertEqual(assigned["payment_type"], "Existing plan")
+        self.assertEqual(assigned["plan"], "1 year")
+        self.assertEqual(pending["member_number"], "")
+        self.assertTrue(pending["member_number_pending"])
+        self.assertEqual(pending["payment_type"], "New plan")
+        self.assertEqual(pending["plan"], "3 year")
+
+    def test_saved_member_payment_can_be_removed_by_position(self):
+        try:
+            from app.membership_payments import remove_membership_payment
+        except ImportError as exc:
+            self.fail(f"saved member payment removal is missing: {exc}")
+
+        payments = [
+            {"member_name": "Keep First"},
+            {"member_name": "Remove"},
+            {"member_name": "Keep Last"},
+        ]
+
+        self.assertEqual(
+            remove_membership_payment(payments, 1),
+            [
+                {"member_name": "Keep First"},
+                {"member_name": "Keep Last"},
+            ],
+        )
+
     def test_pending_member_number_rejects_a_typed_number(self):
         from app.membership_payments import build_membership_lines
 

@@ -23,11 +23,11 @@ The upload area clearly reports whether Subscription Revenue is absent or whethe
 - Split automatically: enter the existing QuickBooks member name and payment details. The app calculates and previews the accounting split.
 - Finish manually in QuickBooks: use this for a brand-new member whose name does not exist in QuickBooks. The app posts one unnamed balancing line to 6100000, and the user creates/selects the member and finishes the entry in QuickBooks.
 
-Automatic entry includes an expandable plan guide for new staff with the deposit, total paid, number of installments, regular payment, principal, and interest for every plan.
+Automatic entry includes one expandable Ownership Payments example and plan guide for new staff. The guide shows the paper sheet used to find the member details plus the deposit, total paid, number of installments, regular payment, principal, and interest for every plan.
 
-In automatic mode, enter the member name, payment option, and amount for every payment. Installment payments also require either a member number or Member # pending; when pending is selected, the memo will use `#Pending`. Paid-in-full payments do not require a member number. The app previews the QuickBooks lines and requires the entered payments to equal the workbook's Subscription Revenue total.
+In automatic mode, add one member payment at a time. Click Member # and answer whether the member has a number. Yes opens the number field; No automatically uses `#Pending` in installment memos. Paid-in-full payments do not require a member number. Choose the payment option, enter the amount, and add the payment to the saved list. The app previews the QuickBooks lines and requires the saved payments to equal the workbook's Subscription Revenue total.
 
-To remove a mistaken entry, select its row number in the table and press Delete. Selecting Paid in full automatically fills the amount with $100.00.
+Each saved payment has a Remove button for correcting mistakes. Selecting Paid in full automatically fills and locks the amount at $100.00.
 
 Payment type and plan are combined into one Payment Option. Paid in full is a single $100 option with no plan selector, so a fully paid member cannot accidentally be assigned an installment plan.
 

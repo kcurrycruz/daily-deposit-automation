@@ -776,6 +776,8 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
 
         for name in wb.sheetnames:
             low = name.strip().lower()
+            if "xxxxxx" in low:
+                continue
             if detected["hash"] is None and "hash" in low:
                 detected["hash"] = name
                 continue
@@ -793,6 +795,8 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
 
         previews = {}
         for name in wb.sheetnames:
+            if "xxxxxx" in name.casefold():
+                continue
             ws = wb[name]
             parts = []
             for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 30), values_only=True):
@@ -853,6 +857,7 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
                     used.add(name)
                     break
 
+        wb.close()
         return detected
     except Exception:
         return {"sales": None, "coupons": None, "discounts": None, "bs": None, "hash": None}

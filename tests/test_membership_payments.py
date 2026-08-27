@@ -2,6 +2,42 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_workbook_validation_ignores_xxxxxx_discount_and_hash_tabs(self):
+        import ast
+        from io import BytesIO
+        from pathlib import Path
+        from typing import Optional
+
+        import openpyxl
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        function_node = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "detect_sheet_roles"
+        )
+        namespace = {"Optional": Optional}
+        exec(compile(ast.Module(body=[function_node], type_ignores=[]), str(source_path), "exec"), namespace)
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "XXXXXX Discounts"
+        workbook.create_sheet("XXXXXX Hash")
+        discounts = workbook.create_sheet("082626 Discounts")
+        discounts.append(["Discounts by Shopper Level"])
+        discounts.append([None, None, "Member Discounts"])
+        hash_sheet = workbook.create_sheet("082626 Hash")
+        hash_sheet.append([None, 23, "Refunded Discounts", None, None, None, 8, 6.96])
+        hash_sheet.append([None, 32, "PASS THROUGH DONATIONS", None, None, None, 5, 5.00])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        roles = namespace["detect_sheet_roles"](output.getvalue())
+
+        self.assertEqual(roles["discounts"], "082626 Discounts")
+        self.assertEqual(roles["hash"], "082626 Hash")
+
     def test_discount_parser_prefers_the_dated_tab_over_xxxxxx_placeholder(self):
         from datetime import date
         from pathlib import Path

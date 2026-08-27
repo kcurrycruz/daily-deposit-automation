@@ -820,6 +820,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
                 break
     if ws is None:
         log.warning(f"  No BS sheet found in {filepath.name}")
+        wb.close()
         return {}
 
     bs = {
@@ -830,6 +831,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         "ebt_food": 0.0, "dufb": 0.0, "cash": 0.0, "check": 0.0,
         "vendor_coupon": 0.0, "charge": 0.0, "prepaid_card": 0.0,
         "donation": 0.0, "subscription": 0.0, "paid_out": 0.0,
+        "offline_credit_card": 0.0,
     }
 
     for row in ws.iter_rows(values_only=True):
@@ -862,6 +864,10 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 931: bs["visa_mc"] = round(bs["visa_mc"] + to_float(amt), 2)
         if code == 932: bs["amex"] = to_float(amt)
         if code == 933: bs["discover"] = to_float(amt)
+        if code == 934 and not bs["offline_credit_card"]:
+            bs["offline_credit_card"] = -abs(to_float(amt))
+        if code == 1334:
+            bs["offline_credit_card"] = -abs(to_float(amt))
         if code == 980: bs["prepaid_card"] = to_float(amt)
         if code == 1117: bs["prepaid_card"] = round(bs["prepaid_card"] + to_float(amt), 2)
         if code == 906: bs["charge"] = to_float(amt)
@@ -873,6 +879,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 3420: bs["subscription"] = to_float(amt)
 
     log.info(f"  BS: Tax=${bs['sales_tax']:,.2f} BottleSales=${bs['bottle_sales']:,.2f} Fee=${bs['milk_bottle_fee']:,.2f} Charity=${bs['charity']:,.2f} Visa/MC=${bs['visa_mc']:,.2f} AMEX=${bs['amex']:,.2f} Discover=${bs['discover']:,.2f} Debit=${bs['debit']:,.2f}")
+    wb.close()
     return bs
 
 
@@ -1020,6 +1027,12 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         v = bs_data.get(key, 0.0)
         if v != 0.0:
             return abs(v)
+        return default
+
+    def bs_signed(key, default=None):
+        v = bs_data.get(key, 0.0)
+        if v != 0.0:
+            return v
         return default
 
     def s(key):
@@ -1207,7 +1220,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Return", -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Return", -bs("bottle_return") if bs("bottle_return") else None),
         ("4160000 · Charitable Donations Payable", "", "Charity/Pass through Donations (Round up)", charity_combined or None),
-        ("9107000 · Miscellaneous Income", "", "Penny Round Up for Cash Transactions", bs("penny_round")),
+        ("9107000 · Miscellaneous Income", "", "Penny Round Up for Cash Transactions", bs_signed("penny_round")),
         ("4160500 · Gift Cards - Sold - Old/Vantiv", "", "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks", "", "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
@@ -1272,6 +1285,25 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             f"Settlement=${adjustment_row['settlement']:,.2f} "
             f"BS=${adjustment_row['bs']:,.2f} "
             f"Adjustment=${qb_adjustment:,.2f} → 8314000"
+        )
+
+    # Offline Credit Card is a unique BS item. Keep it separate from gift cards
+    # and place it at the bottom as a negative QuickBooks TBA line.
+    offline_credit_card = bs_data.get("offline_credit_card", 0.0)
+    if offline_credit_card:
+        iif_amt = -offline_credit_card
+        spl_total += iif_amt
+        spls.append(
+            spl(
+                date_str,
+                "4444 · TBA Purchases",
+                "",
+                iif_amt,
+                "Offline Credit Card:",
+            )
+        )
+        log.info(
+            f"    Offline Credit Card: ${offline_credit_card:,.2f} → TBA Purchases"
         )
 
     spl_total = round(spl_total, 2)

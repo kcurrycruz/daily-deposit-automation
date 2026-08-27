@@ -784,6 +784,80 @@ except RuntimeError:
             iif_text,
         )
 
+    def test_bs_penny_sign_is_preserved_and_offline_credit_is_bottom_tba(self):
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_bs_sign_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            negative_path = engine.generate_iif(
+                {}, {}, {}, date(2026, 8, 24),
+                bs_data={"penny_round": -0.03, "offline_credit_card": -44.07},
+            )
+            negative_text = negative_path.read_text(encoding="utf-8")
+            positive_path = engine.generate_iif(
+                {}, {}, {}, date(2026, 8, 25),
+                bs_data={"penny_round": 0.03},
+            )
+            positive_text = positive_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+        self.assertIn(
+            "9107000 · Miscellaneous Income\t\t0.03\t"
+            "Penny Round Up for Cash Transactions",
+            negative_text,
+        )
+        self.assertIn(
+            "9107000 · Miscellaneous Income\t\t-0.03\t"
+            "Penny Round Up for Cash Transactions",
+            positive_text,
+        )
+        offline_line = (
+            "4444 · TBA Purchases\t\t44.07\tOffline Credit Card:"
+        )
+        self.assertIn(offline_line, negative_text)
+        self.assertGreater(
+            negative_text.index(offline_line),
+            negative_text.index("PAID OUT:"),
+        )
+
+    def test_parse_bs_maps_offline_credit_card_as_a_negative_unique_item(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / "_offline_credit_bs.xlsx"
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "082426 BS"
+        sheet.append([1334, "Dwr Offline Credit card", None, None, 44.07, None, "D"])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            parsed = engine.parse_bs_sheet(workbook_path, date(2026, 8, 24))
+        finally:
+            workbook_path.unlink(missing_ok=True)
+
+        self.assertEqual(parsed["offline_credit_card"], -44.07)
+
     def test_generate_iif_keeps_multiple_members_and_new_plan_offsets_separate(self):
         from datetime import date
         from pathlib import Path

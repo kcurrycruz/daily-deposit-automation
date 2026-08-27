@@ -2012,66 +2012,87 @@ if subscription_total > 0:
         entry_version = st.session_state[entry_version_key]
         entry_key = f"membership_entry_{entry_base_key}_{entry_version}"
         st.markdown("**Add a member payment**")
-        payment_option = st.selectbox(
-            "Payment Option",
-            options=list(PAYMENT_OPTIONS),
-            key=f"{entry_key}_payment_option",
-            help="Paid in full has no plan selection because the share is fully paid.",
+        entry_columns = st.columns(
+            [2.2, 2.0, 1.4, 1.1, 1.1],
+            vertical_alignment="bottom",
         )
-        member_name = st.text_input(
-            "Member Name",
-            key=f"{entry_key}_member_name",
-            help="Enter the existing QuickBooks member name exactly as shown on the sheet.",
-        )
+        with entry_columns[0]:
+            payment_option = st.selectbox(
+                "Payment Option",
+                options=list(PAYMENT_OPTIONS),
+                key=f"{entry_key}_payment_option",
+                help="Paid in full has no plan selection because the share is fully paid.",
+            )
+        with entry_columns[1]:
+            member_name = st.text_input(
+                "Member Name",
+                key=f"{entry_key}_member_name",
+                help="Enter the existing QuickBooks member name exactly as shown on the sheet.",
+            )
+
         member_number_status = None
         member_number = ""
-        if payment_option == "Paid in full — $100":
-            st.caption("Member # is not required for a paid-in-full payment.")
-            member_number_status = "No"
-        else:
-            number_status_key = f"{entry_key}_member_number_status"
-            number_value_key = f"{entry_key}_member_number"
-            selected_status = st.session_state.get(number_status_key)
-            selected_number = str(st.session_state.get(number_value_key) or "").strip()
-            if selected_status == "No":
-                member_number_label = "Member #: Pending"
-            elif selected_status == "Yes" and selected_number:
-                member_number_label = f"Member #: {selected_number}"
-            else:
-                member_number_label = "Member #"
-            with st.popover(member_number_label, use_container_width=True):
-                member_number_status = st.radio(
-                    "Does this member have a member number?",
-                    options=["Yes", "No"],
-                    index=None,
-                    horizontal=True,
-                    key=number_status_key,
+        with entry_columns[2]:
+            if payment_option == "Paid in full — $100":
+                st.text_input(
+                    "Member #",
+                    value="Not required",
+                    disabled=True,
+                    key=f"{entry_key}_paid_in_full_number",
                 )
-                if member_number_status == "Yes":
-                    member_number = st.text_input(
-                        "Enter member number",
-                        key=number_value_key,
-                        help="Digits only; do not include the # symbol.",
+                member_number_status = "No"
+            else:
+                number_status_key = f"{entry_key}_member_number_status"
+                number_value_key = f"{entry_key}_member_number"
+                selected_status = st.session_state.get(number_status_key)
+                selected_number = str(st.session_state.get(number_value_key) or "").strip()
+                if selected_status == "No":
+                    member_number_label = "Member #: Pending"
+                elif selected_status == "Yes" and selected_number:
+                    member_number_label = f"Member #: {selected_number}"
+                else:
+                    member_number_label = "Member #"
+                with st.popover(member_number_label, use_container_width=True):
+                    member_number_status = st.radio(
+                        "Does this member have a member number?",
+                        options=["Yes", "No"],
+                        index=None,
+                        horizontal=True,
+                        key=number_status_key,
                     )
-                elif member_number_status == "No":
-                    st.caption("The QuickBooks memo will use #Pending.")
+                    if member_number_status == "Yes":
+                        member_number = st.text_input(
+                            "Enter member number",
+                            key=number_value_key,
+                            help="Digits only; do not include the # symbol.",
+                        )
+                    elif member_number_status == "No":
+                        st.caption("The QuickBooks memo will use #Pending.")
 
-        if payment_option == "Paid in full — $100":
-            amount = st.number_input(
-                "Amount",
-                value=100.00,
-                format="%.2f",
-                disabled=True,
-                key=f"{entry_key}_paid_in_full_amount",
-            )
-        else:
-            amount = st.number_input(
-                "Amount",
-                min_value=0.00,
-                value=0.00,
-                step=0.01,
-                format="%.2f",
-                key=f"{entry_key}_amount",
+        with entry_columns[3]:
+            if payment_option == "Paid in full — $100":
+                amount = st.number_input(
+                    "Amount",
+                    value=100.00,
+                    format="%.2f",
+                    disabled=True,
+                    key=f"{entry_key}_paid_in_full_amount",
+                )
+            else:
+                amount = st.number_input(
+                    "Amount",
+                    min_value=0.00,
+                    value=0.00,
+                    step=0.01,
+                    format="%.2f",
+                    key=f"{entry_key}_amount",
+                )
+        with entry_columns[4]:
+            add_payment_clicked = st.button(
+                "+ Add payment",
+                type="secondary",
+                use_container_width=True,
+                key=f"{entry_key}_add",
             )
 
         interest_periods = None
@@ -2084,12 +2105,7 @@ if subscription_total > 0:
                 key=f"{entry_key}_interest_periods",
             )
 
-        if st.button(
-            "Add member payment",
-            type="primary",
-            use_container_width=True,
-            key=f"{entry_key}_add",
-        ):
+        if add_payment_clicked:
             try:
                 new_payment = membership_payment_from_entry(
                     member_name=member_name,

@@ -2,6 +2,36 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_result_actions_stay_outside_more_information_dropdown(self):
+        import ast
+        from pathlib import Path
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        detail_dropdowns = []
+        for node in ast.walk(source_tree):
+            if not isinstance(node, ast.With) or not node.items:
+                continue
+            context = node.items[0].context_expr
+            if not isinstance(context, ast.Call):
+                continue
+            function = context.func
+            if not (
+                isinstance(function, ast.Attribute)
+                and function.attr == "expander"
+                and context.args
+                and isinstance(context.args[0], ast.Constant)
+                and context.args[0].value == "More deposit information"
+            ):
+                continue
+            detail_dropdowns.append(node)
+
+        self.assertEqual(len(detail_dropdowns), 1)
+        dropdown_source = ast.unparse(detail_dropdowns[0])
+        self.assertIn("st.tabs", dropdown_source)
+        self.assertNotIn("Download QuickBooks IIF", dropdown_source)
+        self.assertNotIn("Run another deposit", dropdown_source)
+
     def test_workbook_validation_ignores_xxxxxx_discount_and_hash_tabs(self):
         import ast
         from io import BytesIO

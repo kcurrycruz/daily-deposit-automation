@@ -2450,9 +2450,10 @@ if "run_result" in st.session_state:
     else:
         st.warning("No card settlement reconciliation was found in the engine output.", icon="⚠️")
 
-    overview_tab, sales_tab, bs_tab, qb_tab, log_tab = st.tabs(
-        ["🌿 Overview", "🛒 Sales & Discounts", "💰 Balance Sheet & Tenders", "📘 QuickBooks Preview", "🧾 Run Log"]
-    )
+    with st.expander("More deposit information", expanded=False):
+        overview_tab, sales_tab, bs_tab, qb_tab, log_tab = st.tabs(
+            ["🌿 Overview", "🛒 Sales & Discounts", "💰 Balance Sheet & Tenders", "📘 QuickBooks Preview", "🧾 Run Log"]
+        )
 
     with overview_tab:
         st.subheader("Deposit Summary")
@@ -2544,21 +2545,28 @@ if "run_result" in st.session_state:
             preview["Amount"] = preview["Amount"].map(lambda x: money(x) if pd.notna(x) else "")
             st.dataframe(preview, use_container_width=True, hide_index=True, height=520)
 
+    with log_tab:
+        st.caption("Full engine output for troubleshooting and audit review.")
+        st.code(result["log_text"], language="text")
+
+    download_col, another_col = st.columns([3, 1])
+    with download_col:
         st.download_button(
             "⬇ Download QuickBooks IIF",
             data=result["iif_bytes"],
             file_name=result["iif_path"].name,
             mime="text/plain",
+            type="primary",
             use_container_width=True,
         )
-
-    with log_tab:
-        st.caption("Full engine output for troubleshooting and audit review.")
-        st.code(result["log_text"], language="text")
-
-    if st.button("Run another deposit", use_container_width=False):
-        reset_current_work()
-        st.rerun()
+    with another_col:
+        if st.button(
+            "Run another deposit",
+            type="secondary",
+            use_container_width=True,
+        ):
+            reset_current_work()
+            st.rerun()
 
 st.markdown(
     """

@@ -506,29 +506,46 @@ def parse_excel_report(filepath: Path) -> tuple:
     return sales, misc_lines, milk_bottle_return, store_coupons_amt, owner_apprec_amt, sales_total_xl, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total
 
 
+def _dated_report_sheet(wb, report_date, report_label: str):
+    date_names = {
+        f"{report_date.strftime('%m%d%y')} {report_label}".casefold(),
+        f"{report_date.month}{report_date.strftime('%d%y')} {report_label}".casefold(),
+    }
+    for sheet_name in wb.sheetnames:
+        if sheet_name.strip().casefold() in date_names:
+            return wb[sheet_name], sheet_name
+    return None, None
+
+
+def _content_report_sheet(wb, required_phrases: tuple[str, ...]):
+    for sheet_name in wb.sheetnames:
+        if "xxxxxx" in sheet_name.casefold():
+            continue
+        sheet = wb[sheet_name]
+        for row in sheet.iter_rows(
+            min_row=1,
+            max_row=min(sheet.max_row, 25),
+            values_only=True,
+        ):
+            joined = " ".join(str(value or "") for value in row).casefold()
+            if any(phrase in joined for phrase in required_phrases):
+                return sheet, sheet_name
+    return None, None
+
+
 def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     import openpyxl
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    hash_candidates = [s for s in wb.sheetnames if "hash" in s.lower()]
-    ws = wb[hash_candidates[0]] if hash_candidates else None
-    found_tab = hash_candidates[0] if hash_candidates else None
-
+    ws, found_tab = _dated_report_sheet(wb, report_date, "Hash")
     if ws is None:
-        for sheet in wb.sheetnames:
-            candidate = wb[sheet]
-            found_known_row = False
-            for row in candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 25), values_only=True):
-                joined = " ".join(str(v or "") for v in row).lower()
-                if "refunded discounts" in joined or "pass through donations" in joined or "paid-ins" in joined or "paid ins" in joined:
-                    found_known_row = True
-                    break
-            if found_known_row:
-                ws = candidate
-                found_tab = sheet
-                break
+        ws, found_tab = _content_report_sheet(
+            wb,
+            ("refunded discounts", "pass through donations", "paid-ins", "paid ins"),
+        )
 
     if ws is None:
         log.warning(f"  No HASH sheet found in {filepath.name}")
+        wb.close()
         return 0.0, 0.0, 0.0
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
@@ -548,6 +565,7 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
 
     if amount_col is None:
         log.warning("  HASH Amount column not found — HASH values cannot be imported safely.")
+        wb.close()
         return 0.0, 0.0, 0.0
 
     log.info(f"  HASH Amount header found at row {amount_header_row}, column {amount_col + 1}")
@@ -608,36 +626,21 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             log.info(f"    HASH code 34 Paid-Ins: ${amount:,.2f}")
 
     log.info(f"  HASH values used: Refunded=${refunded_discounts:,.2f}, PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}")
+    wb.close()
     return refunded_discounts, pass_through_total, paid_in_total
 
 
 def parse_excel_discounts(filepath: Path, report_date) -> dict:
     import openpyxl
-    mmddyy = f"{report_date.month}{report_date.strftime('%d%y')}"
-    tab_candidates = [
-        f"{mmddyy} discounts",
-        f"0{mmddyy} discounts",
-        report_date.strftime("%m%d%y discounts"),
-    ]
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = None
-    found_tab = None
-    for candidate in tab_candidates:
-        if candidate in wb.sheetnames:
-            ws = wb[candidate]
-            found_tab = candidate
-            break
+    ws, found_tab = _dated_report_sheet(wb, report_date, "Discounts")
     if ws is None:
-        for sheet in wb.sheetnames:
-            if sheet.lower().endswith(" discounts") or sheet.lower().endswith("discounts"):
-                ws = wb[sheet]
-                found_tab = sheet
-                break
+        ws, found_tab = _content_report_sheet(wb, ("discounts by shopper level",))
     if ws is None:
         log.warning(f"  No discounts sheet found in {filepath.name}")
-        log.warning(f"  Tried: {tab_candidates}")
         log.warning(f"  Available: {wb.sheetnames}")
-        return {}
+        wb.close()
+        return {}, 0.0
 
     log.info(f"  Reading discounts from sheet: '{found_tab}'")
     WEDNESDAY_SENIOR_LEVELS = {3, 4, 10}
@@ -694,6 +697,7 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
                 log.warning(f"    Level {code}  ${amt:,.2f}  NOT MAPPED — POS description: {shopper_desc}")
 
     log.info(f"  Discounts: {len(discounts)} accounts, grand total=${grand_total:,.2f}")
+    wb.close()
     return discounts, grand_total
 
 

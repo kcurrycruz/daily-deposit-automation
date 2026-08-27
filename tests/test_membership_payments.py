@@ -2,6 +2,143 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_discount_parser_prefers_the_dated_tab_over_xxxxxx_placeholder(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / "_dated_discounts_fixture.xlsx"
+        workbook = openpyxl.Workbook()
+        placeholder = workbook.active
+        placeholder.title = "XXXXXX Discounts"
+        dated = workbook.create_sheet("082626 Discounts")
+        dated.append(["Discounts by Shopper Level"])
+        dated.append(["Date: ", "8/26/2026", "to", "8/26/2026"])
+        dated.append(["Target: ", "RAL", "Report all"])
+        dated.append([None, None, "Description", None, None, None, None, None, "Qty", "Amount"])
+        dated.append(["Shareholder", None, None, 2, None, None, None, 2365, 277.66])
+        dated.append(["Senior NonMember", None, None, 3, None, None, None, 3294, 1646.30])
+        dated.append(["Senior Share", None, None, 4, None, None, None, 3225, 1547.71])
+        dated.append([None, None, "Member Discounts", None, None, None, None, 8814, 3471.67])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            discounts, grand_total = engine.parse_excel_discounts(
+                workbook_path,
+                date(2026, 8, 26),
+            )
+        finally:
+            try:
+                workbook_path.unlink()
+            except PermissionError:
+                pass
+
+        self.assertEqual(grand_total, 3471.67)
+        self.assertEqual(discounts["8512001 · Discount 2% - Owners"], 277.66)
+        self.assertEqual(discounts["8511002 · Discount 8% - Senior Day"], 3194.01)
+
+    def test_hash_parser_prefers_the_dated_tab_over_xxxxxx_placeholder(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / "_dated_hash_fixture.xlsx"
+        workbook = openpyxl.Workbook()
+        placeholder = workbook.active
+        placeholder.title = "XXXXXX Hash"
+        dated = workbook.create_sheet("082626 Hash")
+        dated.append(["Sub-department Single Total"])
+        dated.append(["Date: ", "8/26/2026", "to", "8/26/2026"])
+        dated.append(["S-Dept.  ", 0, "to", 999999])
+        dated.append(["Tlz.:", 6, "to", 6])
+        dated.append(["Target: ", "RAL", "Report all"])
+        dated.append([None, None, "Sub-Department", None, None, None, None, "Qty", "Amount"])
+        dated.append([None, 23, "Refunded Discounts", None, None, None, 8, 6.96])
+        dated.append([None, 32, "PASS THROUGH DONATIONS", None, None, None, 5, 5.00])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            parsed = engine.parse_hash_sheet(workbook_path, date(2026, 8, 26))
+        finally:
+            try:
+                workbook_path.unlink()
+            except PermissionError:
+                pass
+
+        self.assertEqual(parsed, (6.96, 5.00, 0.0))
+
+    def test_discount_parser_falls_back_to_a_populated_custom_tab(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / "_custom_discounts_fixture.xlsx"
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "XXXXXX Discounts"
+        custom = workbook.create_sheet("Daily Shopper Report")
+        custom.append(["Discounts by Shopper Level"])
+        custom.append(["Date: ", "8/26/2026", "to", "8/26/2026"])
+        custom.append(["Target: ", "RAL", "Report all"])
+        custom.append([None, None, "Description", None, None, None, None, None, "Qty", "Amount"])
+        custom.append(["Shareholder", None, None, 2, None, None, None, 2365, 277.66])
+        custom.append([None, None, "Member Discounts", None, None, None, None, 2365, 277.66])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            discounts, total = engine.parse_excel_discounts(
+                workbook_path,
+                date(2026, 8, 26),
+            )
+        finally:
+            try:
+                workbook_path.unlink()
+            except PermissionError:
+                pass
+
+        self.assertEqual(total, 277.66)
+        self.assertEqual(discounts["8512001 · Discount 2% - Owners"], 277.66)
+
+    def test_hash_parser_falls_back_to_a_populated_custom_tab(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / "_custom_hash_fixture.xlsx"
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "XXXXXX Hash"
+        custom = workbook.create_sheet("Daily Special Items")
+        custom.append(["Sub-department Single Total"])
+        custom.append(["Date: ", "8/26/2026", "to", "8/26/2026"])
+        custom.append(["S-Dept.  ", 0, "to", 999999])
+        custom.append(["Tlz.:", 6, "to", 6])
+        custom.append(["Target: ", "RAL", "Report all"])
+        custom.append([None, None, "Sub-Department", None, None, None, None, "Qty", "Amount"])
+        custom.append([None, 23, "Refunded Discounts", None, None, None, 8, 6.96])
+        custom.append([None, 32, "PASS THROUGH DONATIONS", None, None, None, 5, 5.00])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            parsed = engine.parse_hash_sheet(workbook_path, date(2026, 8, 26))
+        finally:
+            try:
+                workbook_path.unlink()
+            except PermissionError:
+                pass
+
+        self.assertEqual(parsed, (6.96, 5.00, 0.0))
+
     def test_automatic_split_leaves_new_quickbooks_member_name_blank(self):
         from app.membership_payments import (
             build_membership_lines,

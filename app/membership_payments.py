@@ -33,7 +33,7 @@ PLAN_MAX_PERIODS = {
 PAYMENT_TYPES = {"Paid in full", "New plan", "Existing plan"}
 HANDLING_MODES = {"automatic", "manual"}
 HANDLING_CHOICES = {
-    "Split automatically": "automatic",
+    "Breakdown in app using the Ownership Payments sheet": "automatic",
     "Finish manually in QuickBooks": "manual",
 }
 PAYMENT_OPTIONS = {

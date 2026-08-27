@@ -1978,7 +1978,10 @@ if subscription_total > 0:
     st.markdown("### Member share payments")
     handling_choice = st.radio(
         "How should these payments be handled?",
-        options=["Split automatically", "Finish manually in QuickBooks"],
+        options=[
+            "Breakdown in app using the Ownership Payments sheet",
+            "Finish manually in QuickBooks",
+        ],
         horizontal=True,
         index=None,
         key=f"membership_handling_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
@@ -2271,8 +2274,8 @@ if coupon_bs_total > 0:
     coupon_handling_choice = st.radio(
         "How should Coupons Receivable be handled?",
         options=[
-            "Keep current process / finish in QuickBooks",
-            "Break down using Closeout Sheet",
+            "Breakdown in app using Closeout Sheet",
+            "Finish manually in QuickBooks",
         ],
         horizontal=True,
         index=None,
@@ -2282,7 +2285,7 @@ if coupon_bs_total > 0:
     if coupon_handling_choice is None:
         coupon_valid = False
         st.caption("Select how you want to handle Coupons Receivable before building the deposit.")
-    elif coupon_handling_choice == "Keep current process / finish in QuickBooks":
+    elif coupon_handling_choice == "Finish manually in QuickBooks":
         coupon_mode = "quickbooks"
         st.info(
             f"The existing process stays unchanged: ${coupon_bs_total:,.2f} will post to NCG Coupons. "

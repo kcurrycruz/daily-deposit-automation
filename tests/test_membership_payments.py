@@ -114,6 +114,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertNotIn("Run another deposit", dropdown_source)
 
     def test_coupon_closeout_ui_exposes_required_choice_and_fields(self):
+        import ast
         from pathlib import Path
 
         source = (
@@ -121,8 +122,8 @@ class MembershipPaymentTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         required_labels = (
             "How should Coupons Receivable be handled?",
-            "Keep current process / finish in QuickBooks",
-            "Break down using Closeout Sheet",
+            "Finish manually in QuickBooks",
+            "Breakdown in app using Closeout Sheet",
             "Closeout Sheet Coupon Actual Total",
             "NCG Coupons counted",
             "MFG Coupons counted",
@@ -130,6 +131,38 @@ class MembershipPaymentTests(unittest.TestCase):
         for label in required_labels:
             with self.subTest(label=label):
                 self.assertIn(label, source)
+
+        radio_options = {}
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute) or node.func.attr != "radio":
+                continue
+            if not node.args or not isinstance(node.args[0], ast.Constant):
+                continue
+            options_keyword = next(
+                (keyword for keyword in node.keywords if keyword.arg == "options"),
+                None,
+            )
+            if options_keyword and isinstance(options_keyword.value, ast.List):
+                radio_options[node.args[0].value] = [
+                    item.value for item in options_keyword.value.elts
+                ]
+
+        self.assertEqual(
+            radio_options["How should these payments be handled?"],
+            [
+                "Breakdown in app using the Ownership Payments sheet",
+                "Finish manually in QuickBooks",
+            ],
+        )
+        self.assertEqual(
+            radio_options["How should Coupons Receivable be handled?"],
+            [
+                "Breakdown in app using Closeout Sheet",
+                "Finish manually in QuickBooks",
+            ],
+        )
 
     def test_app_passes_coupon_closeout_values_to_engine(self):
         import ast
@@ -571,7 +604,12 @@ class MembershipPaymentTests(unittest.TestCase):
             self.fail(f"membership workflow choice mapping is missing: {exc}")
 
         self.assertIsNone(membership_mode_from_choice(None))
-        self.assertEqual(membership_mode_from_choice("Split automatically"), "automatic")
+        self.assertEqual(
+            membership_mode_from_choice(
+                "Breakdown in app using the Ownership Payments sheet"
+            ),
+            "automatic",
+        )
         self.assertEqual(
             membership_mode_from_choice("Finish manually in QuickBooks"),
             "manual",

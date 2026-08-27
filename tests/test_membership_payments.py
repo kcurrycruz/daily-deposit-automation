@@ -2,6 +2,18 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_coupon_counter_logic_uses_a_separate_deployment_module(self):
+        from pathlib import Path
+
+        repository_root = Path(__file__).resolve().parents[1]
+        counter_module = repository_root / "app" / "coupon_counter.py"
+        self.assertTrue(counter_module.is_file())
+
+        app_source = (repository_root / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("from app.coupon_counter import (", app_source)
+
     def test_coupon_counter_reference_workbook_is_packaged(self):
         from pathlib import Path
 
@@ -25,7 +37,7 @@ class MembershipPaymentTests(unittest.TestCase):
             workbook.close()
 
     def test_coupon_stacks_roll_reimbursed_categories_into_mfg(self):
-        from app.coupon_reconciliation import summarize_coupon_stacks
+        from app.coupon_counter import summarize_coupon_stacks
 
         summary = summarize_coupon_stacks([
             {
@@ -61,7 +73,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIsNone(summary["stacks"][1]["matches_expected"])
 
     def test_coupon_stack_reports_written_total_difference_and_rejects_bad_amounts(self):
-        from app.coupon_reconciliation import summarize_coupon_stacks
+        from app.coupon_counter import summarize_coupon_stacks
 
         summary = summarize_coupon_stacks([
             {
@@ -85,7 +97,7 @@ class MembershipPaymentTests(unittest.TestCase):
                     summarize_coupon_stacks([bad_stack])
 
     def test_coupon_stack_entries_can_be_added_and_removed_without_changing_other_stacks(self):
-        from app.coupon_reconciliation import (
+        from app.coupon_counter import (
             add_coupon_amount,
             remove_coupon_amount,
         )

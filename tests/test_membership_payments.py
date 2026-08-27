@@ -2,6 +2,40 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_automatic_split_rejects_a_member_missing_from_quickbooks(self):
+        from app.membership_payments import build_membership_lines
+
+        payment = {
+            "member_name": "Brand New Member",
+            "member_number": "",
+            "member_number_pending": True,
+            "quickbooks_member_exists": False,
+            "payment_type": "Paid in full",
+            "plan": "",
+            "amount": 100.00,
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Finish manually in QuickBooks",
+        ):
+            build_membership_lines([payment], handling_mode="automatic")
+
+    def test_member_payment_entry_requires_quickbooks_name_confirmation(self):
+        from app.membership_payments import membership_payment_from_entry
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Select Yes or No.*QuickBooks",
+        ):
+            membership_payment_from_entry(
+                member_name="Existing Member",
+                member_number_status="No",
+                member_number="",
+                payment_option="Paid in full — $100",
+                amount=100.00,
+            )
+
     def test_member_number_question_builds_assigned_and_pending_entries(self):
         try:
             from app.membership_payments import membership_payment_from_entry
@@ -12,6 +46,7 @@ class MembershipPaymentTests(unittest.TestCase):
             member_name="Assigned Member",
             member_number_status="Yes",
             member_number="12345",
+            quickbooks_member_exists=True,
             payment_option="Existing plan — 1 year",
             amount=8.45,
         )
@@ -19,6 +54,7 @@ class MembershipPaymentTests(unittest.TestCase):
             member_name="Pending Member",
             member_number_status="No",
             member_number="",
+            quickbooks_member_exists=True,
             payment_option="New plan — 3 year",
             amount=15.00,
         )

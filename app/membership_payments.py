@@ -59,16 +59,25 @@ def membership_payment_from_entry(
     member_name: str,
     member_number_status: str | None,
     member_number: str,
+    quickbooks_member_exists: bool | None = None,
     payment_option: str,
     amount: float,
     interest_periods: int | None = None,
 ) -> dict:
+    if quickbooks_member_exists is None:
+        raise ValueError("Select Yes or No for whether the member exists in QuickBooks")
+    if quickbooks_member_exists is not True:
+        raise ValueError(
+            "This member does not exist in QuickBooks. Select Finish manually in "
+            "QuickBooks before building the deposit."
+        )
     if member_number_status not in {"Yes", "No"}:
         raise ValueError("Select Yes or No for the member number question")
     payment = {
         "member_name": member_name,
         "member_number": member_number if member_number_status == "Yes" else "",
         "member_number_pending": member_number_status == "No",
+        "quickbooks_member_exists": True,
         "payment_option": payment_option,
         "amount": amount,
         "interest_periods": interest_periods,
@@ -394,6 +403,12 @@ def build_membership_lines(
             "class_name": "",
             "amount": float(manual_total),
         }]
+
+    if any(payment.get("quickbooks_member_exists") is False for payment in payments):
+        raise ValueError(
+            "A member name does not exist in QuickBooks. Select Finish manually in "
+            "QuickBooks before building the deposit."
+        )
 
     validated_payments = [_validate_payment(payment) for payment in payments]
     if expected_subscription_total is not None:

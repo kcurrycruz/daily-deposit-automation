@@ -2013,7 +2013,7 @@ if subscription_total > 0:
         entry_key = f"membership_entry_{entry_base_key}_{entry_version}"
         st.markdown("**Add a member payment**")
         entry_columns = st.columns(
-            [2.2, 2.0, 1.4, 1.1, 1.1],
+            [2.0, 1.7, 1.3, 1.3, 1.0, 1.1],
             vertical_alignment="bottom",
         )
         with entry_columns[0]:
@@ -2030,9 +2030,22 @@ if subscription_total > 0:
                 help="Enter the existing QuickBooks member name exactly as shown on the sheet.",
             )
 
+        with entry_columns[2]:
+            quickbooks_name_status = st.selectbox(
+                "In QuickBooks?",
+                options=["Select", "Yes", "No"],
+                key=f"{entry_key}_quickbooks_name_status",
+                help="Does this member name already exist in QuickBooks?",
+            )
+        quickbooks_member_exists = (
+            True if quickbooks_name_status == "Yes"
+            else False if quickbooks_name_status == "No"
+            else None
+        )
+
         member_number_status = None
         member_number = ""
-        with entry_columns[2]:
+        with entry_columns[3]:
             if payment_option == "Paid in full — $100":
                 st.text_input(
                     "Member #",
@@ -2069,7 +2082,7 @@ if subscription_total > 0:
                     elif member_number_status == "No":
                         st.caption("The QuickBooks memo will use #Pending.")
 
-        with entry_columns[3]:
+        with entry_columns[4]:
             if payment_option == "Paid in full — $100":
                 amount = st.number_input(
                     "Amount",
@@ -2087,12 +2100,20 @@ if subscription_total > 0:
                     format="%.2f",
                     key=f"{entry_key}_amount",
                 )
-        with entry_columns[4]:
+        with entry_columns[5]:
             add_payment_clicked = st.button(
                 "+ Add payment",
                 type="secondary",
                 use_container_width=True,
+                disabled=quickbooks_member_exists is False,
                 key=f"{entry_key}_add",
+            )
+
+        if quickbooks_member_exists is False:
+            st.error(
+                "This is a new QuickBooks name. Select **Finish manually in QuickBooks** "
+                "above before building the deposit.",
+                icon="🚫",
             )
 
         interest_periods = None
@@ -2111,6 +2132,7 @@ if subscription_total > 0:
                     member_name=member_name,
                     member_number_status=member_number_status,
                     member_number=member_number,
+                    quickbooks_member_exists=quickbooks_member_exists,
                     payment_option=payment_option,
                     amount=amount,
                     interest_periods=interest_periods,

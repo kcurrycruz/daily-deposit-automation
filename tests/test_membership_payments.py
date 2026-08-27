@@ -1222,6 +1222,76 @@ except RuntimeError:
         )
         self.assertNotIn("Over/Short per Closeout Sheet - Coupon", iif_text)
 
+    def test_iif_omits_empty_calculated_lines_but_keeps_manual_placeholders(self):
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_clean_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            empty_path = engine.generate_iif(
+                {}, {}, {}, date(2026, 8, 24),
+                bs_data={},
+            )
+            empty_text = empty_path.read_text(encoding="utf-8")
+            populated_path = engine.generate_iif(
+                {},
+                {
+                    "8511002 · Discount 8% - Senior Day": 8.00,
+                    "8512005 · Discount 8% - College Day": 4.00,
+                },
+                {},
+                date(2026, 8, 26),
+                bs_data={"donation": 5.00, "paid_out": 3.00},
+                paid_in_total=12.00,
+            )
+            populated_text = populated_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+        for conditional_text in (
+            "Sales - Frozen Foods",
+            "Discount 8% - Senior Day",
+            "Discount 8% - College Day",
+            "Outreach - Donations",
+            "PAID IN:",
+            "PAID OUT:",
+        ):
+            with self.subTest(conditional_text=conditional_text):
+                self.assertNotIn(conditional_text, empty_text)
+
+        for placeholder_text in (
+            "MFG Coupons",
+            "InHouse:",
+            "Over/Short per Closeout Sheet",
+            "Over/Short per POS (to = POS total)",
+        ):
+            with self.subTest(placeholder_text=placeholder_text):
+                self.assertIn(placeholder_text, empty_text)
+
+        for populated_line in (
+            "Discount 8% - Senior Day\t\t8.00\tPdOut -",
+            "Discount 8% - College Day\t\t4.00\tPdOut -",
+            "Outreach - Donations\t\t5.00\t",
+            "TBA Purchases\t\t-12.00\tPAID IN:",
+            "TBA Purchases\t\t3.00\tPAID OUT:",
+        ):
+            with self.subTest(populated_line=populated_line):
+                self.assertIn(populated_line, populated_text)
+
     def test_generate_iif_writes_coupon_closeout_breakdown_and_signed_difference(self):
         from datetime import date
         from pathlib import Path
@@ -1349,9 +1419,13 @@ except RuntimeError:
             "4444 · TBA Purchases\t\t44.07\tOffline Credit Card:"
         )
         self.assertIn(offline_line, negative_text)
-        self.assertGreater(
-            negative_text.index(offline_line),
-            negative_text.index("PAID OUT:"),
+        generated_splits = [
+            line for line in negative_text.splitlines()
+            if line.startswith("SPL\t")
+        ]
+        self.assertIn(
+            offline_line,
+            generated_splits[-1],
         )
 
     def test_parse_bs_maps_offline_credit_card_as_a_negative_unique_item(self):

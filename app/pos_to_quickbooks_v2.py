@@ -1049,6 +1049,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     def d(key):
         return abs(discounts[key]) if key in discounts else None
 
+    def has_amount(value):
+        return value is not None and value != 0
+
     lines = [
         "!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS",
         "!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS",
@@ -1101,14 +1104,15 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             amt = s(acct)
         else:
             amt = -(abs(sales[acct])) if acct in sales else None
-        if amt is not None:
-            spl_total += amt
+        if not has_amount(amt):
+            continue
+        spl_total += amt
         spls.append(spl(date_str, acct, "", amt, memo))
 
     bag_amt = -(abs(sales.get("4150300 · NYS Paper Bag Fees Payable", 0))) or None
-    if bag_amt:
+    if has_amount(bag_amt):
         spl_total += bag_amt
-    spls.append(spl(date_str, "4150300 · NYS Paper Bag Fees Payable", "", bag_amt, "NYS-Albany County Paper Bag Fees"))
+        spls.append(spl(date_str, "4150300 · NYS Paper Bag Fees Payable", "", bag_amt, "NYS-Albany County Paper Bag Fees"))
 
     if store_coupons_xl != 0.0:
         coupon_amt = abs(store_coupons_xl)
@@ -1116,9 +1120,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     else:
         raw_coupon = sales.get("8515000 · Marketing - Coupons, Store", 0)
         coupon_amt = abs(raw_coupon) if raw_coupon != 0 else None
-    if coupon_amt is not None:
+    if has_amount(coupon_amt):
         spl_total += coupon_amt
-    spls.append(spl(date_str, "8515000 · Marketing - Coupons, Store", "", coupon_amt, "Store Coupons"))
+        spls.append(spl(date_str, "8515000 · Marketing - Coupons, Store", "", coupon_amt, "Store Coupons"))
 
     DISCOUNT_ORDER = [
         ("8512006 · Discount 5% - Owner buy Local", "PdOut -"),
@@ -1148,8 +1152,9 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             amt = None
         else:
             amt = d(acct)
-        if amt is not None:
-            spl_total += amt
+        if not has_amount(amt):
+            continue
+        spl_total += amt
         spls.append(spl(date_str, acct, "", amt, memo))
 
     ebt_cash = bs_data.get("ebt_cash", 0.0)
@@ -1278,11 +1283,24 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
         class_name = entry[4] if len(entry) > 4 else ""
-        if amt is not None and amt != 0:
+        keep_blank_placeholder = (
+            memo == "MFG Coupons"
+            or (acct == "4444 · TBA Purchases" and memo in {"InHouse:", ""})
+            or (
+                acct == "8314000 · FE - Cash Over/Shorts"
+                and memo in {
+                    "Over/Short per Closeout Sheet",
+                    "Over/Short per POS (to = POS total)",
+                }
+            )
+        )
+        if has_amount(amt):
             iif_amt = -amt
             spl_total += iif_amt
-        else:
+        elif keep_blank_placeholder:
             iif_amt = None
+        else:
+            continue
         spls.append(spl(date_str, acct, name, iif_amt, memo, class_name))
 
     # Card settlement differences are posted at the bottom of the deposit.

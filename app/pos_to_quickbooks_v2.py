@@ -1253,15 +1253,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
         ("1250000 · Coupons Receivable", "", "NCG Coupons", coupon_ncg_source),
         ("1250000 · Coupons Receivable", "", "MFG Coupons", coupon_mfg_source),
-        *([
-            (
-                "8314000 · FE - Cash Over/Shorts",
-                "",
-                "Over/Short per Closeout Sheet - Coupon",
-                coupon_difference_source,
-                "Admin",
-            )
-        ] if coupon_mode == "closeout" else []),
         ("4444 · TBA Purchases", "", "InHouse:", -bs("charge") if bs("charge") else None),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
@@ -1294,13 +1285,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             iif_amt = None
         spls.append(spl(date_str, acct, name, iif_amt, memo, class_name))
 
-    if misc_tba_lines:
-        for memo, amount in misc_tba_lines:
-            iif_amt = -amount
-            spl_total += iif_amt
-            spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
-            log.info(f"    TBA Purchases: {memo} = ${amount:.2f}")
-
     # Card settlement differences are posted at the bottom of the deposit.
     # The desired QuickBooks display adjustment is Processed Net Amount - BS.
     # The IIF amount is inverted because QuickBooks flips the sign on deposit SPL lines.
@@ -1323,6 +1307,34 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             f"BS=${adjustment_row['bs']:,.2f} "
             f"Adjustment=${qb_adjustment:,.2f} → 8314000"
         )
+
+    # Keep the coupon closeout adjustment below other Cash Over/Short lines,
+    # while leaving all unique-account TBA lines as the final deposit entries.
+    if coupon_mode == "closeout":
+        iif_amt = (
+            -coupon_difference_source
+            if coupon_difference_source is not None
+            else None
+        )
+        if iif_amt is not None:
+            spl_total += iif_amt
+        spls.append(
+            spl(
+                date_str,
+                "8314000 · FE - Cash Over/Shorts",
+                "",
+                iif_amt,
+                "Over/Short per Closeout Sheet - Coupon",
+                "Admin",
+            )
+        )
+
+    if misc_tba_lines:
+        for memo, amount in misc_tba_lines:
+            iif_amt = -amount
+            spl_total += iif_amt
+            spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
+            log.info(f"    TBA Purchases: {memo} = ${amount:.2f}")
 
     # Offline Credit Card is a unique BS item. Keep it separate from gift cards
     # and place it at the bottom as a negative QuickBooks TBA line.

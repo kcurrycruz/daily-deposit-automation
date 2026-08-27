@@ -1240,7 +1240,13 @@ except RuntimeError:
             try:
                 positive_path = engine.generate_iif(
                     {}, {}, {}, date(2026, 8, 26),
-                    bs_data={"vendor_coupon": 181.50},
+                    bs_data={
+                        "vendor_coupon": 181.50,
+                        "visa_mc": 100.00,
+                        "offline_credit_card": -44.07,
+                    },
+                    misc_tba_lines=[("Unique unmapped account", 12.34)],
+                    settlement_data={"visa_mc": 101.00},
                     coupon_mode="closeout",
                     coupon_closeout_total=188.25,
                     coupon_ncg_total=152.25,
@@ -1284,6 +1290,17 @@ except RuntimeError:
             "Over/Short per Closeout Sheet - Coupon\tAdmin",
             negative_text,
         )
+        card_adjustment_position = positive_text.index(
+            "VISA/MC - Difference between First Data vs BS"
+        )
+        coupon_adjustment_position = positive_text.index(
+            "Over/Short per Closeout Sheet - Coupon"
+        )
+        unique_tba_position = positive_text.index("Unique unmapped account")
+        offline_tba_position = positive_text.index("Offline Credit Card:")
+        self.assertLess(card_adjustment_position, coupon_adjustment_position)
+        self.assertLess(coupon_adjustment_position, unique_tba_position)
+        self.assertLess(unique_tba_position, offline_tba_position)
 
     def test_bs_penny_sign_is_preserved_and_offline_credit_is_bottom_tba(self):
         from datetime import date

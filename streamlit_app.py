@@ -1961,15 +1961,15 @@ if subscription_total > 0:
         )
     else:
         st.caption(
-            "Enter each payment below. For a brand-new member whose name does not exist in QuickBooks, "
-            "choose Finish manually in QuickBooks instead."
+            "Enter each payment below. Existing members must use the exact name shown in QuickBooks. "
+            "For a new member, leave the QuickBooks name blank and assign it after import."
         )
         st.info(
             "**Use the Ownership Payments sheet**\n\n"
             "Before splitting automatically, use the Ownership Payments sheet to find "
-            "the member's name, member number (or select Member # pending when the sheet "
-            "says \"New\"), plan type (1, 3, or 5 year), and amount paid. Enter those "
-            "details below exactly as shown on the sheet.",
+            "the member, member number (or select Member # pending when the sheet "
+            "says \"New\"), plan type (1, 3, or 5 year), and amount paid. For an "
+            "existing member, use the name exactly as it appears in QuickBooks.",
             icon="📄",
         )
         st.caption("Deposits are interest-free; installment payments include interest.")
@@ -2013,7 +2013,7 @@ if subscription_total > 0:
         entry_key = f"membership_entry_{entry_base_key}_{entry_version}"
         st.markdown("**Add a member payment**")
         entry_columns = st.columns(
-            [2.0, 1.7, 1.3, 1.3, 1.0, 1.1],
+            [2.2, 2.0, 1.4, 1.1, 1.1],
             vertical_alignment="bottom",
         )
         with entry_columns[0]:
@@ -2024,19 +2024,43 @@ if subscription_total > 0:
                 help="Paid in full has no plan selection because the share is fully paid.",
             )
         with entry_columns[1]:
-            member_name = st.text_input(
-                "Member Name",
-                key=f"{entry_key}_member_name",
-                help="Enter the existing QuickBooks member name exactly as shown on the sheet.",
-            )
-
-        with entry_columns[2]:
-            quickbooks_name_status = st.selectbox(
-                "In QuickBooks?",
-                options=["Select", "Yes", "No"],
-                key=f"{entry_key}_quickbooks_name_status",
-                help="Does this member name already exist in QuickBooks?",
-            )
+            quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
+            quickbooks_name_key = f"{entry_key}_member_name"
+            quickbooks_name_status = st.session_state.get(quickbooks_status_key)
+            saved_quickbooks_name = str(
+                st.session_state.get(quickbooks_name_key) or ""
+            ).strip()
+            if quickbooks_name_status == "No":
+                member_name_label = "Member Name: New"
+            elif quickbooks_name_status == "Yes" and saved_quickbooks_name:
+                member_name_label = "Member Name: Set"
+            else:
+                member_name_label = "Member Name"
+            with st.popover(member_name_label, use_container_width=True):
+                quickbooks_name_status = st.radio(
+                    "Does this member already exist in QuickBooks?",
+                    options=["Yes", "No"],
+                    index=None,
+                    horizontal=True,
+                    key=quickbooks_status_key,
+                )
+                if quickbooks_name_status == "Yes":
+                    member_name = st.text_input(
+                        "Enter the exact QuickBooks member name",
+                        key=quickbooks_name_key,
+                    )
+                    st.caption(
+                        "Use the name exactly as it appears in QuickBooks. For example, "
+                        "the sheet may say Karl Cruz while QuickBooks says Karl Chester Cruz."
+                    )
+                elif quickbooks_name_status == "No":
+                    member_name = ""
+                    st.caption(
+                        "Name entry is disabled. The QuickBooks NAME field will stay blank "
+                        "so the new member can be assigned after import."
+                    )
+                else:
+                    member_name = ""
         quickbooks_member_exists = (
             True if quickbooks_name_status == "Yes"
             else False if quickbooks_name_status == "No"
@@ -2045,7 +2069,7 @@ if subscription_total > 0:
 
         member_number_status = None
         member_number = ""
-        with entry_columns[3]:
+        with entry_columns[2]:
             if payment_option == "Paid in full — $100":
                 st.text_input(
                     "Member #",
@@ -2082,7 +2106,7 @@ if subscription_total > 0:
                     elif member_number_status == "No":
                         st.caption("The QuickBooks memo will use #Pending.")
 
-        with entry_columns[4]:
+        with entry_columns[3]:
             if payment_option == "Paid in full — $100":
                 amount = st.number_input(
                     "Amount",
@@ -2100,20 +2124,12 @@ if subscription_total > 0:
                     format="%.2f",
                     key=f"{entry_key}_amount",
                 )
-        with entry_columns[5]:
+        with entry_columns[4]:
             add_payment_clicked = st.button(
                 "+ Add payment",
                 type="secondary",
                 use_container_width=True,
-                disabled=quickbooks_member_exists is False,
                 key=f"{entry_key}_add",
-            )
-
-        if quickbooks_member_exists is False:
-            st.error(
-                "This is a new QuickBooks name. Select **Finish manually in QuickBooks** "
-                "above before building the deposit.",
-                icon="🚫",
             )
 
         interest_periods = None
@@ -2167,7 +2183,9 @@ if subscription_total > 0:
                     else payment.get("member_number", "")
                 )
             payment_columns = st.columns([2.2, 1.2, 2.0, 1.0, 0.8])
-            payment_columns[0].write(payment["member_name"])
+            payment_columns[0].write(
+                payment["member_name"] or "New member — assign in QuickBooks"
+            )
             payment_columns[1].write(saved_number)
             payment_columns[2].write(saved_option)
             payment_columns[3].write(f"${float(payment['amount']):,.2f}")

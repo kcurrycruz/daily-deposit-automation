@@ -2,24 +2,27 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
-    def test_automatic_split_rejects_a_member_missing_from_quickbooks(self):
-        from app.membership_payments import build_membership_lines
+    def test_automatic_split_leaves_new_quickbooks_member_name_blank(self):
+        from app.membership_payments import (
+            build_membership_lines,
+            membership_payment_from_entry,
+        )
 
-        payment = {
-            "member_name": "Brand New Member",
-            "member_number": "",
-            "member_number_pending": True,
-            "quickbooks_member_exists": False,
-            "payment_type": "Paid in full",
-            "plan": "",
-            "amount": 100.00,
-        }
+        try:
+            payment = membership_payment_from_entry(
+                member_name="This typed value must be ignored",
+                member_number_status="No",
+                member_number="",
+                quickbooks_member_exists=False,
+                payment_option="Paid in full — $100",
+                amount=100.00,
+            )
+            lines = build_membership_lines([payment], handling_mode="automatic")
+        except ValueError as exc:
+            self.fail(f"new QuickBooks member was rejected: {exc}")
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "Finish manually in QuickBooks",
-        ):
-            build_membership_lines([payment], handling_mode="automatic")
+        self.assertEqual(payment["member_name"], "")
+        self.assertEqual(lines[0]["name"], "")
 
     def test_member_payment_entry_requires_quickbooks_name_confirmation(self):
         from app.membership_payments import membership_payment_from_entry

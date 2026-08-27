@@ -66,18 +66,13 @@ def membership_payment_from_entry(
 ) -> dict:
     if quickbooks_member_exists is None:
         raise ValueError("Select Yes or No for whether the member exists in QuickBooks")
-    if quickbooks_member_exists is not True:
-        raise ValueError(
-            "This member does not exist in QuickBooks. Select Finish manually in "
-            "QuickBooks before building the deposit."
-        )
     if member_number_status not in {"Yes", "No"}:
         raise ValueError("Select Yes or No for the member number question")
     payment = {
-        "member_name": member_name,
+        "member_name": member_name if quickbooks_member_exists else "",
         "member_number": member_number if member_number_status == "Yes" else "",
         "member_number_pending": member_number_status == "No",
-        "quickbooks_member_exists": True,
+        "quickbooks_member_exists": quickbooks_member_exists,
         "payment_option": payment_option,
         "amount": amount,
         "interest_periods": interest_periods,
@@ -296,12 +291,16 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
 
 
 def _validate_payment(payment: dict) -> dict:
-    raw_member_name = str(payment.get("member_name") or "")
-    if any(delimiter in raw_member_name for delimiter in ("\t", "\r", "\n")):
-        raise ValueError("Member name cannot contain tabs or line breaks")
-    member_name = raw_member_name.strip()
-    if not member_name:
-        raise ValueError("Member name is required")
+    quickbooks_member_exists = payment.get("quickbooks_member_exists", True) is not False
+    if quickbooks_member_exists:
+        raw_member_name = str(payment.get("member_name") or "")
+        if any(delimiter in raw_member_name for delimiter in ("\t", "\r", "\n")):
+            raise ValueError("Member name cannot contain tabs or line breaks")
+        member_name = raw_member_name.strip()
+        if not member_name:
+            raise ValueError("Member name is required")
+    else:
+        member_name = ""
 
     payment_type = str(payment.get("payment_type") or "").strip()
     if payment_type not in PAYMENT_TYPES:
@@ -403,12 +402,6 @@ def build_membership_lines(
             "class_name": "",
             "amount": float(manual_total),
         }]
-
-    if any(payment.get("quickbooks_member_exists") is False for payment in payments):
-        raise ValueError(
-            "A member name does not exist in QuickBooks. Select Finish manually in "
-            "QuickBooks before building the deposit."
-        )
 
     validated_payments = [_validate_payment(payment) for payment in payments]
     if expected_subscription_total is not None:

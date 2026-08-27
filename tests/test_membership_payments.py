@@ -2,18 +2,6 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
-    def test_coupon_counter_logic_uses_a_separate_deployment_module(self):
-        from pathlib import Path
-
-        repository_root = Path(__file__).resolve().parents[1]
-        counter_module = repository_root / "app" / "coupon_counter.py"
-        self.assertTrue(counter_module.is_file())
-
-        app_source = (repository_root / "streamlit_app.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("from app.coupon_counter import (", app_source)
-
     def test_coupon_counter_reference_workbook_is_packaged(self):
         from pathlib import Path
 
@@ -35,84 +23,6 @@ class MembershipPaymentTests(unittest.TestCase):
             )
         finally:
             workbook.close()
-
-    def test_coupon_stacks_roll_reimbursed_categories_into_mfg(self):
-        from app.coupon_counter import summarize_coupon_stacks
-
-        summary = summarize_coupon_stacks([
-            {
-                "id": "ncg-1",
-                "category": "NCG",
-                "label": "Labeled stack",
-                "expected_total": 10.00,
-                "amounts": [0.25, 0.50, 1.25, 3.00, 5.00],
-            },
-            {
-                "id": "mfg-1",
-                "category": "MFG",
-                "label": "Unlabeled stack",
-                "expected_total": None,
-                "amounts": [4.99, 5.99],
-            },
-            {"id": "vp-1", "category": "VP", "amounts": [2.00]},
-            {"id": "mktg-1", "category": "MKTG", "amounts": [3.00]},
-            {"id": "sitka-1", "category": "SITKA", "amounts": [4.00]},
-        ])
-
-        self.assertEqual(summary["category_totals"], {
-            "NCG": 10.00,
-            "MFG": 10.98,
-            "VP": 2.00,
-            "MKTG": 3.00,
-            "SITKA": 4.00,
-        })
-        self.assertEqual(summary["ncg_total"], 10.00)
-        self.assertEqual(summary["mfg_total"], 19.98)
-        self.assertEqual(summary["overall_total"], 29.98)
-        self.assertTrue(summary["stacks"][0]["matches_expected"])
-        self.assertIsNone(summary["stacks"][1]["matches_expected"])
-
-    def test_coupon_stack_reports_written_total_difference_and_rejects_bad_amounts(self):
-        from app.coupon_counter import summarize_coupon_stacks
-
-        summary = summarize_coupon_stacks([
-            {
-                "id": "mfg-1",
-                "category": "MFG",
-                "expected_total": 10.00,
-                "amounts": [4.99, 5.00],
-            }
-        ])
-        self.assertEqual(summary["stacks"][0]["subtotal"], 9.99)
-        self.assertEqual(summary["stacks"][0]["difference"], -0.01)
-        self.assertFalse(summary["stacks"][0]["matches_expected"])
-
-        for bad_stack in (
-            {"category": "OTHER", "amounts": [1.00]},
-            {"category": "NCG", "amounts": [0]},
-            {"category": "MFG", "amounts": [-1]},
-        ):
-            with self.subTest(bad_stack=bad_stack):
-                with self.assertRaises(ValueError):
-                    summarize_coupon_stacks([bad_stack])
-
-    def test_coupon_stack_entries_can_be_added_and_removed_without_changing_other_stacks(self):
-        from app.coupon_counter import (
-            add_coupon_amount,
-            remove_coupon_amount,
-        )
-
-        stacks = [
-            {"id": "ncg-1", "category": "NCG", "amounts": [0.25]},
-            {"id": "mfg-1", "category": "MFG", "amounts": [4.99]},
-        ]
-        added = add_coupon_amount(stacks, "mfg-1", 5.99)
-        self.assertEqual(added[1]["amounts"], [4.99, 5.99])
-        self.assertEqual(added[0]["amounts"], [0.25])
-
-        removed = remove_coupon_amount(added, "mfg-1", 0)
-        self.assertEqual(removed[1]["amounts"], [5.99])
-        self.assertEqual(stacks[1]["amounts"], [4.99])
 
     def test_coupon_reconciliation_keeps_legacy_bs_process(self):
         try:
@@ -225,7 +135,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertNotIn("Download QuickBooks IIF", dropdown_source)
         self.assertNotIn("Run another deposit", dropdown_source)
 
-    def test_coupon_closeout_ui_exposes_required_choice_and_fields(self):
+    def test_coupon_closeout_ui_uses_direct_totals_without_stack_controls(self):
         import ast
         from pathlib import Path
 
@@ -239,19 +149,22 @@ class MembershipPaymentTests(unittest.TestCase):
             "Closeout Sheet Coupon Actual Total",
             "NCG Coupons counted",
             "MFG Coupons counted",
-            "How would you like to enter coupon counts?",
-            "Count coupon stacks in app",
-            "Enter totals directly",
-            "Add a stack",
-            "Written stack total (optional)",
-            "Add coupon",
-            "NCG quick amounts",
-            "MFG + VP + MKTG + SITKA",
             "Download Excel coupon counter",
         )
         for label in required_labels:
             with self.subTest(label=label):
                 self.assertIn(label, source)
+
+        for removed_control in (
+            "How would you like to enter coupon counts?",
+            "Count coupon stacks in app",
+            "Add a stack",
+            "Written stack total (optional)",
+            "NCG quick amounts",
+            "MFG + VP + MKTG + SITKA",
+        ):
+            with self.subTest(removed_control=removed_control):
+                self.assertNotIn(removed_control, source)
 
         radio_options = {}
         for node in ast.walk(ast.parse(source)):

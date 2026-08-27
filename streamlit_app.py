@@ -29,18 +29,10 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
 
-from app.coupon_counter import (
-    COUPON_CATEGORIES,
-    NCG_DENOMINATIONS,
-    add_coupon_amount,
-    remove_coupon_amount,
-    summarize_coupon_stacks,
-)
 from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
@@ -2303,8 +2295,7 @@ if coupon_bs_total > 0:
     else:
         coupon_mode = "closeout"
         st.caption(
-            "Count coupon stacks in the app or enter the final totals directly. "
-            "NCG remains separate; MFG combines MFG, VP, MKTG, and SITKA."
+            "Use the Excel coupon counter if needed, then enter the final NCG and MFG totals below."
         )
         coupon_reference_path = Path(__file__).parent / "assets" / "NCG-MFG Coupon Counter.xlsx"
         if coupon_reference_path.exists():
@@ -2325,219 +2316,25 @@ if coupon_bs_total > 0:
             key=f"coupon_closeout_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
 
-        coupon_entry_method = st.radio(
-            "How would you like to enter coupon counts?",
-            options=["Count coupon stacks in app", "Enter totals directly"],
-            horizontal=True,
-            key=f"coupon_entry_method_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        direct_columns = st.columns(2)
+        coupon_ncg_total = direct_columns[0].number_input(
+            "NCG Coupons counted",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"coupon_ncg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
-
-        coupon_counts_supplied = True
-        if coupon_entry_method == "Enter totals directly":
-            direct_columns = st.columns(2)
-            coupon_ncg_total = direct_columns[0].number_input(
-                "NCG Coupons counted",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f",
-                key=f"coupon_ncg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
-            )
-            coupon_mfg_total = direct_columns[1].number_input(
-                "MFG Coupons counted",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f",
-                help="Enter the combined MFG + VP + MKTG + SITKA total.",
-                key=f"coupon_mfg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
-            )
-            st.caption("MFG + VP + MKTG + SITKA are combined into the MFG QuickBooks line.")
-        else:
-            coupon_editor_key = membership_editor_key(
-                upload_bytes,
-                st.session_state["file_uploader_key"],
-            )
-            coupon_stacks_key = f"coupon_stacks_{coupon_editor_key}"
-            if coupon_stacks_key not in st.session_state:
-                st.session_state[coupon_stacks_key] = []
-
-            stack_toolbar = st.columns([2, 1])
-            new_stack_category = stack_toolbar[0].selectbox(
-                "Coupon category",
-                options=list(COUPON_CATEGORIES),
-                key=f"new_coupon_stack_category_{coupon_editor_key}",
-            )
-            if stack_toolbar[1].button(
-                "Add a stack",
-                key=f"add_coupon_stack_{coupon_editor_key}",
-                use_container_width=True,
-            ):
-                st.session_state[coupon_stacks_key].append({
-                    "id": uuid4().hex,
-                    "category": new_stack_category,
-                    "label": "",
-                    "expected_total": None,
-                    "amounts": [],
-                })
-                st.rerun()
-
-            stacks = st.session_state[coupon_stacks_key]
-            initial_summary = summarize_coupon_stacks(stacks)
-            for category in COUPON_CATEGORIES:
-                category_stacks = [
-                    stack for stack in stacks if stack.get("category") == category
-                ]
-                if not category_stacks:
-                    continue
-                st.markdown(
-                    f"#### {category} — ${initial_summary['category_totals'][category]:,.2f}"
-                )
-                for category_position, stack in enumerate(category_stacks, start=1):
-                    stack_id = stack["id"]
-                    current_stack = next(
-                        item for item in initial_summary["stacks"]
-                        if item["id"] == stack_id
-                    )
-                    stack_title = stack.get("label") or f"Stack {category_position}"
-                    with st.expander(
-                        f"{stack_title} — ${current_stack['subtotal']:,.2f}",
-                        expanded=True,
-                    ):
-                        stack_meta_columns = st.columns([2, 1, 0.8])
-                        stack["label"] = stack_meta_columns[0].text_input(
-                            "Stack label (optional)",
-                            value=stack.get("label", ""),
-                            key=f"coupon_stack_label_{stack_id}",
-                        )
-                        written_total = stack_meta_columns[1].number_input(
-                            "Written stack total (optional)",
-                            min_value=0.0,
-                            value=float(stack.get("expected_total") or 0.0),
-                            step=0.01,
-                            format="%.2f",
-                            key=f"coupon_stack_expected_{stack_id}",
-                        )
-                        stack["expected_total"] = written_total or None
-                        if stack_meta_columns[2].button(
-                            "Remove stack",
-                            key=f"remove_coupon_stack_{stack_id}",
-                        ):
-                            st.session_state[coupon_stacks_key] = [
-                                item for item in stacks if item.get("id") != stack_id
-                            ]
-                            st.rerun()
-
-                        if category == "NCG":
-                            st.caption("NCG quick amounts")
-                            for row_start in range(0, len(NCG_DENOMINATIONS), 5):
-                                denomination_columns = st.columns(5)
-                                for denomination_column, denomination in zip(
-                                    denomination_columns,
-                                    NCG_DENOMINATIONS[row_start:row_start + 5],
-                                ):
-                                    if denomination_column.button(
-                                        f"${denomination:.2f}",
-                                        key=f"add_ncg_{stack_id}_{denomination:.2f}",
-                                        use_container_width=True,
-                                    ):
-                                        st.session_state[coupon_stacks_key] = add_coupon_amount(
-                                            stacks,
-                                            stack_id,
-                                            denomination,
-                                        )
-                                        st.rerun()
-
-                        coupon_input_columns = st.columns([2, 1])
-                        coupon_amount_label = (
-                            "Custom coupon amount"
-                            if category == "NCG"
-                            else "Coupon amount"
-                        )
-                        coupon_amount = coupon_input_columns[0].number_input(
-                            coupon_amount_label,
-                            min_value=0.0,
-                            step=0.01,
-                            format="%.2f",
-                            key=f"coupon_amount_{stack_id}",
-                        )
-                        if coupon_input_columns[1].button(
-                            "Add coupon",
-                            key=f"add_coupon_amount_{stack_id}",
-                            use_container_width=True,
-                            disabled=coupon_amount <= 0,
-                        ):
-                            st.session_state[coupon_stacks_key] = add_coupon_amount(
-                                stacks,
-                                stack_id,
-                                coupon_amount,
-                            )
-                            st.rerun()
-
-                        for coupon_position, amount in enumerate(
-                            stack.get("amounts", []),
-                            start=1,
-                        ):
-                            coupon_row = st.columns([1, 2, 0.8])
-                            coupon_row[0].write(f"Coupon {coupon_position}")
-                            coupon_row[1].write(f"${float(amount):,.2f}")
-                            if coupon_row[2].button(
-                                "Remove",
-                                key=f"remove_coupon_{stack_id}_{coupon_position - 1}",
-                            ):
-                                st.session_state[coupon_stacks_key] = remove_coupon_amount(
-                                    stacks,
-                                    stack_id,
-                                    coupon_position - 1,
-                                )
-                                st.rerun()
-
-                        refreshed_stack = next(
-                            item for item in summarize_coupon_stacks(stacks)["stacks"]
-                            if item["id"] == stack_id
-                        )
-                        if refreshed_stack["matches_expected"] is True:
-                            st.success(
-                                f"Stack matches the written total: ${refreshed_stack['subtotal']:,.2f}.",
-                                icon="✅",
-                            )
-                        elif refreshed_stack["matches_expected"] is False:
-                            st.warning(
-                                f"Stack count differs from the written total by "
-                                f"{refreshed_stack['difference']:+,.2f}.",
-                                icon="⚠️",
-                            )
-
-            coupon_stack_summary = summarize_coupon_stacks(stacks)
-            category_metric_columns = st.columns(5)
-            for metric_column, category in zip(category_metric_columns, COUPON_CATEGORIES):
-                metric_column.metric(
-                    category,
-                    f"${coupon_stack_summary['category_totals'][category]:,.2f}",
-                )
-            quickbooks_columns = st.columns(3)
-            quickbooks_columns[0].metric(
-                "QuickBooks NCG",
-                f"${coupon_stack_summary['ncg_total']:,.2f}",
-            )
-            quickbooks_columns[1].metric(
-                "QuickBooks MFG combined",
-                f"${coupon_stack_summary['mfg_total']:,.2f}",
-            )
-            quickbooks_columns[2].metric(
-                "Overall counted",
-                f"${coupon_stack_summary['overall_total']:,.2f}",
-            )
-            coupon_ncg_total = coupon_stack_summary["ncg_total"]
-            coupon_mfg_total = coupon_stack_summary["mfg_total"]
-            coupon_counts_supplied = any(
-                stack.get("amounts") for stack in stacks
-            )
+        coupon_mfg_total = direct_columns[1].number_input(
+            "MFG Coupons counted",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"coupon_mfg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        )
 
         if coupon_closeout_total <= 0:
             coupon_valid = False
             st.caption("Enter the Closeout Sheet Coupon Actual Total.")
-        elif not coupon_counts_supplied:
-            coupon_valid = False
-            st.caption("Add coupon counts before building the deposit.")
         else:
             try:
                 coupon_preview = reconcile_coupon_receivable(

@@ -2,6 +2,87 @@ import unittest
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_coupon_reconciliation_keeps_legacy_bs_process(self):
+        try:
+            from app.coupon_reconciliation import reconcile_coupon_receivable
+        except ImportError as exc:
+            self.fail(f"coupon reconciliation module is missing: {exc}")
+
+        self.assertEqual(
+            reconcile_coupon_receivable(181.50, mode="quickbooks"),
+            {
+                "bs_total": 181.50,
+                "closeout_actual_total": None,
+                "ncg_total": 181.50,
+                "mfg_total": None,
+                "difference": None,
+            },
+        )
+
+    def test_coupon_reconciliation_builds_signed_closeout_differences(self):
+        try:
+            from app.coupon_reconciliation import reconcile_coupon_receivable
+        except ImportError as exc:
+            self.fail(f"coupon reconciliation module is missing: {exc}")
+
+        cases = [
+            (188.25, 152.25, 36.00, 6.75),
+            (175.00, 150.00, 25.00, -6.50),
+        ]
+        for closeout, ncg, mfg, expected_difference in cases:
+            with self.subTest(closeout=closeout):
+                result = reconcile_coupon_receivable(
+                    181.50,
+                    mode="closeout",
+                    closeout_actual_total=closeout,
+                    ncg_total=ncg,
+                    mfg_total=mfg,
+                )
+                self.assertEqual(result["difference"], expected_difference)
+                self.assertEqual(result["ncg_total"], ncg)
+                self.assertEqual(result["mfg_total"], mfg)
+
+    def test_coupon_reconciliation_requires_counts_to_match_closeout_actual(self):
+        try:
+            from app.coupon_reconciliation import reconcile_coupon_receivable
+        except ImportError as exc:
+            self.fail(f"coupon reconciliation module is missing: {exc}")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "NCG Coupons.*MFG Coupons.*Closeout Sheet Coupon Actual Total",
+        ):
+            reconcile_coupon_receivable(
+                181.50,
+                mode="closeout",
+                closeout_actual_total=188.25,
+                ncg_total=150.00,
+                mfg_total=36.00,
+            )
+
+    def test_coupon_receivable_total_is_read_from_bs_code_908(self):
+        from io import BytesIO
+
+        import openpyxl
+
+        try:
+            from app.coupon_reconciliation import read_coupon_receivable_total
+        except ImportError as exc:
+            self.fail(f"coupon BS reader is missing: {exc}")
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "082626 BS"
+        sheet.append([908, "Dwr Vendor coupon", None, None, -181.50])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        self.assertEqual(
+            read_coupon_receivable_total(output.getvalue(), "082626 BS"),
+            181.50,
+        )
+
     def test_result_actions_stay_outside_more_information_dropdown(self):
         import ast
         from pathlib import Path
@@ -31,6 +112,45 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn("st.tabs", dropdown_source)
         self.assertNotIn("Download QuickBooks IIF", dropdown_source)
         self.assertNotIn("Run another deposit", dropdown_source)
+
+    def test_coupon_closeout_ui_exposes_required_choice_and_fields(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+        required_labels = (
+            "How should Coupons Receivable be handled?",
+            "Keep current process / finish in QuickBooks",
+            "Break down using Closeout Sheet",
+            "Closeout Sheet Coupon Actual Total",
+            "NCG Coupons counted",
+            "MFG Coupons counted",
+        )
+        for label in required_labels:
+            with self.subTest(label=label):
+                self.assertIn(label, source)
+
+    def test_app_passes_coupon_closeout_values_to_engine(self):
+        import ast
+        from pathlib import Path
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        run_engine_node = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "run_engine"
+        )
+        run_engine_source = ast.unparse(run_engine_node)
+        for flag in (
+            "--coupon-mode",
+            "--coupon-closeout-total",
+            "--coupon-ncg-total",
+            "--coupon-mfg-total",
+        ):
+            with self.subTest(flag=flag):
+                self.assertIn(flag, run_engine_source)
 
     def test_workbook_validation_ignores_xxxxxx_discount_and_hash_tabs(self):
         import ast
@@ -1024,6 +1144,107 @@ except RuntimeError:
             "SPL\tDEPOSIT\t08/24/2026\t9104000 · Interest Income\t"
             "Tara Caruso\t-0.27\tShare Installments - Paid #22206\tAdmin",
             iif_text,
+        )
+
+    def test_generate_iif_keeps_legacy_coupon_receivable_process(self):
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_legacy_coupon_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            iif_path = engine.generate_iif(
+                {}, {}, {}, date(2026, 8, 26),
+                bs_data={"vendor_coupon": 181.50},
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+        self.assertIn(
+            "1250000 · Coupons Receivable\t\t181.50\tNCG Coupons",
+            iif_text,
+        )
+        self.assertIn(
+            "1250000 · Coupons Receivable\t\t\tMFG Coupons",
+            iif_text,
+        )
+        self.assertNotIn("Over/Short per Closeout Sheet - Coupon", iif_text)
+
+    def test_generate_iif_writes_coupon_closeout_breakdown_and_signed_difference(self):
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_coupon_closeout_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            try:
+                positive_path = engine.generate_iif(
+                    {}, {}, {}, date(2026, 8, 26),
+                    bs_data={"vendor_coupon": 181.50},
+                    coupon_mode="closeout",
+                    coupon_closeout_total=188.25,
+                    coupon_ncg_total=152.25,
+                    coupon_mfg_total=36.00,
+                )
+                positive_text = positive_path.read_text(encoding="utf-8")
+                negative_path = engine.generate_iif(
+                    {}, {}, {}, date(2026, 8, 27),
+                    bs_data={"vendor_coupon": 181.50},
+                    coupon_mode="closeout",
+                    coupon_closeout_total=175.00,
+                    coupon_ncg_total=150.00,
+                    coupon_mfg_total=25.00,
+                )
+                negative_text = negative_path.read_text(encoding="utf-8")
+            except TypeError as exc:
+                self.fail(f"coupon closeout IIF integration is missing: {exc}")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+        self.assertIn(
+            "1250000 · Coupons Receivable\t\t152.25\tNCG Coupons",
+            positive_text,
+        )
+        self.assertIn(
+            "1250000 · Coupons Receivable\t\t36.00\tMFG Coupons",
+            positive_text,
+        )
+        self.assertIn(
+            "8314000 · FE - Cash Over/Shorts\t\t-6.75\t"
+            "Over/Short per Closeout Sheet - Coupon\tAdmin",
+            positive_text,
+        )
+        self.assertIn(
+            "8314000 · FE - Cash Over/Shorts\t\t6.50\t"
+            "Over/Short per Closeout Sheet - Coupon\tAdmin",
+            negative_text,
         )
 
     def test_bs_penny_sign_is_preserved_and_offline_credit_is_bottom_tba(self):

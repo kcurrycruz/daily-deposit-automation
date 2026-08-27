@@ -33,6 +33,10 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+from app.coupon_reconciliation import (
+    read_coupon_receivable_total,
+    reconcile_coupon_receivable,
+)
 from app.membership_payments import (
     PAYMENT_OPTIONS,
     build_membership_lines,
@@ -1272,6 +1276,10 @@ def run_engine(
     deposit_date: date,
     membership_payments: list[dict],
     membership_mode: str,
+    coupon_mode: str,
+    coupon_closeout_total: float | None,
+    coupon_ncg_total: float | None,
+    coupon_mfg_total: float | None,
 ) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
@@ -1309,7 +1317,18 @@ def run_engine(
         str(membership_path),
         "--membership-mode",
         membership_mode,
+        "--coupon-mode",
+        coupon_mode,
     ]
+    if coupon_mode == "closeout":
+        cmd.extend([
+            "--coupon-closeout-total",
+            f"{coupon_closeout_total:.2f}",
+            "--coupon-ncg-total",
+            f"{coupon_ncg_total:.2f}",
+            "--coupon-mfg-total",
+            f"{coupon_mfg_total:.2f}",
+        ])
 
     try:
         proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
@@ -1928,6 +1947,12 @@ subscription_total = 0.0
 membership_payments: list[dict] = []
 membership_valid = True
 membership_mode = "automatic"
+coupon_bs_total = 0.0
+coupon_valid = True
+coupon_mode = "quickbooks"
+coupon_closeout_total = None
+coupon_ncg_total = None
+coupon_mfg_total = None
 
 if uploaded:
     try:
@@ -1935,6 +1960,11 @@ if uploaded:
     except Exception as exc:
         membership_valid = False
         st.error(f"Could not read Subscription Revenue from the Balance Sheet: {exc}", icon="🚫")
+    try:
+        coupon_bs_total = read_coupon_receivable_total(upload_bytes, roles.get("bs"))
+    except Exception as exc:
+        coupon_valid = False
+        st.error(f"Could not read Coupons Receivable from the Balance Sheet: {exc}", icon="🚫")
 
 if uploaded and membership_valid:
     subscription_status = subscription_action_status(subscription_total)
@@ -2235,6 +2265,76 @@ if subscription_total > 0:
             membership_valid = False
             st.warning(str(exc), icon="⚠️")
 
+if coupon_bs_total > 0:
+    st.markdown("### Coupons Receivable")
+    st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
+    coupon_handling_choice = st.radio(
+        "How should Coupons Receivable be handled?",
+        options=[
+            "Keep current process / finish in QuickBooks",
+            "Break down using Closeout Sheet",
+        ],
+        horizontal=True,
+        index=None,
+        key=f"coupon_handling_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+    )
+
+    if coupon_handling_choice is None:
+        coupon_valid = False
+        st.caption("Select how you want to handle Coupons Receivable before building the deposit.")
+    elif coupon_handling_choice == "Keep current process / finish in QuickBooks":
+        coupon_mode = "quickbooks"
+        st.info(
+            f"The existing process stays unchanged: ${coupon_bs_total:,.2f} will post to NCG Coupons. "
+            "You can make any needed coupon changes in QuickBooks.",
+            icon="ℹ️",
+        )
+    else:
+        coupon_mode = "closeout"
+        st.caption(
+            "Enter the physical Closeout Sheet total and the counted NCG and MFG coupon amounts. "
+            "The two counted amounts must equal the Closeout Sheet total."
+        )
+        coupon_columns = st.columns(3)
+        coupon_closeout_total = coupon_columns[0].number_input(
+            "Closeout Sheet Coupon Actual Total",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"coupon_closeout_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        )
+        coupon_ncg_total = coupon_columns[1].number_input(
+            "NCG Coupons counted",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"coupon_ncg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        )
+        coupon_mfg_total = coupon_columns[2].number_input(
+            "MFG Coupons counted",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"coupon_mfg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        )
+        try:
+            coupon_preview = reconcile_coupon_receivable(
+                coupon_bs_total,
+                mode=coupon_mode,
+                closeout_actual_total=coupon_closeout_total,
+                ncg_total=coupon_ncg_total,
+                mfg_total=coupon_mfg_total,
+            )
+            discrepancy = coupon_preview["difference"]
+            st.success(
+                f"Reconciled — counted coupons total ${coupon_closeout_total:,.2f}. "
+                f"Closeout Sheet minus Balance Sheet: {discrepancy:+,.2f}.",
+                icon="✅",
+            )
+        except ValueError as exc:
+            coupon_valid = False
+            st.warning(str(exc), icon="⚠️")
+
 settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
@@ -2299,6 +2399,7 @@ run_clicked = st.button(
         or deposit_date is None
         or not settlement_source_ok
         or not membership_valid
+        or not coupon_valid
     ),
 )
 
@@ -2312,6 +2413,10 @@ if run_clicked:
                     deposit_date,
                     membership_payments,
                     membership_mode,
+                    coupon_mode,
+                    coupon_closeout_total,
+                    coupon_ncg_total,
+                    coupon_mfg_total,
                 )
                 st.session_state["run_result"] = result
                 st.session_state["run_date"] = deposit_date

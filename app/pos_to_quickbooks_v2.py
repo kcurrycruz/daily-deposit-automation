@@ -15,8 +15,10 @@ from pathlib import Path
 
 try:
     from .membership_payments import build_membership_lines, load_membership_payments_file
+    from .coupon_reconciliation import reconcile_coupon_receivable
 except ImportError:
     from membership_payments import build_membership_lines, load_membership_payments_file
+    from coupon_reconciliation import reconcile_coupon_receivable
 
 
 def get_project_root() -> Path:
@@ -1014,7 +1016,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic") -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1159,6 +1161,27 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     log.info(f"    Charity mapping: BS Charity=${charity_bs_amt:,.2f} + HASH Pass Through=${pass_through_amt:,.2f} = ${charity_combined:,.2f}")
     log.info(f"    Paid-In mapping: HASH Paid-Ins=${abs(paid_in_total):,.2f} → 4444 · TBA Purchases / PAID IN:")
 
+    coupon_reconciliation = reconcile_coupon_receivable(
+        bs("vendor_coupon", 0.0),
+        mode=coupon_mode,
+        closeout_actual_total=coupon_closeout_total,
+        ncg_total=coupon_ncg_total,
+        mfg_total=coupon_mfg_total,
+    )
+    coupon_ncg_source = (
+        -coupon_reconciliation["ncg_total"]
+        if coupon_reconciliation["ncg_total"]
+        else None
+    )
+    coupon_mfg_source = (
+        -coupon_reconciliation["mfg_total"]
+        if coupon_reconciliation["mfg_total"]
+        else None
+    )
+    coupon_difference_source = coupon_reconciliation["difference"]
+    if coupon_difference_source == 0:
+        coupon_difference_source = None
+
     bs_ebt_compare = round(abs(bs_data.get("ebt_cash", 0.0)) + abs(bs_data.get("ebt_food", 0.0)), 2)
     tender_checks = [
         ("VISA/MC", "visa_mc", round(abs(bs_data.get("visa_mc", 0.0)), 2)),
@@ -1228,8 +1251,17 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4160500 · Gift Cards - Sold - Old/Vantiv", "", "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks", "", "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
-        ("1250000 · Coupons Receivable", "", "NCG Coupons", -bs("vendor_coupon") if bs("vendor_coupon") else None),
-        ("1250000 · Coupons Receivable", "", "MFG Coupons"),
+        ("1250000 · Coupons Receivable", "", "NCG Coupons", coupon_ncg_source),
+        ("1250000 · Coupons Receivable", "", "MFG Coupons", coupon_mfg_source),
+        *([
+            (
+                "8314000 · FE - Cash Over/Shorts",
+                "",
+                "Over/Short per Closeout Sheet - Coupon",
+                coupon_difference_source,
+                "Admin",
+            )
+        ] if coupon_mode == "closeout" else []),
         ("4444 · TBA Purchases", "", "InHouse:", -bs("charge") if bs("charge") else None),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
@@ -1254,12 +1286,13 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     for entry in MANUAL_LINES:
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
+        class_name = entry[4] if len(entry) > 4 else ""
         if amt is not None and amt != 0:
             iif_amt = -amt
             spl_total += iif_amt
         else:
             iif_amt = None
-        spls.append(spl(date_str, acct, name, iif_amt, memo))
+        spls.append(spl(date_str, acct, name, iif_amt, memo, class_name))
 
     if misc_tba_lines:
         for memo, amount in misc_tba_lines:
@@ -1541,6 +1574,15 @@ def main():
         parser.add_argument("--membership-mode", choices=("automatic", "manual"),
                             default="automatic",
                             help="Split member payments automatically or finish them manually in QuickBooks")
+        parser.add_argument("--coupon-mode", choices=("quickbooks", "closeout"),
+                            default="quickbooks",
+                            help="Keep the current coupon process or use the Closeout Sheet breakdown")
+        parser.add_argument("--coupon-closeout-total", type=float,
+                            help="Closeout Sheet Coupon Actual Total")
+        parser.add_argument("--coupon-ncg-total", type=float,
+                            help="Counted NCG coupon total")
+        parser.add_argument("--coupon-mfg-total", type=float,
+                            help="Counted MFG coupon total")
         args, _unknown = parser.parse_known_args()
 
         membership_payments = (
@@ -1679,7 +1721,11 @@ def main():
             excel_sales_total, excel_discount_total, bs_data, pass_through_total,
             dust_bunnies_total, milk_bottles_returns, refunded_discounts,
             hash_sales_total, paid_in_total, settlement_data, membership_payments,
-            args.membership_mode
+            args.membership_mode,
+            coupon_mode=args.coupon_mode,
+            coupon_closeout_total=args.coupon_closeout_total,
+            coupon_ncg_total=args.coupon_ncg_total,
+            coupon_mfg_total=args.coupon_mfg_total,
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)

@@ -64,7 +64,7 @@ from app.membership_payments import (
     subscription_action_status,
     write_membership_payments_file,
 )
-from app.ui_helpers import workflow_heading_html
+from app.ui_helpers import plan_guide_html, workflow_heading_html
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -446,6 +446,48 @@ st.markdown(
         color: #C7D2C2;
         font-size: .92rem;
         margin-top: 4px;
+    }
+
+    .hwfc-plan-guide-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin: 10px 0 18px;
+    }
+
+    .hwfc-plan-card {
+        background: #161B22;
+        border: 1px solid var(--hwfc-border);
+        border-top: 4px solid #78A85B;
+        border-radius: 14px;
+        padding: 14px 16px 10px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, .16);
+    }
+
+    .hwfc-plan-card-title {
+        color: #FFFDF8;
+        font-size: 1.08rem;
+        font-weight: 850;
+        margin-bottom: 8px;
+    }
+
+    .hwfc-plan-card-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255,255,255,.07);
+        color: #B8C2B5;
+        font-size: .88rem;
+    }
+
+    .hwfc-plan-card-row:last-child {
+        border-bottom: 0;
+    }
+
+    .hwfc-plan-card-row strong {
+        color: #F4F1E8;
+        white-space: nowrap;
     }
 
     .hwfc-result {
@@ -2180,24 +2222,15 @@ if subscription_total > 0:
             icon="📄",
         )
         st.caption("Deposits are interest-free; installment payments include interest.")
-        with st.expander("View Ownership Payments & Plan Guide"):
-            st.markdown("**Ownership Payments sheet example**")
+        st.markdown("#### Plan Payment Guide")
+        st.markdown(
+            plan_guide_html(plan_reference_rows()),
+            unsafe_allow_html=True,
+        )
+        with st.expander("View Ownership Payments Sheet Example"):
             st.image(
                 str(Path(__file__).parent / "assets" / "ownership_payments_example.png"),
                 caption="Use the actual paper sheet for the current deposit.",
-            )
-            st.markdown("**Plan payment guide**")
-            st.dataframe(
-                pd.DataFrame(plan_reference_rows()),
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Deposit": st.column_config.NumberColumn(format="$%.2f"),
-                    "Total Paid": st.column_config.NumberColumn(format="$%.2f"),
-                    "Installment": st.column_config.NumberColumn(format="$%.2f"),
-                    "Principal": st.column_config.NumberColumn(format="$%.2f"),
-                    "Interest": st.column_config.NumberColumn(format="$%.2f"),
-                },
             )
         show_payoff_adjustment = st.checkbox(
             "Advanced: adjust interest periods for a payoff",

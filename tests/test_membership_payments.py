@@ -25,6 +25,30 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn("Use &quot;QuickBooks&quot; safely", rendered)
         self.assertNotIn("Member & <Share>", rendered)
 
+    def test_plan_guide_html_renders_each_plan_as_a_readable_card(self):
+        try:
+            from app.ui_helpers import plan_guide_html
+        except ImportError:
+            self.fail("plan guide card renderer is missing")
+        from app.membership_payments import plan_reference_rows
+
+        rendered = plan_guide_html(plan_reference_rows())
+
+        self.assertEqual(rendered.count('class="hwfc-plan-card"'), 3)
+        self.assertIn("1-Year Plan", rendered)
+        self.assertIn("3-Year Plan", rendered)
+        self.assertIn("5-Year Plan", rendered)
+        for label, value in (
+            ("Deposit", "$10.00"),
+            ("Regular payment", "$8.45"),
+            ("Principal", "$8.18"),
+            ("Interest", "$0.27"),
+            ("Number of payments", "11"),
+            ("Total paid", "$102.95"),
+        ):
+            self.assertIn(label, rendered)
+            self.assertIn(value, rendered)
+
     def test_rejected_final_closeout_removes_generated_iif(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

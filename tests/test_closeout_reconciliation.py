@@ -1,4 +1,6 @@
 from io import BytesIO
+from pathlib import Path
+from uuid import uuid4
 
 import openpyxl
 import unittest
@@ -387,3 +389,232 @@ class CloseoutReconciliationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "valid.*amount|monetary"):
             default_closeout_actuals({"cash": 1.00}, "Infinity")
+
+
+class CloseoutAdjustmentTests(unittest.TestCase):
+    def closeout_payload(self, **overrides):
+        payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 10 for key in STANDARD_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1000,
+            "approve_final_pos": False,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_build_misc_adjustments_uses_exact_mappings_and_iif_signs(self):
+        from app.closeout_reconciliation import build_misc_adjustments
+
+        rows = build_misc_adjustments(
+            {
+                "payroll": -4000,
+                "safe": {"type": "overage", "amount": 25},
+                "plants_purchase": 60,
+                "custom_tba": [
+                    {
+                        "memo": "Unusual Closeout item",
+                        "amount": 12,
+                        "direction": "removes",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            [
+                (row["account"], row["memo"], row["qb_effect"], row["iif_amount"])
+                for row in rows
+            ],
+            [
+                ("1140000 · Cash Drawers/Safe", "Payroll - Check Cashing", -4000.0, 4000.0),
+                (
+                    "8314000 · FE - Cash Over/Shorts",
+                    "Safe Overage Cash added to deposit",
+                    25.0,
+                    -25.0,
+                ),
+                ("1130000 · Petty Cash", "Plants Dept - Market Purchases", -60.0, 60.0),
+                ("4444 · TBA Purchases", "Unusual Closeout item", -12.0, 12.0),
+            ],
+        )
+
+    def test_safe_shortage_and_custom_adds_post_negative_and_positive_effects(self):
+        from app.closeout_reconciliation import build_misc_adjustments
+
+        rows = build_misc_adjustments(
+            {
+                "safe": {"type": "shortage", "amount": 25},
+                "custom_tba": [
+                    {"memo": "Cash found", "amount": 12, "direction": "adds"}
+                ],
+            }
+        )
+
+        self.assertEqual([row["qb_effect"] for row in rows], [-25.0, 12.0])
+        self.assertEqual([row["iif_amount"] for row in rows], [25.0, -12.0])
+
+    def test_build_misc_adjustments_rejects_invalid_payroll_and_custom_rows(self):
+        from app.closeout_reconciliation import build_misc_adjustments
+
+        invalid_payloads = [
+            {"payroll": 3999, "custom_tba": []},
+            {
+                "payroll": 0,
+                "custom_tba": [{"memo": " ", "amount": 5, "direction": "adds"}],
+            },
+            {
+                "payroll": 0,
+                "custom_tba": [{"memo": "Item", "amount": 0, "direction": "adds"}],
+            },
+            {
+                "payroll": 0,
+                "custom_tba": [
+                    {"memo": "Item", "amount": 5, "direction": "addition"}
+                ],
+            },
+        ]
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                build_misc_adjustments(payload)
+
+    def test_normalize_closeout_payload_rejects_iif_delimiters_in_custom_tba_memos(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        for delimiter, label in (("\t", "tab"), ("\r", "carriage return"), ("\n", "line feed")):
+            payload = self.closeout_payload(
+                custom_tba=[
+                    {
+                        "memo": f"Unsafe{delimiter}memo",
+                        "amount": 5,
+                        "direction": "adds",
+                    }
+                ]
+            )
+            with self.subTest(delimiter=label), self.assertRaisesRegex(
+                ValueError, "Custom TBA memo cannot contain tabs or line breaks"
+            ):
+                normalize_closeout_payload(payload)
+
+    def test_final_difference_requires_explicit_approval_with_exact_pos_line(self):
+        from app.closeout_reconciliation import calculate_final_pos_adjustment
+
+        unapproved = calculate_final_pos_adjustment(1000, 1025, approved=False)
+        approved = calculate_final_pos_adjustment(1000, 1025, approved=True)
+
+        self.assertEqual(unapproved["remaining"], 25.0)
+        self.assertIsNone(unapproved["line"])
+        self.assertTrue(unapproved["requires_approval"])
+        self.assertEqual(
+            approved["line"],
+            {
+                "kind": "final_pos",
+                "account": "8314000 · FE - Cash Over/Shorts",
+                "memo": "Over/Short per POS (to = POS total)",
+                "qb_effect": 25.0,
+                "iif_amount": -25.0,
+            },
+        )
+
+    def test_final_balancing_omits_zero_and_rejects_nonpositive_total(self):
+        from app.closeout_reconciliation import calculate_final_pos_adjustment
+
+        zero = calculate_final_pos_adjustment("1000.004", "1000.004", approved=False)
+
+        self.assertEqual(zero["provisional_total"], 1000.0)
+        self.assertEqual(zero["final_total"], 1000.0)
+        self.assertEqual(zero["remaining"], 0.0)
+        self.assertIsNone(zero["line"])
+        self.assertFalse(zero["requires_approval"])
+        for final_total in (0, -0.01, "NaN"):
+            with self.subTest(final_total=final_total), self.assertRaises(ValueError):
+                calculate_final_pos_adjustment(1000, final_total, approved=True)
+
+    def test_final_balancing_rejects_non_boolean_approval_values(self):
+        from app.closeout_reconciliation import calculate_final_pos_adjustment
+
+        for approved in ("false", 1, None):
+            with self.subTest(approved=approved), self.assertRaisesRegex(
+                ValueError, "approved.*boolean"
+            ):
+                calculate_final_pos_adjustment(1000, 1025, approved=approved)
+
+    def test_normalize_manual_mode_returns_only_canonical_manual_payload(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        self.assertEqual(
+            normalize_closeout_payload({"mode": "manual", "unexpected": "ignored"}),
+            {"mode": "manual"},
+        )
+
+    def test_closeout_payload_round_trips_to_distinct_json_files(self):
+        from app.closeout_reconciliation import (
+            load_closeout_payload_file,
+            normalize_closeout_payload,
+            write_closeout_payload_file,
+        )
+
+        payload = self.closeout_payload(
+            payroll="-4000.004",
+            safe={"type": "overage", "amount": "25.004"},
+            plants_purchase="60.004",
+            custom_tba=[
+                {"memo": "  Unusual Closeout item  ", "amount": "12.004", "direction": "removes"}
+            ],
+        )
+        folder = Path(__file__).parent
+        first_path = write_closeout_payload_file(folder, payload)
+        second_path = write_closeout_payload_file(folder, payload)
+        try:
+            self.assertNotEqual(first_path, second_path)
+            self.assertEqual(first_path.parent, folder)
+            self.assertEqual(
+                load_closeout_payload_file(first_path), normalize_closeout_payload(payload)
+            )
+        finally:
+            first_path.unlink(missing_ok=True)
+            second_path.unlink(missing_ok=True)
+
+    def test_normalize_closeout_payload_rejects_invalid_state_and_does_not_mutate_input(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        payload = self.closeout_payload(
+            actuals={key: "10.004" for key in reversed(STANDARD_ORDER)},
+            safe={"type": "overage", "amount": "25.004"},
+            custom_tba=[{"memo": "  Item  ", "amount": "1.004", "direction": "adds"}],
+        )
+        normalized = normalize_closeout_payload(payload)
+
+        self.assertEqual(tuple(normalized["actuals"]), STANDARD_ORDER)
+        self.assertEqual(normalized["actuals"]["cash"], 10.0)
+        self.assertEqual(normalized["safe"], {"type": "overage", "amount": 25.0})
+        self.assertEqual(normalized["custom_tba"][0]["memo"], "Item")
+        self.assertEqual(payload["actuals"]["cash"], "10.004")
+        self.assertEqual(payload["safe"]["amount"], "25.004")
+        self.assertEqual(payload["custom_tba"][0]["memo"], "  Item  ")
+
+        invalid_payloads = [
+            self.closeout_payload(reviewed=False),
+            self.closeout_payload(actuals={"cash": 10}),
+            self.closeout_payload(approve_final_pos=1),
+            "not a payload",
+        ]
+        for invalid_payload in invalid_payloads:
+            with self.subTest(invalid_payload=invalid_payload), self.assertRaises(ValueError):
+                normalize_closeout_payload(invalid_payload)
+
+    def test_loader_rejects_malformed_json(self):
+        from app.closeout_reconciliation import load_closeout_payload_file
+
+        path = Path(__file__).parent / f"invalid_closeout_{uuid4()}.json"
+        try:
+            path.write_text("{not json", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "JSON"):
+                load_closeout_payload_file(path)
+        finally:
+            path.unlink(missing_ok=True)

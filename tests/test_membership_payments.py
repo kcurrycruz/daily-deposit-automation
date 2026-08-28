@@ -1,7 +1,536 @@
+import ast
+import subprocess
+import sys
 import unittest
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_rejected_final_closeout_removes_generated_iif(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            normalize_closeout_payload,
+            write_closeout_payload_file,
+        )
+        from app.membership_payments import write_membership_payments_file
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        runtime_nodes = [
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"build_engine_command", "run_engine"}
+        ]
+        runtime_root = Path(__file__).parent / f"_rejected_closeout_runtime_{uuid4().hex}"
+        input_dir = runtime_root / "input"
+        iif_dir = runtime_root / "qb_imports"
+        log_dir = runtime_root / "logs"
+        temp_dir = runtime_root / "runtime"
+        for folder in (input_dir, iif_dir, log_dir, temp_dir):
+            folder.mkdir(parents=True, exist_ok=True)
+        generated_iif = iif_dir / "deposit_20260828.iif"
+
+        class UploadedWorkbook:
+            name = "daily.xlsx"
+
+            def getvalue(self):
+                return b"workbook"
+
+        class FakeSubprocess:
+            def run(self, command, **_kwargs):
+                generated_iif.write_bytes(b"rejected final iif")
+                preview_path = Path(
+                    command[command.index("--closeout-preview-output") + 1]
+                )
+                preview_path.write_text(
+                    '{"remaining_after_approval": 1.0, "requires_approval": true}',
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(stdout="engine output", stderr="", returncode=0)
+
+        namespace = {
+            "Path": Path,
+            "date": date,
+            "json": __import__("json"),
+            "sys": sys,
+            "uuid4": uuid4,
+            "subprocess": FakeSubprocess(),
+            "ENGINE_PATH": source_path,
+            "ROOT": runtime_root,
+            "INPUT_DIR": input_dir,
+            "QB_IMPORT_DIR": iif_dir,
+            "LOG_DIR": log_dir,
+            "RUNTIME_TEMP_DIR": temp_dir,
+            "write_membership_payments_file": write_membership_payments_file,
+            "normalize_closeout_payload": normalize_closeout_payload,
+            "write_closeout_payload_file": write_closeout_payload_file,
+            "parse_iif": lambda _path: (["parsed line"], "parsed dataframe"),
+            "parse_validation": lambda _log_text, _lines: {"all_ok": True},
+        }
+        exec(
+            compile(ast.Module(body=runtime_nodes, type_ignores=[]), str(source_path), "exec"),
+            namespace,
+        )
+        closeout_payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 0 for key in STANDARD_CLOSEOUT_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1,
+            "approve_final_pos": False,
+        }
+
+        try:
+            with self.assertRaisesRegex(ValueError, "approval is required"):
+                namespace["run_engine"](
+                    UploadedWorkbook(),
+                    UploadedWorkbook(),
+                    date(2026, 8, 28),
+                    [],
+                    "automatic",
+                    "quickbooks",
+                    None,
+                    None,
+                    None,
+                    closeout_payload=closeout_payload,
+                )
+            self.assertFalse(generated_iif.exists())
+        finally:
+            for path in sorted(runtime_root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            runtime_root.rmdir()
+
+    def test_failed_final_closeout_paths_remove_generated_iif(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            normalize_closeout_payload,
+            write_closeout_payload_file,
+        )
+        from app.membership_payments import write_membership_payments_file
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        runtime_nodes = [
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"build_engine_command", "run_engine"}
+        ]
+        closeout_payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 0 for key in STANDARD_CLOSEOUT_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1,
+            "approve_final_pos": False,
+        }
+
+        class UploadedWorkbook:
+            name = "daily.xlsx"
+
+            def getvalue(self):
+                return b"workbook"
+
+        cases = (
+            ("subprocess_failure", 1, None, RuntimeError),
+            ("missing_preview", 0, None, RuntimeError),
+            ("malformed_preview", 0, "not JSON", RuntimeError),
+        )
+        for case_name, returncode, preview_text, error_type in cases:
+            with self.subTest(case=case_name):
+                runtime_root = (
+                    Path(__file__).parent
+                    / f"_failed_closeout_runtime_{uuid4().hex}"
+                )
+                input_dir = runtime_root / "input"
+                iif_dir = runtime_root / "qb_imports"
+                log_dir = runtime_root / "logs"
+                temp_dir = runtime_root / "runtime"
+                for folder in (input_dir, iif_dir, log_dir, temp_dir):
+                    folder.mkdir(parents=True, exist_ok=True)
+                generated_iif = iif_dir / "deposit_20260828.iif"
+
+                class FakeSubprocess:
+                    def run(self, command, **_kwargs):
+                        generated_iif.write_bytes(b"failed final iif")
+                        if preview_text is not None:
+                            preview_path = Path(
+                                command[command.index("--closeout-preview-output") + 1]
+                            )
+                            preview_path.write_text(preview_text, encoding="utf-8")
+                        return SimpleNamespace(
+                            stdout="engine output", stderr="", returncode=returncode
+                        )
+
+                namespace = {
+                    "Path": Path,
+                    "date": date,
+                    "json": __import__("json"),
+                    "sys": sys,
+                    "uuid4": uuid4,
+                    "subprocess": FakeSubprocess(),
+                    "ENGINE_PATH": source_path,
+                    "ROOT": runtime_root,
+                    "INPUT_DIR": input_dir,
+                    "QB_IMPORT_DIR": iif_dir,
+                    "LOG_DIR": log_dir,
+                    "RUNTIME_TEMP_DIR": temp_dir,
+                    "write_membership_payments_file": write_membership_payments_file,
+                    "normalize_closeout_payload": normalize_closeout_payload,
+                    "write_closeout_payload_file": write_closeout_payload_file,
+                    "parse_iif": lambda _path: (["parsed line"], "parsed dataframe"),
+                    "parse_validation": lambda _log_text, _lines: {"all_ok": True},
+                }
+                exec(
+                    compile(
+                        ast.Module(body=runtime_nodes, type_ignores=[]),
+                        str(source_path),
+                        "exec",
+                    ),
+                    namespace,
+                )
+
+                try:
+                    with self.assertRaises(error_type):
+                        namespace["run_engine"](
+                            UploadedWorkbook(),
+                            UploadedWorkbook(),
+                            date(2026, 8, 28),
+                            [],
+                            "automatic",
+                            "quickbooks",
+                            None,
+                            None,
+                            None,
+                            closeout_payload=closeout_payload,
+                        )
+                    self.assertFalse(generated_iif.exists())
+                finally:
+                    for path in sorted(runtime_root.rglob("*"), reverse=True):
+                        if path.is_file():
+                            path.unlink()
+                        else:
+                            path.rmdir()
+                    runtime_root.rmdir()
+
+    def test_coupon_workflow_is_required_for_zero_bs_when_closeout_is_in_app(self):
+        from app.closeout_reconciliation import coupon_workflow_is_required
+
+        self.assertTrue(
+            coupon_workflow_is_required(
+                0,
+                "Breakdown in app using Closeout Sheet",
+            )
+        )
+        self.assertFalse(coupon_workflow_is_required(0, None))
+        self.assertFalse(
+            coupon_workflow_is_required(0, "Finish manually in QuickBooks")
+        )
+        self.assertTrue(coupon_workflow_is_required(10, None))
+
+    def test_closeout_form_payload_preserves_order_defaults_and_confirmation(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            build_closeout_form_payload,
+        )
+
+        payload = build_closeout_form_payload(
+            baselines={key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+            actuals={**{key: 10 for key in STANDARD_CLOSEOUT_ORDER}, "offline_zon": 0},
+            reviewed=True,
+            payroll=-4000,
+            safe_type="shortage",
+            safe_amount=25,
+            plants_purchase=40,
+            custom_tba=[{"memo": "Other", "amount": 3, "direction": "adds"}],
+            final_total=1000,
+            approve_final_pos=False,
+        )
+
+        self.assertEqual(list(payload["actuals"]), list(STANDARD_CLOSEOUT_ORDER))
+        self.assertEqual(payload["payroll"], -4000.0)
+        self.assertEqual(payload["safe"], {"type": "shortage", "amount": 25.0})
+        self.assertEqual(payload["plants_purchase"], 40.0)
+        self.assertEqual(
+            payload["custom_tba"],
+            [{"memo": "Other", "amount": 3.0, "direction": "adds"}],
+        )
+        self.assertTrue(payload["reviewed"])
+
+    def test_closeout_form_requires_paper_review_confirmation(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            build_closeout_form_payload,
+        )
+
+        with self.assertRaisesRegex(ValueError, "paper Closeout Sheet"):
+            build_closeout_form_payload(
+                baselines={key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+                actuals={key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+                reviewed=False,
+                payroll=0,
+                safe_type="none",
+                safe_amount=0,
+                plants_purchase=0,
+                custom_tba=[],
+                final_total=1000,
+                approve_final_pos=False,
+            )
+
+    def test_closeout_preview_fingerprint_invalidates_financial_changes_only(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            closeout_input_fingerprint,
+        )
+
+        payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1000,
+            "approve_final_pos": False,
+        }
+        original = closeout_input_fingerprint(payload)
+        approved = {**payload, "approve_final_pos": True}
+        changed = {**payload, "final_total": 1001}
+
+        self.assertEqual(closeout_input_fingerprint(approved), original)
+        self.assertNotEqual(closeout_input_fingerprint(changed), original)
+
+    def test_closeout_preview_freshness_requires_matching_payload_fingerprint(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            closeout_input_fingerprint,
+            closeout_preview_is_fresh,
+        )
+
+        payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1000,
+            "approve_final_pos": False,
+        }
+        saved = {
+            "input_fingerprint": closeout_input_fingerprint(payload),
+            "preview": {"remaining": 1.25},
+        }
+
+        self.assertTrue(closeout_preview_is_fresh(payload, saved))
+        self.assertFalse(
+            closeout_preview_is_fresh({**payload, "payroll": 4000}, saved)
+        )
+        self.assertFalse(closeout_preview_is_fresh(payload, None))
+
+    def test_closeout_preview_fingerprint_includes_other_deposit_inputs(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            closeout_input_fingerprint,
+        )
+
+        payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {key: 10 for key in STANDARD_CLOSEOUT_ORDER},
+            "payroll": 0,
+            "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0,
+            "custom_tba": [],
+            "final_total": 1000,
+            "approve_final_pos": False,
+        }
+        original = closeout_input_fingerprint(
+            payload,
+            review_context={"membership_total": 8.45, "settlement": "first"},
+        )
+
+        self.assertNotEqual(
+            closeout_input_fingerprint(
+                payload,
+                review_context={"membership_total": 16.90, "settlement": "first"},
+            ),
+            original,
+        )
+        self.assertNotEqual(
+            closeout_input_fingerprint(
+                payload,
+                review_context={"membership_total": 8.45, "settlement": "second"},
+            ),
+            original,
+        )
+
+    def test_manual_closeout_payload_returns_final_result_without_preview(self):
+        from app.closeout_reconciliation import (
+            normalize_closeout_payload,
+            write_closeout_payload_file,
+        )
+        from app.membership_payments import write_membership_payments_file
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        runtime_nodes = [
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"build_engine_command", "run_engine"}
+        ]
+        runtime_root = Path(__file__).parent / f"_manual_closeout_runtime_{uuid4().hex}"
+        input_dir = runtime_root / "input"
+        iif_dir = runtime_root / "qb_imports"
+        log_dir = runtime_root / "logs"
+        temp_dir = runtime_root / "runtime"
+        for folder in (input_dir, iif_dir, log_dir, temp_dir):
+            folder.mkdir(parents=True, exist_ok=True)
+
+        class UploadedWorkbook:
+            name = "daily.xlsx"
+
+            def getvalue(self):
+                return b"workbook"
+
+        class FakeSubprocess:
+            def __init__(self):
+                self.command = None
+
+            def run(self, command, **_kwargs):
+                self.command = command
+                (iif_dir / "deposit_20260828.iif").write_bytes(b"legacy final iif")
+                return SimpleNamespace(stdout="engine output", stderr="", returncode=0)
+
+        fake_subprocess = FakeSubprocess()
+        namespace = {
+            "Path": Path,
+            "date": date,
+            "json": __import__("json"),
+            "sys": sys,
+            "uuid4": uuid4,
+            "subprocess": fake_subprocess,
+            "ENGINE_PATH": source_path,
+            "ROOT": runtime_root,
+            "INPUT_DIR": input_dir,
+            "QB_IMPORT_DIR": iif_dir,
+            "LOG_DIR": log_dir,
+            "RUNTIME_TEMP_DIR": temp_dir,
+            "write_membership_payments_file": write_membership_payments_file,
+            "normalize_closeout_payload": normalize_closeout_payload,
+            "write_closeout_payload_file": write_closeout_payload_file,
+            "parse_iif": lambda _path: (["parsed line"], "parsed dataframe"),
+            "parse_validation": lambda _log_text, _lines: {"all_ok": True},
+        }
+        exec(
+            compile(ast.Module(body=runtime_nodes, type_ignores=[]), str(source_path), "exec"),
+            namespace,
+        )
+
+        try:
+            result = namespace["run_engine"](
+                UploadedWorkbook(),
+                UploadedWorkbook(),
+                date(2026, 8, 28),
+                [],
+                "automatic",
+                "quickbooks",
+                None,
+                None,
+                None,
+                closeout_payload={"mode": "manual"},
+            )
+        finally:
+            for path in sorted(runtime_root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            runtime_root.rmdir()
+
+        self.assertIn("--closeout-file", fake_subprocess.command)
+        self.assertNotIn("--closeout-preview-output", fake_subprocess.command)
+        self.assertFalse(result["preview_only"])
+        self.assertIsNone(result["closeout_preview"])
+        self.assertEqual(result["iif_bytes"], b"legacy final iif")
+
+    def test_build_engine_command_passes_closeout_files(self):
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        function_node = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "build_engine_command"
+        )
+        namespace = {"date": date, "Path": Path, "sys": sys}
+        exec(
+            compile(ast.Module(body=[function_node], type_ignores=[]), str(source_path), "exec"),
+            namespace,
+        )
+        build_engine_command = namespace["build_engine_command"]
+
+        command = build_engine_command(
+            engine_path=Path("engine.py"),
+            deposit_date=date(2026, 8, 28),
+            membership_path=Path("members.json"),
+            membership_mode="automatic",
+            coupon_mode="closeout",
+            coupon_closeout_total=188.25,
+            coupon_ncg_total=152.25,
+            coupon_mfg_total=36.00,
+            closeout_path=Path("closeout.json"),
+            closeout_preview_path=Path("preview.json"),
+        )
+
+        self.assertIn("--closeout-file", command)
+        self.assertIn("closeout.json", command)
+        self.assertIn("--closeout-preview-output", command)
+        self.assertIn("preview.json", command)
+
+    def test_engine_rejects_malformed_closeout_payload(self):
+        engine_path = Path(__file__).parents[1] / "app" / "pos_to_quickbooks_v2.py"
+        closeout_path = Path(__file__).parent / "_malformed_closeout_cli.json"
+        try:
+            closeout_path.write_text("{not valid JSON", encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(engine_path),
+                    "--date",
+                    "08/28/26",
+                    "--closeout-file",
+                    str(closeout_path),
+                ],
+                cwd=engine_path.parents[1],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        finally:
+            closeout_path.unlink(missing_ok=True)
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(
+            "Closeout payload file contains malformed JSON",
+            (proc.stdout or "") + (proc.stderr or ""),
+        )
+
     def test_coupon_counter_reference_workbook_is_packaged(self):
         from pathlib import Path
 
@@ -204,12 +733,12 @@ class MembershipPaymentTests(unittest.TestCase):
 
         source_path = Path(__file__).parents[1] / "streamlit_app.py"
         source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        run_engine_node = next(
+        command_builder_node = next(
             node
             for node in source_tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "run_engine"
+            if isinstance(node, ast.FunctionDef) and node.name == "build_engine_command"
         )
-        run_engine_source = ast.unparse(run_engine_node)
+        command_builder_source = ast.unparse(command_builder_node)
         for flag in (
             "--coupon-mode",
             "--coupon-closeout-total",
@@ -217,7 +746,7 @@ class MembershipPaymentTests(unittest.TestCase):
             "--coupon-mfg-total",
         ):
             with self.subTest(flag=flag):
-                self.assertIn(flag, run_engine_source)
+                self.assertIn(flag, command_builder_source)
 
     def test_workbook_validation_ignores_xxxxxx_discount_and_hash_tabs(self):
         import ast
@@ -325,6 +854,55 @@ class MembershipPaymentTests(unittest.TestCase):
                 pass
 
         self.assertEqual(parsed, (6.96, 5.00, 0.0))
+
+    def test_hash_exact_amount_header_controls_paid_in_engine_and_iif(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        fixture_root = Path(__file__).parent / f"_hash_exact_amount_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "daily.xlsx"
+        workbook = openpyxl.Workbook()
+        hash_sheet = workbook.active
+        hash_sheet.title = "082826 Hash"
+        hash_sheet.append(["Code", "Description", "Net Amount", "Amount"])
+        hash_sheet.append([34, "Paid-Ins", 999.99, 34.56])
+        workbook.save(workbook_path)
+        workbook.close()
+
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            refunded, pass_through, paid_in = engine.parse_hash_sheet(
+                workbook_path, date(2026, 8, 28)
+            )
+            iif_path = engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 8, 28),
+                paid_in_total=paid_in,
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertEqual((refunded, pass_through, paid_in), (0.0, 0.0, 34.56))
+        self.assertIn("4444 · TBA Purchases\t\t-34.56\tPAID IN:", iif_text)
+        self.assertNotIn("999.99\tPAID IN:", iif_text)
 
     def test_discount_parser_falls_back_to_a_populated_custom_tab(self):
         from datetime import date
@@ -1438,6 +2016,174 @@ except RuntimeError:
         ):
             with self.subTest(populated_line=populated_line):
                 self.assertIn(populated_line, populated_text)
+
+    def _generate_closeout_fixture(self, closeout_payload):
+        import json
+        from datetime import date
+        from pathlib import Path
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        temp_dir = Path(__file__).parent / "_closeout_iif_output"
+        temp_dir.mkdir(exist_ok=True)
+        preview_path = temp_dir / "closeout_preview.json"
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = temp_dir
+        engine.LOG_DIR = temp_dir
+        engine.log.disabled = True
+        try:
+            iif_path = engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 8, 28),
+                bs_data={
+                    "cash": 100.00,
+                    "check": 50.00,
+                    "donation": 20.00,
+                    "charge": 10.00,
+                    "offline_credit_card": -12.00,
+                    "vendor_coupon": 181.50,
+                    "paid_out": 40.00,
+                },
+                pass_through_total=7.00,
+                paid_in_total=30.00,
+                misc_tba_lines=[("Existing misc item", 3.00)],
+                coupon_mode="closeout",
+                coupon_closeout_total=188.25,
+                coupon_ncg_total=152.25,
+                coupon_mfg_total=36.00,
+                closeout_payload=closeout_payload,
+                closeout_preview_path=preview_path,
+            )
+            text = iif_path.read_text(encoding="utf-8")
+            preview = (
+                json.loads(preview_path.read_text(encoding="utf-8"))
+                if preview_path.exists()
+                else None
+            )
+            return text, preview
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in temp_dir.iterdir():
+                generated_file.unlink()
+            temp_dir.rmdir()
+
+    def test_generate_iif_applies_closeout_actuals_memos_signs_and_order(self):
+        payload = {
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {
+                "cash": 110,
+                "checks": 45,
+                "donation": 25,
+                "charge_house": 8,
+                "offline_zon": 0,
+                "vendor_coupons": 188.25,
+                "paid_out": 50,
+                "paid_in": 35,
+            },
+            "payroll": -4000,
+            "safe": {"type": "shortage", "amount": 10},
+            "plants_purchase": 20,
+            "custom_tba": [
+                {"memo": "Other paper item", "amount": 5, "direction": "adds"}
+            ],
+            "final_total": 5000,
+            "approve_final_pos": True,
+        }
+
+        text, preview = self._generate_closeout_fixture(payload)
+
+        expected_adjustments = [
+            ("-10.00", "Over/Short per Closeout Sheet - Cash"),
+            ("5.00", "Over/Short per Closeout Sheet - Check"),
+            ("-5.00", "Over/Short per Closeout Sheet - Donation"),
+            ("2.00", "Over/Short per Closeout Sheet - Charge (House)"),
+            ("12.00", "Over/Short per Closeout Sheet - Offline Zon"),
+            ("-6.75", "Over/Short per Closeout Sheet - Coupon"),
+            ("-10.00", "Over/Short per Closeout Sheet - Paid Out"),
+            ("5.00", "Over/Short per Closeout Sheet - Paid In"),
+        ]
+        adjustment_positions = []
+        for amount, memo in expected_adjustments:
+            with self.subTest(memo=memo):
+                line = f"8314000 · FE - Cash Over/Shorts\t\t{amount}\t{memo}\tAdmin"
+                self.assertIn(line, text)
+                adjustment_positions.append(text.index(line))
+        self.assertEqual(adjustment_positions, sorted(adjustment_positions))
+        self.assertEqual(text.count("Over/Short per Closeout Sheet - Coupon"), 1)
+
+        for detail_line in (
+            "4160000 · Charitable Donations Payable\t\t-7.00\tCharity/Pass through Donations (Round up)",
+            "8506000 · Outreach - Donations\t\t25.00\t",
+            "4444 · TBA Purchases\t\t8.00\tInHouse:",
+            "4444 · TBA Purchases\t\t-35.00\tPAID IN:",
+            "4444 · TBA Purchases\t\t50.00\tPAID OUT:",
+        ):
+            with self.subTest(detail_line=detail_line):
+                self.assertIn(detail_line, text)
+        self.assertNotIn("Offline Credit Card:", text)
+
+        ordered_memos = [
+            "Over/Short per Closeout Sheet - Paid In",
+            "Payroll - Check Cashing",
+            "Safe Shortage Cash Taken from Deposit",
+            "Plants Dept - Market Purchases",
+            "Over/Short per POS (to = POS total)",
+            "Other paper item",
+            "Existing misc item",
+        ]
+        memo_positions = [text.index(memo) for memo in ordered_memos]
+        self.assertEqual(memo_positions, sorted(memo_positions))
+        self.assertIn("1140000 · Cash Drawers/Safe\t\t4000.00", text)
+        self.assertIn("1130000 · Petty Cash\t\t20.00", text)
+        self.assertIn("4444 · TBA Purchases\t\t-5.00\tOther paper item", text)
+        self.assertIn(
+            "8314000 · FE - Cash Over/Shorts\t\t-9243.50\t"
+            "Over/Short per POS (to = POS total)",
+            text,
+        )
+
+        self.assertEqual(preview["provisional_total"], -4243.5)
+        self.assertEqual(preview["final_total"], 5000.0)
+        self.assertEqual(preview["remaining"], 9243.5)
+        self.assertEqual(preview["remaining_after_approval"], 0.0)
+        self.assertFalse(preview["requires_approval"])
+        self.assertEqual(
+            preview["final_pos_line"],
+            {
+                "kind": "final_pos",
+                "account": "8314000 · FE - Cash Over/Shorts",
+                "memo": "Over/Short per POS (to = POS total)",
+                "qb_effect": 9243.5,
+                "iif_amount": -9243.5,
+            },
+        )
+        self.assertEqual([row["key"] for row in preview["standard_rows"]], [
+            "cash",
+            "checks",
+            "donation",
+            "charge_house",
+            "offline_zon",
+            "vendor_coupons",
+            "paid_out",
+            "paid_in",
+        ])
+        self.assertEqual(
+            [row["kind"] for row in preview["misc_rows"]],
+            ["payroll", "safe_shortage", "plants_purchase", "custom_tba"],
+        )
+
+    def test_generate_iif_manual_closeout_mode_is_byte_equivalent_to_legacy(self):
+        legacy = self._generate_closeout_fixture(None)[0]
+        manual = self._generate_closeout_fixture({"mode": "manual"})[0]
+
+        self.assertEqual(manual, legacy)
 
     def test_generate_iif_writes_coupon_closeout_breakdown_and_signed_difference(self):
         from datetime import date

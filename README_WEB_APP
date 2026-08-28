@@ -39,6 +39,44 @@ Payment type and plan are combined into one Payment Option. Paid in full is a si
 
 The Interest Periods field is hidden under the advanced payoff option. Leave it blank for automatic calculation; enter a whole-number override only when an unusual payoff requires fewer interest periods.
 
+## Store Closeout Sheet
+
+The Store Closeout Sheet workflow is optional. Choose one of these options before building the deposit:
+
+- **Breakdown in app using Closeout Sheet**: enter the paper Closeout amounts, review the proposed QuickBooks lines, and reconcile the deposit in the app.
+- **Finish manually in QuickBooks**: keep the existing deposit process and make any Closeout Sheet changes in QuickBooks.
+
+When using the in-app breakdown, enter every standard Closeout actual as a positive amount exactly as printed on the paper sheet. The app determines whether each amount adds to or reduces the QuickBooks deposit.
+
+Enter the eight recurring categories in this order:
+
+1. Cash
+2. Checks
+3. Donation
+4. Charge (House)
+5. Offline Zon
+6. Vendor Coupons
+7. Paid Out
+8. Paid In
+
+Paid In still comes from the HASH Paid-In total. The Closeout entry is a second check against the paper sheet; it does not replace HASH as the original source. Offline Zon defaults to $0.00 because it is normally zero, but it can be changed on the rare day when the paper sheet shows an amount.
+
+Vendor Coupons uses the existing NCG and MFG coupon breakdown. Choose **Breakdown in app using Closeout Sheet** for Coupons Receivable first, then enter the NCG and MFG totals. NCG + MFG must equal the Vendor Coupons actual before the Closeout can reconcile. Use the coupon workflow even when the Balance Sheet coupon amount is zero if paper NCG or MFG coupons were received.
+
+The optional preset adjustments follow these rules:
+
+- Payroll - Check Cashing is either +$4,000.00 or -$4,000.00 and posts to `1140000 · Cash Drawers/Safe` with memo `Payroll - Check Cashing`.
+- Safe Overage is positive with memo `Safe Overage Cash added to deposit`. Safe Shortage is negative with memo `Safe Shortage Cash Taken from Deposit`. Both post to `8314000 · FE - Cash Over/Shorts`.
+- Plants Dept - Market Purchases is entered as a positive amount, but the app posts it as a negative amount to `1130000 · Petty Cash` with memo `Plants Dept - Market Purchases`.
+
+For another miscellaneous item, add a custom row with a clear memo, positive amount, and direction. The app places it in `4444 · TBA Purchases` at the bottom of the deposit. Every TBA line must be assigned to the correct QuickBooks account manually before the deposit is finalized.
+
+Click **Review Closeout** before building the deposit. This is a dry run: it previews the Closeout QuickBooks lines and totals without creating a downloadable IIF. Check the preview against the paper Closeout Sheet.
+
+If a difference remains after all known items are entered, the app shows the exact amount. **Add final POS adjustment** is a last resort and requires explicit approval. It posts the approved difference to `8314000 · FE - Cash Over/Shorts` with memo `Over/Short per POS (to = POS total)`. The app never adds this line automatically.
+
+If the paper sheet cannot be reconciled confidently in the app, choose **Finish manually in QuickBooks** and complete the Closeout corrections there.
+
 ## Test in Codespaces
 
 Install requirements:

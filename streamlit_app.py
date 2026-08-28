@@ -29,6 +29,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -36,6 +37,18 @@ import streamlit as st
 from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
+)
+from app.closeout_reconciliation import (
+    STANDARD_CLOSEOUT_ORDER,
+    STANDARD_METADATA,
+    build_closeout_form_payload,
+    closeout_input_fingerprint,
+    closeout_preview_is_fresh,
+    coupon_workflow_is_required,
+    default_closeout_actuals,
+    normalize_closeout_payload,
+    read_closeout_baselines,
+    write_closeout_payload_file,
 )
 from app.membership_payments import (
     PAYMENT_OPTIONS,
@@ -1271,6 +1284,51 @@ def build_deposit_summary(lines: list[IIFLine], validation: dict) -> dict[str, O
         "IIF Difference": float(validation.get("iif_difference", 0.0)),
     }
 
+def build_engine_command(
+    *,
+    engine_path: Path,
+    deposit_date: date,
+    membership_path: Path,
+    membership_mode: str,
+    coupon_mode: str,
+    coupon_closeout_total: float | None,
+    coupon_ncg_total: float | None,
+    coupon_mfg_total: float | None,
+    closeout_path: Path | None = None,
+    closeout_preview_path: Path | None = None,
+) -> list[str]:
+    """Build the engine command without performing subprocess or file I/O."""
+    command = [
+        sys.executable,
+        str(engine_path),
+        "--date",
+        deposit_date.strftime("%m/%d/%y"),
+        "--membership-payments-file",
+        str(membership_path),
+        "--membership-mode",
+        membership_mode,
+        "--coupon-mode",
+        coupon_mode,
+    ]
+    if coupon_mode == "closeout":
+        command.extend([
+            "--coupon-closeout-total",
+            f"{coupon_closeout_total:.2f}",
+            "--coupon-ncg-total",
+            f"{coupon_ncg_total:.2f}",
+            "--coupon-mfg-total",
+            f"{coupon_mfg_total:.2f}",
+        ])
+    if closeout_path is not None:
+        command.extend(["--closeout-file", str(closeout_path)])
+        if closeout_preview_path is not None:
+            command.extend([
+                "--closeout-preview-output",
+                str(closeout_preview_path),
+            ])
+    return command
+
+
 def run_engine(
     uploaded_file,
     settlement_file,
@@ -1281,6 +1339,8 @@ def run_engine(
     coupon_closeout_total: float | None,
     coupon_ncg_total: float | None,
     coupon_mfg_total: float | None,
+    closeout_payload: dict | None = None,
+    preview_only: bool = False,
 ) -> dict:
     if not ENGINE_PATH.exists():
         raise FileNotFoundError(
@@ -1304,76 +1364,153 @@ def run_engine(
     settlement_path = INPUT_DIR / settlement_name
     settlement_path.write_bytes(settlement_file.getvalue())
 
-    expected_iif = QB_IMPORT_DIR / f"deposit_{deposit_date.strftime('%Y%m%d')}.iif"
-    if expected_iif.exists():
-        expected_iif.unlink()
+    owned_iif_path = QB_IMPORT_DIR / f"deposit_{deposit_date.strftime('%Y%m%d')}.iif"
+    if owned_iif_path.exists():
+        owned_iif_path.unlink()
 
-    membership_path = write_membership_payments_file(RUNTIME_TEMP_DIR, membership_payments)
-    cmd = [
-        sys.executable,
-        str(ENGINE_PATH),
-        "--date",
-        deposit_date.strftime("%m/%d/%y"),
-        "--membership-payments-file",
-        str(membership_path),
-        "--membership-mode",
-        membership_mode,
-        "--coupon-mode",
-        coupon_mode,
-    ]
-    if coupon_mode == "closeout":
-        cmd.extend([
-            "--coupon-closeout-total",
-            f"{coupon_closeout_total:.2f}",
-            "--coupon-ncg-total",
-            f"{coupon_ncg_total:.2f}",
-            "--coupon-mfg-total",
-            f"{coupon_mfg_total:.2f}",
-        ])
-
+    membership_path = None
+    closeout_path = None
+    closeout_preview_path = None
+    closeout_final_run = False
+    engine_invocation_attempted = False
+    final_result_validated = False
     try:
-        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
-    finally:
-        membership_path.unlink(missing_ok=True)
-    log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-
-    for status_path in [LOG_DIR / "last_run_status.txt", QB_IMPORT_DIR / "last_run_status.txt"]:
-        if status_path.exists():
-            try:
-                status_text = status_path.read_text(encoding="utf-8", errors="replace")
-                if status_text.strip():
-                    log_text += "\n\n--- STATUS SUMMARY ---\n" + status_text
-            except Exception:
-                pass
-            break
-
-    if proc.returncode != 0:
-        raise RuntimeError(log_text.strip() or f"Deposit engine exited with code {proc.returncode}.")
-
-    if not expected_iif.exists():
-        candidates = sorted(QB_IMPORT_DIR.glob("deposit_*.iif"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if candidates:
-            expected_iif = candidates[0]
-
-    if not expected_iif.exists():
-        raise RuntimeError(
-            "The automation finished, but no IIF file was found in output/qb_imports.\n\n"
-            + log_text[-4000:]
+        normalized_closeout_payload = (
+            normalize_closeout_payload(closeout_payload)
+            if closeout_payload is not None else None
         )
+        if (
+            preview_only
+            and (
+                normalized_closeout_payload is None
+                or normalized_closeout_payload["mode"] != "closeout"
+            )
+        ):
+            raise ValueError("Closeout preview requires a Closeout payload.")
+        closeout_final_run = (
+            normalized_closeout_payload is not None
+            and normalized_closeout_payload["mode"] == "closeout"
+            and not preview_only
+        )
+        membership_path = write_membership_payments_file(
+            RUNTIME_TEMP_DIR, membership_payments
+        )
+        if normalized_closeout_payload is not None:
+            closeout_path = write_closeout_payload_file(
+                RUNTIME_TEMP_DIR, normalized_closeout_payload
+            )
+            if normalized_closeout_payload["mode"] == "closeout":
+                closeout_preview_path = RUNTIME_TEMP_DIR / (
+                    f"closeout_preview_{uuid4().hex}.json"
+                )
+        cmd = build_engine_command(
+            engine_path=ENGINE_PATH,
+            deposit_date=deposit_date,
+            membership_path=membership_path,
+            membership_mode=membership_mode,
+            coupon_mode=coupon_mode,
+            coupon_closeout_total=coupon_closeout_total,
+            coupon_ncg_total=coupon_ncg_total,
+            coupon_mfg_total=coupon_mfg_total,
+            closeout_path=closeout_path,
+            closeout_preview_path=closeout_preview_path,
+        )
+        engine_invocation_attempted = True
+        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
+        log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
-    lines, iif_df = parse_iif(expected_iif)
-    validation = parse_validation(log_text, lines)
+        for status_path in [LOG_DIR / "last_run_status.txt", QB_IMPORT_DIR / "last_run_status.txt"]:
+            if status_path.exists():
+                try:
+                    status_text = status_path.read_text(encoding="utf-8", errors="replace")
+                    if status_text.strip():
+                        log_text += "\n\n--- STATUS SUMMARY ---\n" + status_text
+                except Exception:
+                    pass
+                break
 
-    return {
-        "input_path": input_path,
-        "settlement_path": settlement_path,
-        "iif_path": expected_iif,
-        "iif_bytes": expected_iif.read_bytes(),
-        "lines": lines,
-        "iif_df": iif_df,
-        "validation": validation,
-        "log_text": log_text,
-    }
+        if proc.returncode != 0:
+            raise RuntimeError(log_text.strip() or f"Deposit engine exited with code {proc.returncode}.")
+
+        closeout_preview = None
+        if closeout_preview_path is not None:
+            if not closeout_preview_path.exists():
+                raise RuntimeError("The automation finished without a Closeout preview.")
+            try:
+                closeout_preview = json.loads(
+                    closeout_preview_path.read_text(encoding="utf-8")
+                )
+            except json.JSONDecodeError:
+                raise RuntimeError("The automation wrote a malformed Closeout preview.") from None
+            if not isinstance(closeout_preview, dict):
+                raise RuntimeError("The automation wrote an invalid Closeout preview.")
+
+        if preview_only:
+            return {
+                "input_path": input_path,
+                "settlement_path": settlement_path,
+                "closeout_preview": closeout_preview,
+                "preview_only": True,
+                "log_text": log_text,
+            }
+
+        if closeout_preview is not None:
+            try:
+                remaining_after_approval = float(
+                    closeout_preview["remaining_after_approval"]
+                )
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("Closeout preview is missing a valid approval balance.") from None
+            if (
+                closeout_preview.get("requires_approval") is not False
+                or remaining_after_approval != 0.0
+            ):
+                raise ValueError(
+                    "Closeout Sheet approval is required before generating a downloadable IIF."
+                )
+
+        resolved_iif_path = owned_iif_path
+        if not resolved_iif_path.exists():
+            candidates = sorted(QB_IMPORT_DIR.glob("deposit_*.iif"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if candidates:
+                resolved_iif_path = candidates[0]
+
+        if not resolved_iif_path.exists():
+            raise RuntimeError(
+                "The automation finished, but no IIF file was found in output/qb_imports.\n\n"
+                + log_text[-4000:]
+            )
+
+        lines, iif_df = parse_iif(resolved_iif_path)
+        validation = parse_validation(log_text, lines)
+
+        result = {
+            "input_path": input_path,
+            "settlement_path": settlement_path,
+            "iif_path": resolved_iif_path,
+            "iif_bytes": resolved_iif_path.read_bytes(),
+            "lines": lines,
+            "iif_df": iif_df,
+            "validation": validation,
+            "closeout_preview": closeout_preview,
+            "preview_only": False,
+            "log_text": log_text,
+        }
+        final_result_validated = True
+        return result
+    finally:
+        if membership_path is not None:
+            membership_path.unlink(missing_ok=True)
+        if closeout_path is not None:
+            closeout_path.unlink(missing_ok=True)
+        if closeout_preview_path is not None:
+            closeout_preview_path.unlink(missing_ok=True)
+        if preview_only or (
+            closeout_final_run
+            and engine_invocation_attempted
+            and not final_result_validated
+        ):
+            owned_iif_path.unlink(missing_ok=True)
 
 def card(label: str, value: str, foot: str = ""):
     st.markdown(
@@ -1954,6 +2091,8 @@ coupon_mode = "quickbooks"
 coupon_closeout_total = None
 coupon_ncg_total = None
 coupon_mfg_total = None
+closeout_payload = None
+closeout_valid = False
 
 if uploaded:
     try:
@@ -2272,7 +2411,21 @@ if subscription_total > 0:
             membership_valid = False
             st.warning(str(exc), icon="⚠️")
 
-if coupon_bs_total > 0:
+closeout_workbook_key = (
+    membership_editor_key(upload_bytes, st.session_state["file_uploader_key"])
+    if uploaded
+    else None
+)
+closeout_choice_state = (
+    st.session_state.get(f"closeout_handling_{closeout_workbook_key}")
+    if closeout_workbook_key is not None
+    else None
+)
+
+if uploaded and coupon_workflow_is_required(
+    coupon_bs_total,
+    closeout_choice_state,
+):
     st.markdown("### Coupons Receivable")
     st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
     coupon_handling_choice = st.radio(
@@ -2336,27 +2489,408 @@ if coupon_bs_total > 0:
             key=f"coupon_mfg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
         )
 
-        if coupon_closeout_total <= 0:
+        try:
+            coupon_preview = reconcile_coupon_receivable(
+                coupon_bs_total,
+                mode=coupon_mode,
+                closeout_actual_total=coupon_closeout_total,
+                ncg_total=coupon_ncg_total,
+                mfg_total=coupon_mfg_total,
+            )
+            discrepancy = coupon_preview["difference"]
+            st.success(
+                f"Reconciled — counted coupons total ${coupon_closeout_total:,.2f}. "
+                f"Closeout Sheet minus Balance Sheet: {discrepancy:+,.2f}.",
+                icon="✅",
+            )
+        except ValueError as exc:
             coupon_valid = False
-            st.caption("Enter the Closeout Sheet Coupon Actual Total.")
-        else:
-            try:
-                coupon_preview = reconcile_coupon_receivable(
-                    coupon_bs_total,
-                    mode=coupon_mode,
-                    closeout_actual_total=coupon_closeout_total,
-                    ncg_total=coupon_ncg_total,
-                    mfg_total=coupon_mfg_total,
+            st.warning(str(exc), icon="⚠️")
+
+if uploaded:
+    closeout_payload_key = f"closeout_payload_{closeout_workbook_key}"
+    closeout_preview_key = f"closeout_preview_{closeout_workbook_key}"
+    closeout_choice = st.radio(
+        "How should the Closeout Sheet be handled?",
+        options=[
+            "Breakdown in app using Closeout Sheet",
+            "Finish manually in QuickBooks",
+        ],
+        horizontal=True,
+        index=None,
+        key=f"closeout_handling_{closeout_workbook_key}",
+    )
+
+    if closeout_choice is None:
+        st.caption("Select how you want to handle the Closeout Sheet before building the deposit.")
+    elif closeout_choice == "Finish manually in QuickBooks":
+        closeout_payload = {"mode": "manual"}
+        closeout_valid = True
+        st.session_state[closeout_payload_key] = closeout_payload
+        st.info(
+            "The app will keep the existing deposit process. Complete any Closeout Sheet changes in QuickBooks.",
+            icon="ℹ️",
+        )
+    else:
+        st.markdown("### Closeout Sheet reconciliation")
+        st.caption(
+            "Enter positive amounts exactly as printed on the paper Closeout Sheet. "
+            "The app handles which amounts add to or remove from the deposit."
+        )
+        coupon_link_ready = coupon_mode == "closeout" and coupon_valid
+        if not coupon_link_ready:
+            st.warning(
+                "Choose Breakdown in app using Closeout Sheet for Coupons Receivable first. "
+                "Vendor Coupons must use the reconciled NCG + MFG total.",
+                icon="⚠️",
+            )
+
+        closeout_baselines = None
+        try:
+            closeout_baselines = read_closeout_baselines(
+                upload_bytes,
+                roles.get("bs"),
+                roles.get("hash"),
+            )
+        except Exception as exc:
+            st.error(f"Could not read Closeout baselines: {exc}", icon="🚫")
+
+        current_closeout_payload = None
+        closeout_form_error = None
+        if closeout_baselines is not None:
+            counted_coupon_total = (
+                float(coupon_ncg_total or 0) + float(coupon_mfg_total or 0)
+                if coupon_mode == "closeout"
+                else 0.0
+            )
+            closeout_defaults = default_closeout_actuals(
+                closeout_baselines,
+                counted_coupon_total,
+            )
+            closeout_actuals = {}
+            header_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
+            for column, heading in zip(
+                header_columns,
+                ["Category", "System / BS", "Actual", "Difference", "Status"],
+            ):
+                column.caption(heading)
+            for field in STANDARD_CLOSEOUT_ORDER:
+                row_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
+                label = STANDARD_METADATA[field]["label"]
+                baseline = float(closeout_baselines[field])
+                row_columns[0].write(label)
+                row_columns[1].write(f"${baseline:,.2f}")
+                if field == "vendor_coupons":
+                    actual = counted_coupon_total
+                    row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
+                else:
+                    actual = row_columns[2].number_input(
+                        f"{label} actual",
+                        min_value=0.0,
+                        value=float(closeout_defaults[field]),
+                        step=0.01,
+                        format="%.2f",
+                        label_visibility="collapsed",
+                        key=f"closeout_actual_{field}_{closeout_workbook_key}",
+                    )
+                closeout_actuals[field] = float(actual)
+                difference = round(float(actual) - baseline, 2)
+                row_columns[3].write(f"{difference:+,.2f}")
+                row_columns[4].write("Match" if difference == 0 else "Review")
+
+            reviewed_closeout = st.checkbox(
+                "I reviewed these amounts against the paper Closeout Sheet",
+                value=False,
+                key=f"closeout_reviewed_{closeout_workbook_key}",
+            )
+
+            st.markdown("#### Other Closeout Sheet activity")
+            misc_columns = st.columns(3)
+            payroll_choice = misc_columns[0].selectbox(
+                "Payroll - Check Cashing",
+                options=["None", "Adds $4,000", "Removes $4,000"],
+                key=f"closeout_payroll_{closeout_workbook_key}",
+                help="Use the exact $4,000 choice shown on the paper Closeout Sheet.",
+            )
+            payroll_value = {
+                "None": 0.0,
+                "Adds $4,000": 4000.0,
+                "Removes $4,000": -4000.0,
+            }[payroll_choice]
+            safe_choice = misc_columns[1].selectbox(
+                "Safe cash",
+                options=["None", "Overage", "Shortage"],
+                key=f"closeout_safe_type_{closeout_workbook_key}",
+                help=(
+                    "Overage means cash was added to the deposit. "
+                    "Shortage means cash was taken from the deposit."
+                ),
+            )
+            safe_type = safe_choice.casefold()
+            safe_amount_key = f"closeout_safe_amount_{closeout_workbook_key}"
+            if safe_type == "none":
+                st.session_state[safe_amount_key] = 0.0
+            safe_amount_entered = misc_columns[2].number_input(
+                "Safe amount",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                disabled=safe_type == "none",
+                key=safe_amount_key,
+            )
+            safe_amount = 0.0 if safe_type == "none" else float(safe_amount_entered)
+
+            plants_purchase = st.number_input(
+                "Plants Dept - Market Purchases",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                help="Enter a positive amount. This always removes money from the deposit.",
+                key=f"closeout_plants_{closeout_workbook_key}",
+            )
+
+            custom_ids_key = f"closeout_custom_ids_{closeout_workbook_key}"
+            custom_next_key = f"closeout_custom_next_{closeout_workbook_key}"
+            st.session_state.setdefault(custom_ids_key, [])
+            st.session_state.setdefault(custom_next_key, 0)
+            custom_tba = []
+            if st.button(
+                "+ Add other item",
+                type="secondary",
+                key=f"closeout_add_custom_{closeout_workbook_key}",
+            ):
+                next_id = st.session_state[custom_next_key]
+                st.session_state[custom_ids_key] = [
+                    *st.session_state[custom_ids_key],
+                    next_id,
+                ]
+                st.session_state[custom_next_key] = next_id + 1
+                st.rerun()
+            for custom_id in list(st.session_state[custom_ids_key]):
+                custom_columns = st.columns([2.2, 1.1, 1.4, 0.8])
+                memo_key = f"closeout_custom_memo_{closeout_workbook_key}_{custom_id}"
+                amount_key = f"closeout_custom_amount_{closeout_workbook_key}_{custom_id}"
+                direction_key = f"closeout_custom_direction_{closeout_workbook_key}_{custom_id}"
+                memo = custom_columns[0].text_input(
+                    "Memo",
+                    key=memo_key,
+                    label_visibility="collapsed",
+                    placeholder="What is this item?",
                 )
-                discrepancy = coupon_preview["difference"]
-                st.success(
-                    f"Reconciled — counted coupons total ${coupon_closeout_total:,.2f}. "
-                    f"Closeout Sheet minus Balance Sheet: {discrepancy:+,.2f}.",
-                    icon="✅",
+                amount = custom_columns[1].number_input(
+                    "Amount",
+                    min_value=0.0,
+                    value=0.0,
+                    step=0.01,
+                    format="%.2f",
+                    key=amount_key,
+                    label_visibility="collapsed",
+                )
+                direction_label = custom_columns[2].selectbox(
+                    "Direction",
+                    options=["Adds to deposit", "Removes from deposit"],
+                    key=direction_key,
+                    label_visibility="collapsed",
+                )
+                if custom_columns[3].button(
+                    "Remove",
+                    key=f"closeout_remove_custom_{closeout_workbook_key}_{custom_id}",
+                ):
+                    st.session_state[custom_ids_key] = [
+                        row_id
+                        for row_id in st.session_state[custom_ids_key]
+                        if row_id != custom_id
+                    ]
+                    for widget_key in (memo_key, amount_key, direction_key):
+                        st.session_state.pop(widget_key, None)
+                    st.rerun()
+                custom_tba.append(
+                    {
+                        "memo": memo,
+                        "amount": float(amount),
+                        "direction": (
+                            "adds" if direction_label == "Adds to deposit" else "removes"
+                        ),
+                    }
+                )
+
+            final_closeout_total = st.number_input(
+                "Final Closeout Sheet Deposit Total",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                key=f"closeout_final_total_{closeout_workbook_key}",
+            )
+
+            try:
+                current_closeout_payload = build_closeout_form_payload(
+                    baselines=closeout_baselines,
+                    actuals=closeout_actuals,
+                    reviewed=reviewed_closeout,
+                    payroll=payroll_value,
+                    safe_type=safe_type,
+                    safe_amount=safe_amount,
+                    plants_purchase=plants_purchase,
+                    custom_tba=custom_tba,
+                    final_total=final_closeout_total,
+                    approve_final_pos=False,
                 )
             except ValueError as exc:
-                coupon_valid = False
-                st.warning(str(exc), icon="⚠️")
+                closeout_form_error = str(exc)
+
+            saved_closeout_preview = st.session_state.get(closeout_preview_key)
+            final_approval_key = f"closeout_approve_final_{closeout_workbook_key}"
+            closeout_review_context = {
+                "deposit_date": deposit_date.isoformat() if deposit_date else None,
+                "membership_mode": membership_mode,
+                "membership_payments": membership_payments,
+                "coupon_mode": coupon_mode,
+                "coupon_closeout_total": coupon_closeout_total,
+                "coupon_ncg_total": coupon_ncg_total,
+                "coupon_mfg_total": coupon_mfg_total,
+                "settlement_key": (
+                    membership_editor_key(
+                        settlement_file.getvalue(),
+                        st.session_state["file_uploader_key"],
+                    )
+                    if settlement_file is not None
+                    else None
+                ),
+            }
+            preview_is_fresh = bool(
+                current_closeout_payload is not None
+                and closeout_preview_is_fresh(
+                    current_closeout_payload,
+                    saved_closeout_preview,
+                    review_context=closeout_review_context,
+                )
+            )
+            review_settlement_ok = bool(
+                settlement_file is not None
+                and validate_settlement_processed_net_header(
+                    settlement_file.getvalue()
+                )[0]
+            )
+            review_clicked = st.button(
+                "Review Closeout",
+                type="secondary",
+                disabled=(
+                    current_closeout_payload is None
+                    or not coupon_link_ready
+                    or not membership_valid
+                    or deposit_date is None
+                    or not review_settlement_ok
+                ),
+                key=f"review_closeout_{closeout_workbook_key}",
+            )
+            if review_clicked:
+                try:
+                    with st.spinner("Reviewing the full deposit against the Closeout Sheet..."):
+                        with exclusive_run_lock(RUN_LOCK_PATH):
+                            review_result = run_engine(
+                                uploaded,
+                                settlement_file,
+                                deposit_date,
+                                membership_payments,
+                                membership_mode,
+                                coupon_mode,
+                                coupon_closeout_total,
+                                coupon_ncg_total,
+                                coupon_mfg_total,
+                                closeout_payload=current_closeout_payload,
+                                preview_only=True,
+                            )
+                    st.session_state[closeout_preview_key] = {
+                        "input_fingerprint": closeout_input_fingerprint(
+                            current_closeout_payload,
+                            review_context=closeout_review_context,
+                        ),
+                        "preview": review_result["closeout_preview"],
+                    }
+                    st.session_state[final_approval_key] = False
+                    st.session_state[closeout_payload_key] = current_closeout_payload
+                    st.rerun()
+                except Exception as exc:
+                    st.error("The Closeout review could not be completed.")
+                    st.code(str(exc), language="text")
+
+            approve_final_pos = False
+            if preview_is_fresh:
+                closeout_preview = saved_closeout_preview["preview"]
+                st.markdown("#### Closeout review")
+                standard_display = pd.DataFrame(closeout_preview.get("standard_rows", []))
+                if not standard_display.empty:
+                    standard_display = standard_display.rename(
+                        columns={
+                            "label": "Category",
+                            "baseline": "System / BS",
+                            "actual": "Actual",
+                            "difference": "Difference",
+                        }
+                    )
+                    st.dataframe(
+                        standard_display[["Category", "System / BS", "Actual", "Difference"]],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                generated_rows = []
+                for row in closeout_preview.get("standard_rows", []):
+                    if float(row.get("adjustment_qb_effect", 0) or 0) != 0:
+                        generated_rows.append(
+                            {
+                                "Account": row.get("adjustment_account"),
+                                "Memo": row.get("adjustment_memo"),
+                                "Effect": row.get("adjustment_qb_effect"),
+                            }
+                        )
+                for row in closeout_preview.get("misc_rows", []):
+                    generated_rows.append(
+                        {
+                            "Account": row.get("account"),
+                            "Memo": row.get("memo"),
+                            "Effect": row.get("qb_effect"),
+                        }
+                    )
+                if generated_rows:
+                    st.dataframe(
+                        pd.DataFrame(generated_rows),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                total_columns = st.columns(3)
+                total_columns[0].metric(
+                    "Generated deposit",
+                    f"${float(closeout_preview['provisional_total']):,.2f}",
+                )
+                total_columns[1].metric(
+                    "Paper Closeout total",
+                    f"${float(closeout_preview['final_total']):,.2f}",
+                )
+                remaining = float(closeout_preview["remaining"])
+                total_columns[2].metric("Remaining", f"{remaining:+,.2f}")
+                if remaining != 0:
+                    st.warning(
+                        f"The reviewed deposit still differs by {remaining:+,.2f}. "
+                        "Approve the exact final POS adjustment only after checking the paper sheet.",
+                        icon="⚠️",
+                    )
+                    approve_final_pos = st.checkbox(
+                        "Add final POS adjustment",
+                        value=False,
+                        key=final_approval_key,
+                    )
+                current_closeout_payload = {
+                    **current_closeout_payload,
+                    "approve_final_pos": approve_final_pos,
+                }
+                closeout_payload = normalize_closeout_payload(current_closeout_payload)
+                closeout_valid = remaining == 0 or approve_final_pos
+                st.session_state[closeout_payload_key] = closeout_payload
+            elif closeout_form_error and reviewed_closeout:
+                st.caption(closeout_form_error)
 
 settlement_date_info = None
 settlement_date_mismatch = False
@@ -2423,6 +2957,7 @@ run_clicked = st.button(
         or not settlement_source_ok
         or not membership_valid
         or not coupon_valid
+        or not closeout_valid
     ),
 )
 
@@ -2440,6 +2975,7 @@ if run_clicked:
                     coupon_closeout_total,
                     coupon_ncg_total,
                     coupon_mfg_total,
+                    closeout_payload=closeout_payload,
                 )
                 st.session_state["run_result"] = result
                 st.session_state["run_date"] = deposit_date

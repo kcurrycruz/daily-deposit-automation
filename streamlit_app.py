@@ -2976,6 +2976,7 @@ settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
 settlement_source_sheet = None
+run_clicked = False
 
 if settlement_file is not None:
     settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(settlement_file.getvalue())

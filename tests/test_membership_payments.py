@@ -70,6 +70,52 @@ class MembershipPaymentTests(unittest.TestCase):
             },
         )
 
+    def test_deposit_action_is_safe_before_files_are_uploaded(self):
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+        settlement_block = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.If)
+            and any(
+                isinstance(child, ast.Name)
+                and child.id == "run_clicked"
+                and isinstance(child.ctx, ast.Store)
+                for child in ast.walk(node)
+            )
+        )
+        run_block = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Name)
+            and node.test.id == "run_clicked"
+        )
+        safe_defaults = [
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "run_clicked"
+                for target in node.targets
+            )
+            and source_tree.body.index(node) < source_tree.body.index(settlement_block)
+        ]
+
+        namespace = {"settlement_file": None}
+        exec(
+            compile(
+                ast.Module(
+                    body=[*safe_defaults, settlement_block, run_block],
+                    type_ignores=[],
+                ),
+                str(source_path),
+                "exec",
+            ),
+            namespace,
+        )
+
     def test_rejected_final_closeout_removes_generated_iif(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

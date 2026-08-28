@@ -2605,8 +2605,7 @@ if uploaded:
             )
 
             st.markdown("#### Other Closeout Sheet activity")
-            misc_columns = st.columns(3)
-            payroll_choice = misc_columns[0].selectbox(
+            payroll_choice = st.selectbox(
                 "Payroll - Check Cashing",
                 options=["None", "Adds $4,000", "Removes $4,000"],
                 key=f"closeout_payroll_{closeout_workbook_key}",
@@ -2617,7 +2616,19 @@ if uploaded:
                 "Adds $4,000": 4000.0,
                 "Removes $4,000": -4000.0,
             }[payroll_choice]
-            safe_choice = misc_columns[1].selectbox(
+
+            plants_purchase = st.number_input(
+                "Plants Dept - Market Purchases",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                help="Enter a positive amount. This always removes money from the deposit.",
+                key=f"closeout_plants_{closeout_workbook_key}",
+            )
+
+            safe_columns = st.columns(2)
+            safe_choice = safe_columns[0].selectbox(
                 "Safe cash",
                 options=["None", "Overage", "Shortage"],
                 key=f"closeout_safe_type_{closeout_workbook_key}",
@@ -2630,7 +2641,7 @@ if uploaded:
             safe_amount_key = f"closeout_safe_amount_{closeout_workbook_key}"
             if safe_type == "none":
                 st.session_state[safe_amount_key] = 0.0
-            safe_amount_entered = misc_columns[2].number_input(
+            safe_amount_entered = safe_columns[1].number_input(
                 "Safe amount",
                 min_value=0.0,
                 value=0.0,
@@ -2640,16 +2651,6 @@ if uploaded:
                 key=safe_amount_key,
             )
             safe_amount = 0.0 if safe_type == "none" else float(safe_amount_entered)
-
-            plants_purchase = st.number_input(
-                "Plants Dept - Market Purchases",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                format="%.2f",
-                help="Enter a positive amount. This always removes money from the deposit.",
-                key=f"closeout_plants_{closeout_workbook_key}",
-            )
 
             custom_ids_key = f"closeout_custom_ids_{closeout_workbook_key}"
             custom_next_key = f"closeout_custom_next_{closeout_workbook_key}"

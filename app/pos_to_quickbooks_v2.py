@@ -1342,7 +1342,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("8314000 · FE - Cash Over/Shorts", "", "Over/Short per POS (to = POS total)"),
     ]
 
-    retained_tba_placeholders = []
     for entry in MANUAL_LINES:
         acct, name, memo = entry[0], entry[1], entry[2]
         amt = entry[3] if len(entry) > 3 else None
@@ -1366,21 +1365,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 }
             )
         )
-        if normalized_closeout is not None and (
-            not has_amount(amt)
-            and acct == "4444 · TBA Purchases"
-            and memo in {"InHouse:", ""}
-        ):
-            retained_tba_placeholders.append(
-                {
-                    "account": acct,
-                    "name": name,
-                    "memo": memo,
-                    "iif_amount": None,
-                    "class_name": class_name,
-                }
-            )
-            continue
         if has_amount(amt):
             iif_amt = -amt
             spl_total += iif_amt
@@ -1533,7 +1517,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         pending_tba_rows = (
             custom_tba_rows
             + existing_misc_tba_rows
-            + retained_tba_placeholders
             + offline_tba_rows
         )
         pending_tba_iif_total = sum(

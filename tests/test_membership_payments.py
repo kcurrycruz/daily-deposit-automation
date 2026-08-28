@@ -2129,6 +2129,21 @@ except RuntimeError:
                 self.assertIn(detail_line, text)
         self.assertNotIn("Offline Credit Card:", text)
 
+        iif_lines = text.splitlines()
+        inhouse_position = next(
+            index
+            for index, line in enumerate(iif_lines)
+            if "\t4444 · TBA Purchases\t\t8.00\tInHouse:\t" in line
+        )
+        inhouse_breakdown_rows = [
+            line.split("\t")[3:8]
+            for line in iif_lines[inhouse_position + 1:inhouse_position + 6]
+        ]
+        self.assertEqual(
+            inhouse_breakdown_rows,
+            [["4444 · TBA Purchases", "", "", "", ""]] * 5,
+        )
+
         ordered_memos = [
             "Over/Short per Closeout Sheet - Paid In",
             "Payroll - Check Cashing",

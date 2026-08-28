@@ -56,6 +56,166 @@ def workbook_bytes(
 
 
 class CloseoutReconciliationTests(unittest.TestCase):
+    def test_build_standard_reconciliation_returns_eight_rows_in_approved_order(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {
+            "cash": 100.00,
+            "checks": 50.00,
+            "donation": 20.00,
+            "charge_house": 10.00,
+            "offline_zon": 12.00,
+            "vendor_coupons": 181.50,
+            "paid_out": 40.00,
+            "paid_in": 30.00,
+        }
+        actuals = {
+            "cash": 105.00,
+            "checks": 45.00,
+            "donation": 25.00,
+            "charge_house": 8.00,
+            "offline_zon": 0.00,
+            "vendor_coupons": 188.25,
+            "paid_out": 50.00,
+            "paid_in": 35.00,
+        }
+
+        result = build_standard_reconciliation(baselines, actuals)
+
+        self.assertEqual([row["key"] for row in result], list(STANDARD_ORDER))
+        self.assertEqual(len(result), 8)
+        self.assertTrue(
+            all(
+                set(row)
+                == {
+                    "key",
+                    "label",
+                    "baseline",
+                    "actual",
+                    "difference",
+                    "detail_qb_effect",
+                    "adjustment_account",
+                    "adjustment_memo",
+                    "adjustment_qb_effect",
+                    "managed_externally",
+                }
+                for row in result
+            )
+        )
+
+    def test_build_standard_reconciliation_calculates_fixture_effects_and_metadata(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {
+            "cash": 100.00,
+            "checks": 50.00,
+            "donation": 20.00,
+            "charge_house": 10.00,
+            "offline_zon": 12.00,
+            "vendor_coupons": 181.50,
+            "paid_out": 40.00,
+            "paid_in": 30.00,
+        }
+        actuals = {
+            "cash": 105.00,
+            "checks": 45.00,
+            "donation": 25.00,
+            "charge_house": 8.00,
+            "offline_zon": 0.00,
+            "vendor_coupons": 188.25,
+            "paid_out": 50.00,
+            "paid_in": 35.00,
+        }
+
+        rows = build_standard_reconciliation(baselines, actuals)
+        by_key = {row["key"]: row for row in rows}
+
+        self.assertEqual(by_key["cash"]["difference"], 5.00)
+        self.assertIsNone(by_key["cash"]["detail_qb_effect"])
+        self.assertEqual(by_key["cash"]["adjustment_qb_effect"], 5.00)
+        self.assertEqual(
+            by_key["checks"]["adjustment_memo"],
+            "Over/Short per Closeout Sheet - Check",
+        )
+        self.assertEqual(by_key["donation"]["difference"], 5.00)
+        self.assertEqual(by_key["donation"]["detail_qb_effect"], -25.00)
+        self.assertEqual(by_key["donation"]["adjustment_qb_effect"], 5.00)
+        self.assertEqual(by_key["paid_in"]["detail_qb_effect"], 35.00)
+        self.assertEqual(by_key["paid_in"]["adjustment_qb_effect"], -5.00)
+        self.assertTrue(by_key["vendor_coupons"]["managed_externally"])
+        self.assertEqual(
+            by_key["vendor_coupons"]["adjustment_memo"],
+            "Over/Short per Closeout Sheet - Coupon",
+        )
+
+    def test_build_standard_reconciliation_rejects_negative_actual_for_every_category(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {key: 1.00 for key in STANDARD_ORDER}
+        actuals = {key: 1.00 for key in STANDARD_ORDER}
+
+        for key in STANDARD_ORDER:
+            with self.subTest(key=key), self.assertRaisesRegex(
+                ValueError, "zero or greater"
+            ):
+                invalid_actuals = dict(actuals)
+                invalid_actuals[key] = -0.01
+                build_standard_reconciliation(baselines, invalid_actuals)
+
+    def test_build_standard_reconciliation_rejects_missing_baseline_or_actual_with_label(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {key: 1.00 for key in STANDARD_ORDER}
+        actuals = {key: 1.00 for key in STANDARD_ORDER}
+        labels = {
+            "cash": "Cash",
+            "checks": "Checks",
+            "donation": "Donation",
+            "charge_house": "Charge (House)",
+            "offline_zon": "Offline Zon",
+            "vendor_coupons": "Vendor Coupons",
+            "paid_out": "Paid Out",
+            "paid_in": "Paid In",
+        }
+
+        for key, label in labels.items():
+            with self.subTest(mapping="baseline", key=key):
+                missing_baseline = dict(baselines)
+                missing_baseline.pop(key)
+                with self.assertRaises(ValueError) as error:
+                    build_standard_reconciliation(missing_baseline, actuals)
+                self.assertIn(label, str(error.exception))
+            with self.subTest(mapping="actual", key=key):
+                missing_actual = dict(actuals)
+                missing_actual.pop(key)
+                with self.assertRaises(ValueError) as error:
+                    build_standard_reconciliation(baselines, missing_actual)
+                self.assertIn(label, str(error.exception))
+
+    def test_build_standard_reconciliation_quantizes_decimal_sensitive_values(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {key: "0.00" for key in STANDARD_ORDER}
+        actuals = {key: "0.00" for key in STANDARD_ORDER}
+        baselines["donation"] = "10.009"
+        actuals["donation"] = "10.004"
+
+        donation = build_standard_reconciliation(baselines, actuals)[2]
+
+        for field in (
+            "baseline",
+            "actual",
+            "difference",
+            "detail_qb_effect",
+            "adjustment_qb_effect",
+        ):
+            self.assertIsInstance(donation[field], float)
+        self.assertEqual(donation["baseline"], 10.01)
+        self.assertEqual(donation["actual"], 10.00)
+        self.assertEqual(donation["difference"], -0.01)
+        self.assertEqual(donation["detail_qb_effect"], -10.00)
+        self.assertEqual(donation["adjustment_qb_effect"], -0.01)
+
     def test_read_closeout_baselines_returns_approved_key_order_and_values(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

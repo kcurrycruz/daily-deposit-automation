@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 
@@ -25,6 +26,79 @@ _BS_CODE_TO_FIELD = {
 }
 
 
+STANDARD_METADATA = OrderedDict(
+    [
+        (
+            "cash",
+            {
+                "label": "Cash",
+                "memo": "Over/Short per Closeout Sheet - Cash",
+                "detail_direction": None,
+            },
+        ),
+        (
+            "checks",
+            {
+                "label": "Checks",
+                "memo": "Over/Short per Closeout Sheet - Check",
+                "detail_direction": None,
+            },
+        ),
+        (
+            "donation",
+            {
+                "label": "Donation",
+                "memo": "Over/Short per Closeout Sheet - Donation",
+                "detail_direction": -1,
+            },
+        ),
+        (
+            "charge_house",
+            {
+                "label": "Charge (House)",
+                "memo": "Over/Short per Closeout Sheet - Charge (House)",
+                "detail_direction": -1,
+            },
+        ),
+        (
+            "offline_zon",
+            {
+                "label": "Offline Zon",
+                "memo": "Over/Short per Closeout Sheet - Offline Zon",
+                "detail_direction": -1,
+            },
+        ),
+        (
+            "vendor_coupons",
+            {
+                "label": "Vendor Coupons",
+                "memo": "Over/Short per Closeout Sheet - Coupon",
+                "detail_direction": -1,
+                "managed_externally": True,
+            },
+        ),
+        (
+            "paid_out",
+            {
+                "label": "Paid Out",
+                "memo": "Over/Short per Closeout Sheet - Paid Out",
+                "detail_direction": -1,
+            },
+        ),
+        (
+            "paid_in",
+            {
+                "label": "Paid In",
+                "memo": "Over/Short per Closeout Sheet - Paid In",
+                "detail_direction": 1,
+            },
+        ),
+    ]
+)
+
+_STANDARD_ADJUSTMENT_ACCOUNT = "8314000 · FE - Cash Over/Shorts"
+
+
 def _money(value, label: str) -> Decimal:
     try:
         amount = Decimal(str(value)).quantize(Decimal("0.01"))
@@ -33,6 +107,62 @@ def _money(value, label: str) -> Decimal:
     if not amount.is_finite():
         raise ValueError(f"{label} must be a valid monetary amount")
     return amount
+
+
+def build_standard_reconciliation(
+    baselines: dict[str, float],
+    actuals: dict[str, float],
+) -> list[dict]:
+    """Build the approved closeout reconciliation rows in canonical order."""
+    normalized_baselines = {}
+    normalized_actuals = {}
+    for key, metadata in STANDARD_METADATA.items():
+        label = metadata["label"]
+        if key not in baselines:
+            raise ValueError(f"Closeout {label} is missing")
+        if key not in actuals:
+            raise ValueError(f"Closeout {label} is missing")
+
+        normalized_baselines[key] = abs(_money(baselines[key], f"{label} baseline"))
+        actual = _money(actuals[key], f"{label} actual")
+        if actual < 0:
+            raise ValueError(f"{label} must be zero or greater")
+        normalized_actuals[key] = actual
+
+    rows = []
+    for key, metadata in STANDARD_METADATA.items():
+        label = metadata["label"]
+        memo = metadata["memo"]
+        detail_direction = metadata.get("detail_direction")
+        baseline = normalized_baselines[key]
+        actual = normalized_actuals[key]
+        difference = (actual - baseline).quantize(Decimal("0.01"))
+        if detail_direction is None:
+            detail_qb_effect = None
+            adjustment_qb_effect = difference
+        else:
+            detail_qb_effect = (actual * detail_direction).quantize(Decimal("0.01"))
+            adjustment_qb_effect = (
+                (baseline * detail_direction) - (actual * detail_direction)
+            ).quantize(Decimal("0.01"))
+
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "baseline": float(baseline),
+                "actual": float(actual),
+                "difference": float(difference),
+                "detail_qb_effect": (
+                    None if detail_qb_effect is None else float(detail_qb_effect)
+                ),
+                "adjustment_account": _STANDARD_ADJUSTMENT_ACCOUNT,
+                "adjustment_memo": memo,
+                "adjustment_qb_effect": float(adjustment_qb_effect),
+                "managed_externally": bool(metadata.get("managed_externally")),
+            }
+        )
+    return rows
 
 
 def _code(value):

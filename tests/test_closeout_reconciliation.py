@@ -216,6 +216,35 @@ class CloseoutReconciliationTests(unittest.TestCase):
         self.assertEqual(donation["detail_qb_effect"], -10.00)
         self.assertEqual(donation["adjustment_qb_effect"], -0.01)
 
+    def test_build_standard_reconciliation_rejects_negative_subcent_actuals_for_every_category(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {key: 1.00 for key in STANDARD_ORDER}
+        actuals = {key: 1.00 for key in STANDARD_ORDER}
+
+        for key in STANDARD_ORDER:
+            with self.subTest(key=key), self.assertRaisesRegex(
+                ValueError, "zero or greater"
+            ):
+                negative_subcent_actuals = dict(actuals)
+                negative_subcent_actuals[key] = "-0.004"
+                build_standard_reconciliation(baselines, negative_subcent_actuals)
+
+    def test_build_standard_reconciliation_uses_canonical_order_for_reversed_mappings(self):
+        from app.closeout_reconciliation import build_standard_reconciliation
+
+        baselines = {key: float(index) for index, key in enumerate(reversed(STANDARD_ORDER), 1)}
+        actuals = {key: float(index) for index, key in enumerate(reversed(STANDARD_ORDER), 1)}
+
+        rows = build_standard_reconciliation(baselines, actuals)
+
+        self.assertEqual([row["key"] for row in rows], list(STANDARD_ORDER))
+
+    def test_standard_metadata_covers_exactly_canonical_closeout_keys(self):
+        from app.closeout_reconciliation import STANDARD_METADATA, STANDARD_CLOSEOUT_ORDER
+
+        self.assertEqual(set(STANDARD_METADATA), set(STANDARD_CLOSEOUT_ORDER))
+
     def test_read_closeout_baselines_returns_approved_key_order_and_values(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

@@ -116,7 +116,8 @@ def build_standard_reconciliation(
     """Build the approved closeout reconciliation rows in canonical order."""
     normalized_baselines = {}
     normalized_actuals = {}
-    for key, metadata in STANDARD_METADATA.items():
+    for key in STANDARD_CLOSEOUT_ORDER:
+        metadata = STANDARD_METADATA[key]
         label = metadata["label"]
         if key not in baselines:
             raise ValueError(f"Closeout {label} is missing")
@@ -124,13 +125,20 @@ def build_standard_reconciliation(
             raise ValueError(f"Closeout {label} is missing")
 
         normalized_baselines[key] = abs(_money(baselines[key], f"{label} baseline"))
+        try:
+            raw_actual = Decimal(str(actuals[key]))
+        except (InvalidOperation, TypeError, ValueError):
+            raw_actual = None
+        if raw_actual is not None and raw_actual.is_finite() and raw_actual < 0:
+            raise ValueError(f"{label} must be zero or greater")
         actual = _money(actuals[key], f"{label} actual")
         if actual < 0:
             raise ValueError(f"{label} must be zero or greater")
         normalized_actuals[key] = actual
 
     rows = []
-    for key, metadata in STANDARD_METADATA.items():
+    for key in STANDARD_CLOSEOUT_ORDER:
+        metadata = STANDARD_METADATA[key]
         label = metadata["label"]
         memo = metadata["memo"]
         detail_direction = metadata.get("detail_direction")

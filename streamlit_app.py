@@ -64,6 +64,7 @@ from app.membership_payments import (
     subscription_action_status,
     write_membership_payments_file,
 )
+from app.ui_helpers import workflow_heading_html
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -423,6 +424,28 @@ st.markdown(
         letter-spacing: .12em;
         text-transform: uppercase;
         margin: 8px 0 6px;
+    }
+
+    .hwfc-workflow-heading {
+        background: linear-gradient(90deg, rgba(47,82,51,.48), rgba(22,27,34,.94));
+        border: 1px solid #315F3A;
+        border-left: 5px solid #78A85B;
+        border-radius: 14px;
+        padding: 15px 18px;
+        margin: 28px 0 18px;
+    }
+
+    .hwfc-workflow-heading-title {
+        color: #FFFDF8;
+        font-size: 1.45rem;
+        font-weight: 850;
+        line-height: 1.2;
+    }
+
+    .hwfc-workflow-heading-sub {
+        color: #C7D2C2;
+        font-size: .92rem;
+        margin-top: 4px;
     }
 
     .hwfc-result {
@@ -2115,7 +2138,13 @@ if uploaded and membership_valid:
         st.success(status_text, icon="✅")
 
 if subscription_total > 0:
-    st.markdown("### Member share payments")
+    st.markdown(
+        workflow_heading_html(
+            "Member Share Payments",
+            "Handle membership revenue for this deposit.",
+        ),
+        unsafe_allow_html=True,
+    )
     handling_choice = st.radio(
         "How should these payments be handled?",
         options=[
@@ -2426,7 +2455,13 @@ if uploaded and coupon_workflow_is_required(
     coupon_bs_total,
     closeout_choice_state,
 ):
-    st.markdown("### Coupons Receivable")
+    st.markdown(
+        workflow_heading_html(
+            "Coupons Receivable",
+            "Reconcile NCG and MFG coupons.",
+        ),
+        unsafe_allow_html=True,
+    )
     st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
     coupon_handling_choice = st.radio(
         "How should Coupons Receivable be handled?",
@@ -2510,6 +2545,13 @@ if uploaded and coupon_workflow_is_required(
 if uploaded:
     closeout_payload_key = f"closeout_payload_{closeout_workbook_key}"
     closeout_preview_key = f"closeout_preview_{closeout_workbook_key}"
+    st.markdown(
+        workflow_heading_html(
+            "Closeout Sheet",
+            "Match the deposit to the paper Closeout Sheet.",
+        ),
+        unsafe_allow_html=True,
+    )
     closeout_choice = st.radio(
         "How should the Closeout Sheet be handled?",
         options=[

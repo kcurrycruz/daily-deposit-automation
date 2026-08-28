@@ -9,6 +9,22 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_workflow_heading_html_escapes_visible_content(self):
+        try:
+            from app.ui_helpers import workflow_heading_html
+        except ModuleNotFoundError:
+            self.fail("workflow heading renderer is missing")
+
+        rendered = workflow_heading_html(
+            "Member & <Share>",
+            'Use "QuickBooks" safely',
+        )
+
+        self.assertIn('class="hwfc-workflow-heading"', rendered)
+        self.assertIn("Member &amp; &lt;Share&gt;", rendered)
+        self.assertIn("Use &quot;QuickBooks&quot; safely", rendered)
+        self.assertNotIn("Member & <Share>", rendered)
+
     def test_rejected_final_closeout_removes_generated_iif(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

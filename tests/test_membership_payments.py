@@ -49,6 +49,27 @@ class MembershipPaymentTests(unittest.TestCase):
             self.assertIn(label, rendered)
             self.assertIn(value, rendered)
 
+    def test_deposit_download_details_requires_a_complete_iif_result(self):
+        try:
+            from app.ui_helpers import deposit_download_details
+        except ImportError:
+            self.fail("deposit download state helper is missing")
+
+        self.assertIsNone(deposit_download_details(None))
+        self.assertIsNone(deposit_download_details({"iif_path": Path("deposit.iif")}))
+        self.assertEqual(
+            deposit_download_details(
+                {
+                    "iif_path": Path("deposit_20260827.iif"),
+                    "iif_bytes": b"IIF content",
+                }
+            ),
+            {
+                "file_name": "deposit_20260827.iif",
+                "data": b"IIF content",
+            },
+        )
+
     def test_rejected_final_closeout_removes_generated_iif(self):
         from app.closeout_reconciliation import (
             STANDARD_CLOSEOUT_ORDER,

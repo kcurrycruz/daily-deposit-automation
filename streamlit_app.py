@@ -64,7 +64,11 @@ from app.membership_payments import (
     subscription_action_status,
     write_membership_payments_file,
 )
-from app.ui_helpers import plan_guide_html, workflow_heading_html
+from app.ui_helpers import (
+    deposit_download_details,
+    plan_guide_html,
+    workflow_heading_html,
+)
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -3022,20 +3026,34 @@ if settlement_file is not None:
             icon="⚠️",
         )
 
-run_clicked = st.button(
-    "🌿  Validate & Build Deposit",
-    type="primary",
-    use_container_width=True,
-    disabled=(
-        uploaded is None
-        or settlement_file is None
-        or deposit_date is None
-        or not settlement_source_ok
-        or not membership_valid
-        or not coupon_valid
-        or not closeout_valid
-    ),
-)
+    download_details = deposit_download_details(
+        st.session_state.get("run_result")
+    )
+    if download_details is not None:
+        st.download_button(
+            "⬇ Download QuickBooks IIF",
+            data=download_details["data"],
+            file_name=download_details["file_name"],
+            mime="text/plain",
+            type="primary",
+            use_container_width=True,
+        )
+        run_clicked = False
+    else:
+        run_clicked = st.button(
+            "🌿  Validate & Prepare IIF",
+            type="primary",
+            use_container_width=True,
+            disabled=(
+                uploaded is None
+                or settlement_file is None
+                or deposit_date is None
+                or not settlement_source_ok
+                or not membership_valid
+                or not coupon_valid
+                or not closeout_valid
+            ),
+        )
 
 if run_clicked:
     try:
@@ -3083,7 +3101,7 @@ if "run_result" in st.session_state:
     if v["all_ok"]:
         result_class = "good"
         title = "🟢 Deposit balanced"
-        sub = "Core reconciliation checks passed. Review the detail below, then download the IIF."
+        sub = "Core reconciliation checks passed. The IIF is ready to download above; review the detail below as needed."
     elif v["warning_count"] > 0:
         result_class = "warn"
         title = "🟡 Deposit needs review"
@@ -3289,16 +3307,7 @@ if "run_result" in st.session_state:
         st.caption("Full engine output for troubleshooting and audit review.")
         st.code(result["log_text"], language="text")
 
-    download_col, another_col = st.columns([3, 1])
-    with download_col:
-        st.download_button(
-            "⬇ Download QuickBooks IIF",
-            data=result["iif_bytes"],
-            file_name=result["iif_path"].name,
-            mime="text/plain",
-            type="primary",
-            use_container_width=True,
-        )
+    _, another_col = st.columns([3, 1])
     with another_col:
         if st.button(
             "Run another deposit",

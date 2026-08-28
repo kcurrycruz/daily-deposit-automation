@@ -1,4 +1,5 @@
 import html
+from pathlib import Path
 
 
 def workflow_heading_html(title: str, description: str) -> str:
@@ -38,3 +39,17 @@ def plan_guide_html(rows: list[dict]) -> str:
             "</div>"
         )
     return f'<div class="hwfc-plan-guide-grid">{"".join(cards)}</div>'
+
+
+def deposit_download_details(result: dict | None) -> dict | None:
+    """Return browser-download data only for a complete generated IIF result."""
+    if not isinstance(result, dict):
+        return None
+    data = result.get("iif_bytes")
+    path = result.get("iif_path")
+    if not isinstance(data, bytes) or not data or path is None:
+        return None
+    return {
+        "file_name": Path(path).name,
+        "data": data,
+    }

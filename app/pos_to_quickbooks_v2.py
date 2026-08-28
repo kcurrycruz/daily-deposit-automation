@@ -15,6 +15,13 @@ from decimal import Decimal
 from pathlib import Path
 
 try:
+    from .activity_breakdowns import (
+        activity_actuals,
+        activity_workflow_keys,
+        build_activity_lines,
+        load_activity_payload_file,
+        normalize_activity_payload,
+    )
     from .membership_payments import build_membership_lines, load_membership_payments_file
     from .coupon_reconciliation import reconcile_coupon_receivable
     from .closeout_reconciliation import (
@@ -25,6 +32,13 @@ try:
         normalize_closeout_payload,
     )
 except ImportError:
+    from activity_breakdowns import (
+        activity_actuals,
+        activity_workflow_keys,
+        build_activity_lines,
+        load_activity_payload_file,
+        normalize_activity_payload,
+    )
     from membership_payments import build_membership_lines, load_membership_payments_file
     from coupon_reconciliation import reconcile_coupon_receivable
     from closeout_reconciliation import (
@@ -1031,7 +1045,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1044,29 +1058,77 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     if membership_payments is None:
         membership_payments = []
 
+    candidate_closeout = None
     normalized_closeout = None
     if closeout_payload is not None:
         candidate_closeout = normalize_closeout_payload(closeout_payload)
         if candidate_closeout["mode"] == "closeout":
             normalized_closeout = candidate_closeout
 
+    activity_payload_supplied = activity_payload is not None
+    normalized_activity = normalize_activity_payload(activity_payload)
+    activity_lines = build_activity_lines(normalized_activity)
+    locked_activity_actuals = activity_actuals(normalized_activity)
+    app_activity_keys = [
+        key
+        for key, section in normalized_activity.items()
+        if section["mode"] == "app"
+    ]
+    source_baselines = {
+        "cash": abs(bs_data.get("cash", 0.0)),
+        "checks": abs(bs_data.get("check", 0.0)),
+        "donation": abs(bs_data.get("donation", 0.0)),
+        "charge_house": abs(bs_data.get("charge", 0.0)),
+        "offline_zon": abs(bs_data.get("offline_credit_card", 0.0)),
+        "vendor_coupons": abs(bs_data.get("vendor_coupon", 0.0)),
+        "paid_out": abs(bs_data.get("paid_out", 0.0)),
+        "paid_in": abs(paid_in_total),
+    }
+    detected_activity_keys = activity_workflow_keys(source_baselines)
+    if normalized_closeout is not None:
+        if activity_payload_supplied and any(
+            normalized_activity[key]["mode"] != "app"
+            for key in detected_activity_keys
+        ):
+            raise ValueError(
+                "The in-app Closeout Sheet requires every detected activity "
+                "to be broken down in the app."
+            )
+        labels = {
+            "donation": "Donation",
+            "paid_out": "Paid Out",
+            "paid_in": "Paid In",
+        }
+        for key in app_activity_keys:
+            locked_total = Decimal(str(locked_activity_actuals[key])).quantize(Decimal("0.01"))
+            closeout_total = Decimal(str(normalized_closeout["actuals"][key])).quantize(Decimal("0.01"))
+            if closeout_total != locked_total:
+                raise ValueError(
+                    f"{labels[key]} Closeout actual must match its app breakdown "
+                    f"total of ${locked_total:,.2f}."
+                )
+
     closeout_rows = []
     closeout_rows_by_key = {}
+    standalone_activity_rows = []
     if normalized_closeout is not None:
         closeout_rows = build_standard_reconciliation(
-            {
-                "cash": abs(bs_data.get("cash", 0.0)),
-                "checks": abs(bs_data.get("check", 0.0)),
-                "donation": abs(bs_data.get("donation", 0.0)),
-                "charge_house": abs(bs_data.get("charge", 0.0)),
-                "offline_zon": abs(bs_data.get("offline_credit_card", 0.0)),
-                "vendor_coupons": abs(bs_data.get("vendor_coupon", 0.0)),
-                "paid_out": abs(bs_data.get("paid_out", 0.0)),
-                "paid_in": abs(paid_in_total),
-            },
+            source_baselines,
             normalized_closeout["actuals"],
         )
         closeout_rows_by_key = {row["key"]: row for row in closeout_rows}
+    elif app_activity_keys:
+        standalone_actuals = dict(source_baselines)
+        for key in app_activity_keys:
+            standalone_actuals[key] = locked_activity_actuals[key]
+        standalone_activity_rows = [
+            row
+            for row in build_standard_reconciliation(
+                source_baselines,
+                standalone_actuals,
+            )
+            if row["key"] in app_activity_keys
+        ]
 
     def closeout_actual(key, legacy_value):
         row = closeout_rows_by_key.get(key)
@@ -1308,6 +1370,20 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     )
     paid_out_source = closeout_actual("paid_out", bs("paid_out"))
 
+    def activity_entries(category, legacy_entry):
+        if normalized_activity[category]["mode"] != "app":
+            return [legacy_entry]
+        return [
+            (
+                line["account"],
+                "",
+                line["memo"],
+                line["qb_effect"],
+                line["class_name"],
+            )
+            for line in activity_lines[category]
+        ]
+
     MANUAL_LINES = [
         ("4150100 · Sales Tax Payable", "New York State Sales Tax", "", bs("sales_tax")),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Sales", bs("bottle_sales")),
@@ -1327,12 +1403,21 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
         ("4444 · TBA Purchases", "", ""),
-        ("8506000 · Outreach - Donations", "", "", -donation_source if donation_source else None),
-        ("4444 · TBA Purchases", "", "PAID IN:", paid_in_source if paid_in_source else None),
+        *activity_entries(
+            "donation",
+            ("8506000 · Outreach - Donations", "", "", -donation_source if donation_source else None),
+        ),
+        *activity_entries(
+            "paid_in",
+            ("4444 · TBA Purchases", "", "PAID IN:", paid_in_source if paid_in_source else None),
+        ),
         # Paid Out is stored as a positive BS pickup amount, but it reduces the QuickBooks deposit.
         # MANUAL_LINES inverts the source amount for IIF sign convention, so pass a negative source
         # value here to produce a positive IIF SPL that displays as a negative deposit line in QB.
-        ("4444 · TBA Purchases", "", "PAID OUT:", -paid_out_source if paid_out_source else None),
+        *activity_entries(
+            "paid_out",
+            ("4444 · TBA Purchases", "", "PAID OUT:", -paid_out_source if paid_out_source else None),
+        ),
         ("1240001 · Credit Card Payments Receivable", "", "Visa/MC", -tender_source("visa_mc", bs("visa_mc")) if tender_source("visa_mc", bs("visa_mc")) else None),
         ("1240001 · Credit Card Payments Receivable", "", "Discover", -tender_source("discover", bs("discover")) if tender_source("discover", bs("discover")) else None),
         ("1240001 · Credit Card Payments Receivable", "", "AMEX", -tender_source("amex", bs("amex")) if tender_source("amex", bs("amex")) else None),
@@ -1417,6 +1502,28 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 "Admin",
             )
         )
+
+    # App-entered Donation/Paid In/Paid Out detail can be used even when the
+    # employee finishes the full Closeout Sheet in QuickBooks. Preserve the
+    # source total with the same per-category Closeout adjustment used by the
+    # reviewed Closeout workflow.
+    if normalized_closeout is None:
+        for row in standalone_activity_rows:
+            qb_effect = row["adjustment_qb_effect"]
+            if not has_amount(qb_effect):
+                continue
+            iif_amount = -qb_effect
+            spl_total += iif_amount
+            spls.append(
+                spl(
+                    date_str,
+                    row["adjustment_account"],
+                    "",
+                    iif_amount,
+                    row["adjustment_memo"],
+                    "Admin",
+                )
+            )
 
     if normalized_closeout is None and misc_tba_lines:
         for memo, amount in misc_tba_lines:
@@ -1826,6 +1933,8 @@ def main():
                             help="Counted NCG coupon total")
         parser.add_argument("--coupon-mfg-total", type=float,
                             help="Counted MFG coupon total")
+        parser.add_argument("--activity-breakdowns-file",
+                            help="Validated Donations, Paid Out, and Paid In JSON payload")
         parser.add_argument("--closeout-file",
                             help="Validated Closeout Sheet JSON payload")
         parser.add_argument("--closeout-preview-output",
@@ -1839,6 +1948,10 @@ def main():
         closeout_payload = (
             load_closeout_payload_file(args.closeout_file)
             if args.closeout_file else None
+        )
+        activity_payload = (
+            load_activity_payload_file(args.activity_breakdowns_file)
+            if args.activity_breakdowns_file else None
         )
 
         if args.deposit_date:
@@ -1982,6 +2095,7 @@ def main():
                 Path(args.closeout_preview_output)
                 if args.closeout_preview_output and closeout_payload is not None else None
             ),
+            activity_payload=activity_payload,
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)

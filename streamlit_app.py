@@ -34,6 +34,15 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
+from app.activity_breakdowns import (
+    activity_actuals,
+    activity_closeout_ready,
+    activity_workflow_keys,
+    normalize_activity_payload,
+    normalize_activity_section,
+    read_activity_source_totals,
+    write_activity_payload_file,
+)
 from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
@@ -1363,6 +1372,7 @@ def build_engine_command(
     coupon_closeout_total: float | None,
     coupon_ncg_total: float | None,
     coupon_mfg_total: float | None,
+    activity_path: Path | None = None,
     closeout_path: Path | None = None,
     closeout_preview_path: Path | None = None,
 ) -> list[str]:
@@ -1388,6 +1398,8 @@ def build_engine_command(
             "--coupon-mfg-total",
             f"{coupon_mfg_total:.2f}",
         ])
+    if activity_path is not None:
+        command.extend(["--activity-breakdowns-file", str(activity_path)])
     if closeout_path is not None:
         command.extend(["--closeout-file", str(closeout_path)])
         if closeout_preview_path is not None:
@@ -1408,6 +1420,7 @@ def run_engine(
     coupon_closeout_total: float | None,
     coupon_ncg_total: float | None,
     coupon_mfg_total: float | None,
+    activity_payload: dict | None = None,
     closeout_payload: dict | None = None,
     preview_only: bool = False,
 ) -> dict:
@@ -1438,6 +1451,7 @@ def run_engine(
         owned_iif_path.unlink()
 
     membership_path = None
+    activity_path = None
     closeout_path = None
     closeout_preview_path = None
     closeout_final_run = False
@@ -1464,6 +1478,11 @@ def run_engine(
         membership_path = write_membership_payments_file(
             RUNTIME_TEMP_DIR, membership_payments
         )
+        if activity_payload is not None:
+            normalized_activity_payload = normalize_activity_payload(activity_payload)
+            activity_path = write_activity_payload_file(
+                RUNTIME_TEMP_DIR, normalized_activity_payload
+            )
         if normalized_closeout_payload is not None:
             closeout_path = write_closeout_payload_file(
                 RUNTIME_TEMP_DIR, normalized_closeout_payload
@@ -1481,6 +1500,7 @@ def run_engine(
             coupon_closeout_total=coupon_closeout_total,
             coupon_ncg_total=coupon_ncg_total,
             coupon_mfg_total=coupon_mfg_total,
+            activity_path=activity_path,
             closeout_path=closeout_path,
             closeout_preview_path=closeout_preview_path,
         )
@@ -1570,6 +1590,8 @@ def run_engine(
     finally:
         if membership_path is not None:
             membership_path.unlink(missing_ok=True)
+        if activity_path is not None:
+            activity_path.unlink(missing_ok=True)
         if closeout_path is not None:
             closeout_path.unlink(missing_ok=True)
         if closeout_preview_path is not None:
@@ -2160,6 +2182,12 @@ coupon_mode = "quickbooks"
 coupon_closeout_total = None
 coupon_ncg_total = None
 coupon_mfg_total = None
+activity_source_totals = {key: 0.0 for key in ("donation", "paid_out", "paid_in")}
+activity_payload = {
+    key: {"mode": "quickbooks", "rows": []}
+    for key in ("donation", "paid_out", "paid_in")
+}
+activity_valid = True
 closeout_payload = None
 closeout_valid = False
 
@@ -2488,6 +2516,169 @@ closeout_choice_state = (
     else None
 )
 
+if uploaded:
+    try:
+        activity_source_totals = read_activity_source_totals(
+            upload_bytes,
+            roles.get("bs"),
+            roles.get("hash"),
+        )
+    except Exception as exc:
+        st.warning(
+            "Optional Donations, Paid Out, and Paid In totals could not be read. "
+            f"The existing QuickBooks process remains available. Details: {exc}",
+            icon="⚠️",
+        )
+
+activity_labels = {
+    "donation": ("Donations", "Balance Sheet Donation (code 1122)"),
+    "paid_out": ("Paid Out", "Balance Sheet Paid Out (code 1114)"),
+    "paid_in": ("Paid In", "HASH Paid-Ins (code 34)"),
+}
+for activity_key in activity_workflow_keys(activity_source_totals):
+    activity_title, activity_source_label = activity_labels[activity_key]
+    source_total = float(activity_source_totals[activity_key])
+    st.markdown(
+        workflow_heading_html(
+            activity_title,
+            "Enter the paper slips here or finish this activity manually in QuickBooks.",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.caption(f"{activity_source_label}: ${source_total:,.2f}")
+    handling_choice = st.radio(
+        f"How should {activity_title} be handled?",
+        options=["Breakdown in app", "Finish manually in QuickBooks"],
+        horizontal=True,
+        index=None,
+        key=f"activity_handling_{activity_key}_{closeout_workbook_key}",
+    )
+    if handling_choice is None:
+        activity_valid = False
+        st.caption(f"Select how you want to handle {activity_title} before building the deposit.")
+        continue
+    if handling_choice == "Finish manually in QuickBooks":
+        activity_payload[activity_key] = {"mode": "quickbooks", "rows": []}
+        st.info(
+            f"The current {activity_title} process stays unchanged. Complete its detail and the Closeout Sheet in QuickBooks.",
+            icon="ℹ️",
+        )
+        continue
+
+    row_ids_key = f"activity_row_ids_{activity_key}_{closeout_workbook_key}"
+    if row_ids_key not in st.session_state:
+        st.session_state[row_ids_key] = [uuid4().hex]
+    raw_rows = []
+    for row_number, row_id in enumerate(st.session_state[row_ids_key], start=1):
+        st.markdown(f"**{activity_title} item {row_number}**")
+        if activity_key == "donation":
+            row_columns = st.columns([1.5, 1.8, 1.2, 0.9, 0.35])
+            given_key = f"activity_{activity_key}_{row_id}_given_to"
+            purpose_key = f"activity_{activity_key}_{row_id}_purpose"
+            manager_key = f"activity_{activity_key}_{row_id}_manager"
+            amount_key = f"activity_{activity_key}_{row_id}_amount"
+            given_to = row_columns[0].text_input("Given To", key=given_key)
+            purpose = row_columns[1].text_input("For", key=purpose_key)
+            manager = row_columns[2].text_input("Manager Approval", key=manager_key)
+            amount = row_columns[3].number_input(
+                "Amount",
+                min_value=0.0,
+                step=0.01,
+                format="%.2f",
+                key=amount_key,
+            )
+            widget_keys = (given_key, purpose_key, manager_key, amount_key)
+            raw_rows.append(
+                {
+                    "given_to": given_to,
+                    "purpose": purpose,
+                    "manager": manager,
+                    "amount": float(amount),
+                }
+            )
+        else:
+            row_columns = st.columns([1.15, 1.8, 1.0, 0.9, 0.35])
+            type_key = f"activity_{activity_key}_{row_id}_type"
+            amount_key = f"activity_{activity_key}_{row_id}_amount"
+            item_type = row_columns[0].selectbox(
+                "Type",
+                options=["ESP Deposit", "Other"],
+                key=type_key,
+            )
+            if item_type == "ESP Deposit":
+                date_key = f"activity_{activity_key}_{row_id}_date"
+                initials_key = f"activity_{activity_key}_{row_id}_initials"
+                original_date = row_columns[1].date_input(
+                    "Original ESP Deposit Date",
+                    value=deposit_date or date.today(),
+                    key=date_key,
+                )
+                initials = row_columns[2].text_input("Initials", key=initials_key)
+                widget_keys = (type_key, date_key, initials_key, amount_key)
+                raw_row = {
+                    "type": "esp",
+                    "original_date": original_date,
+                    "initials": initials,
+                }
+            else:
+                memo_key = f"activity_{activity_key}_{row_id}_memo"
+                memo = row_columns[1].text_input("Description / Memo", key=memo_key)
+                row_columns[2].caption("Posts to TBA Purchases")
+                widget_keys = (type_key, memo_key, amount_key)
+                raw_row = {"type": "other", "memo": memo}
+            amount = row_columns[3].number_input(
+                "Amount",
+                min_value=0.0,
+                step=0.01,
+                format="%.2f",
+                key=amount_key,
+            )
+            raw_rows.append({**raw_row, "amount": float(amount)})
+
+        delete_key = f"delete_activity_{activity_key}_{row_id}"
+        if row_columns[4].button(
+            "×",
+            key=delete_key,
+            help=f"Delete {activity_title} item {row_number}",
+            disabled=len(st.session_state[row_ids_key]) == 1,
+        ):
+            st.session_state[row_ids_key] = [
+                existing_id
+                for existing_id in st.session_state[row_ids_key]
+                if existing_id != row_id
+            ]
+            for widget_key in (*widget_keys, delete_key):
+                st.session_state.pop(widget_key, None)
+            st.rerun()
+
+    if st.button(
+        f"+ Add {activity_title} item",
+        key=f"add_activity_{activity_key}_{closeout_workbook_key}",
+        type="secondary",
+    ):
+        st.session_state[row_ids_key].append(uuid4().hex)
+        st.rerun()
+
+    try:
+        activity_payload[activity_key] = normalize_activity_section(
+            activity_key,
+            {"mode": "app", "rows": raw_rows},
+        )
+        actual_total = round(
+            sum(row["amount"] for row in activity_payload[activity_key]["rows"]),
+            2,
+        )
+        discrepancy = round(float(actual_total) - source_total, 2)
+        st.success(
+            f"{activity_title} actual is ${actual_total:,.2f}. "
+            f"Closeout actual minus system total: {discrepancy:+,.2f}.",
+            icon="✅",
+        )
+    except ValueError as exc:
+        activity_valid = False
+        activity_payload[activity_key] = {"mode": "app", "rows": raw_rows}
+        st.caption(str(exc))
+
 if uploaded and coupon_workflow_is_required(
     coupon_bs_total,
     closeout_choice_state,
@@ -2604,10 +2795,10 @@ if uploaded:
         st.caption("Select how you want to handle the Closeout Sheet before building the deposit.")
     elif closeout_choice == "Finish manually in QuickBooks":
         closeout_payload = {"mode": "manual"}
-        closeout_valid = True
+        closeout_valid = activity_valid
         st.session_state[closeout_payload_key] = closeout_payload
         st.info(
-            "The app will keep the existing deposit process. Complete any Closeout Sheet changes in QuickBooks.",
+            "Any app breakdowns will be itemized and reconciled. Complete the remaining Closeout Sheet changes in QuickBooks.",
             icon="ℹ️",
         )
     else:
@@ -2621,6 +2812,15 @@ if uploaded:
             st.warning(
                 "Choose Breakdown in app using Closeout Sheet for Coupons Receivable first. "
                 "Vendor Coupons must use the reconciled NCG + MFG total.",
+                icon="⚠️",
+            )
+        activity_link_ready = activity_valid and activity_closeout_ready(
+            activity_payload,
+            activity_source_totals,
+        )
+        if not activity_link_ready:
+            st.warning(
+                "Every detected Donations, Paid Out, and Paid In section must use Breakdown in app before the Closeout Sheet can be completed here.",
                 icon="⚠️",
             )
 
@@ -2646,6 +2846,11 @@ if uploaded:
                 closeout_baselines,
                 counted_coupon_total,
             )
+            locked_activity_actuals = (
+                activity_actuals(activity_payload)
+                if activity_link_ready
+                else {}
+            )
             closeout_actuals = {}
             header_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
             for column, heading in zip(
@@ -2662,6 +2867,9 @@ if uploaded:
                 if field == "vendor_coupons":
                     actual = counted_coupon_total
                     row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
+                elif locked_activity_actuals.get(field) is not None:
+                    actual = float(locked_activity_actuals[field])
+                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
                 else:
                     actual = row_columns[2].number_input(
                         f"{label} actual",
@@ -2831,6 +3039,7 @@ if uploaded:
                 "coupon_closeout_total": coupon_closeout_total,
                 "coupon_ncg_total": coupon_ncg_total,
                 "coupon_mfg_total": coupon_mfg_total,
+                "activity_payload": activity_payload,
                 "settlement_key": (
                     membership_editor_key(
                         settlement_file.getvalue(),
@@ -2842,6 +3051,8 @@ if uploaded:
             }
             preview_is_fresh = bool(
                 current_closeout_payload is not None
+                and activity_valid
+                and activity_link_ready
                 and closeout_preview_is_fresh(
                     current_closeout_payload,
                     saved_closeout_preview,
@@ -2860,6 +3071,8 @@ if uploaded:
                 disabled=(
                     current_closeout_payload is None
                     or not coupon_link_ready
+                    or not activity_link_ready
+                    or not activity_valid
                     or not membership_valid
                     or deposit_date is None
                     or not review_settlement_ok
@@ -2880,6 +3093,7 @@ if uploaded:
                                 coupon_closeout_total,
                                 coupon_ncg_total,
                                 coupon_mfg_total,
+                                activity_payload=activity_payload,
                                 closeout_payload=current_closeout_payload,
                                 preview_only=True,
                             )
@@ -2967,7 +3181,12 @@ if uploaded:
                     "approve_final_pos": approve_final_pos,
                 }
                 closeout_payload = normalize_closeout_payload(current_closeout_payload)
-                closeout_valid = remaining == 0 or approve_final_pos
+                closeout_valid = bool(
+                    (remaining == 0 or approve_final_pos)
+                    and coupon_link_ready
+                    and activity_link_ready
+                    and activity_valid
+                )
                 st.session_state[closeout_payload_key] = closeout_payload
             elif closeout_form_error and reviewed_closeout:
                 st.caption(closeout_form_error)
@@ -3052,6 +3271,7 @@ if settlement_file is not None:
                 or not settlement_source_ok
                 or not membership_valid
                 or not coupon_valid
+                or not activity_valid
                 or not closeout_valid
             ),
         )
@@ -3070,6 +3290,7 @@ if run_clicked:
                     coupon_closeout_total,
                     coupon_ncg_total,
                     coupon_mfg_total,
+                    activity_payload=activity_payload,
                     closeout_payload=closeout_payload,
                 )
                 st.session_state["run_result"] = result

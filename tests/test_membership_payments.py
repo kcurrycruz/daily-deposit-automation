@@ -599,6 +599,76 @@ class MembershipPaymentTests(unittest.TestCase):
             (None, ""),
         )
 
+    def test_quickbooks_name_state_adapter_enters_paid_in_full_with_defaults(self):
+        from app.membership_payments import apply_quickbooks_name_option_state
+
+        state = {
+            "entry_previous_payment_option": "New plan — 1 year",
+            "entry_quickbooks_name_status": "Yes",
+            "entry_member_name": "Stale Name",
+        }
+
+        result = apply_quickbooks_name_option_state(
+            state,
+            "entry",
+            "Paid in full — $100",
+        )
+
+        self.assertEqual(result, ("No", ""))
+        self.assertEqual(
+            state,
+            {
+                "entry_previous_payment_option": "Paid in full — $100",
+                "entry_quickbooks_name_status": "No",
+                "entry_member_name": "",
+            },
+        )
+
+    def test_quickbooks_name_state_adapter_preserves_deliberate_paid_in_full_name(self):
+        from app.membership_payments import apply_quickbooks_name_option_state
+
+        state = {
+            "entry_previous_payment_option": "Paid in full — $100",
+            "entry_quickbooks_name_status": "Yes",
+            "entry_member_name": "  Karl Chester Cruz  ",
+        }
+
+        result = apply_quickbooks_name_option_state(
+            state,
+            "entry",
+            "Paid in full — $100",
+        )
+
+        self.assertEqual(result, ("Yes", "Karl Chester Cruz"))
+        self.assertEqual(state["entry_previous_payment_option"], "Paid in full — $100")
+        self.assertEqual(state["entry_quickbooks_name_status"], "Yes")
+        self.assertEqual(state["entry_member_name"], "Karl Chester Cruz")
+
+    def test_quickbooks_name_state_adapter_leaves_paid_in_full_with_blank_state(self):
+        from app.membership_payments import apply_quickbooks_name_option_state
+
+        state = {
+            "entry_previous_payment_option": "Paid in full — $100",
+            "entry_quickbooks_name_status": "No",
+            "entry_member_name": "Stale Name",
+        }
+
+        result = apply_quickbooks_name_option_state(
+            state,
+            "entry",
+            "New plan — 5 year",
+        )
+
+        self.assertEqual(result, (None, ""))
+        self.assertEqual(
+            state,
+            {
+                "entry_previous_payment_option": "New plan — 5 year",
+                "entry_quickbooks_name_status": None,
+                "entry_member_name": "",
+            },
+        )
+
     def test_blank_dynamic_editor_row_does_not_require_a_payment_option(self):
         from app.membership_payments import prepare_membership_editor_rows
 

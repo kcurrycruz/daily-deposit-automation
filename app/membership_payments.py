@@ -74,6 +74,26 @@ def quickbooks_name_state_for_payment_option(
     return current_status, str(current_name or "").strip()
 
 
+def apply_quickbooks_name_option_state(
+    state: dict,
+    entry_key: str,
+    payment_option: str,
+) -> tuple[str | None, str]:
+    previous_option_key = f"{entry_key}_previous_payment_option"
+    quickbooks_name_status_key = f"{entry_key}_quickbooks_name_status"
+    member_name_key = f"{entry_key}_member_name"
+    status, name = quickbooks_name_state_for_payment_option(
+        payment_option,
+        state.get(previous_option_key),
+        state.get(quickbooks_name_status_key),
+        state.get(member_name_key, ""),
+    )
+    state[previous_option_key] = payment_option
+    state[quickbooks_name_status_key] = status
+    state[member_name_key] = name
+    return status, name
+
+
 def membership_payment_from_entry(
     *,
     member_name: str,

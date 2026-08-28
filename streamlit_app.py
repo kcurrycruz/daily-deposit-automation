@@ -39,6 +39,7 @@ from app.coupon_reconciliation import (
 )
 from app.membership_payments import (
     PAYMENT_OPTIONS,
+    apply_quickbooks_name_option_state,
     build_membership_lines,
     exclusive_run_lock,
     membership_editor_key,
@@ -2061,13 +2062,16 @@ if subscription_total > 0:
                 key=f"{entry_key}_payment_option",
                 help="Paid in full has no plan selection because the share is fully paid.",
             )
+            quickbooks_name_status, saved_quickbooks_name = (
+                apply_quickbooks_name_option_state(
+                    st.session_state,
+                    entry_key,
+                    payment_option,
+                )
+            )
         with entry_columns[1]:
             quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
             quickbooks_name_key = f"{entry_key}_member_name"
-            quickbooks_name_status = st.session_state.get(quickbooks_status_key)
-            saved_quickbooks_name = str(
-                st.session_state.get(quickbooks_name_key) or ""
-            ).strip()
             if quickbooks_name_status == "No":
                 member_name_label = "Member Name: New"
             elif quickbooks_name_status == "Yes" and saved_quickbooks_name:

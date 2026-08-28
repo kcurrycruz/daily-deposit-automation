@@ -27,7 +27,9 @@ BS_VALUES = {
 }
 
 
-def workbook_bytes(*, paid_in_column=1, paid_in_amount=30.00, bs_values=None):
+def workbook_bytes(
+    *, paid_in_column=1, paid_in_amount=30.00, bs_values=None, preceding_amount_like_header=False
+):
     workbook = openpyxl.Workbook()
     workbook.remove(workbook.active)
     balance_sheet = workbook.create_sheet("Daily BS")
@@ -36,9 +38,14 @@ def workbook_bytes(*, paid_in_column=1, paid_in_amount=30.00, bs_values=None):
     for code, amount in (bs_values or BS_VALUES).items():
         balance_sheet.append([code, None, None, None, amount])
 
-    hash_sheet.append(["Code", "Description", "Notes", "Type", "aMoUnT"])
+    hash_header = ["Code", "Description", "Notes", "Type", "aMoUnT"]
+    if preceding_amount_like_header:
+        hash_header[1] = "Net Amount"
+    hash_sheet.append(hash_header)
     hash_row = [None] * 5
     hash_row[paid_in_column - 1] = 34
+    if preceding_amount_like_header:
+        hash_row[1] = 999.99
     hash_row[4] = paid_in_amount
     hash_sheet.append(hash_row)
 
@@ -108,6 +115,47 @@ class CloseoutReconciliationTests(unittest.TestCase):
                     "Daily HASH",
                 )
                 self.assertEqual(result["paid_in"], 30.00)
+
+
+    def test_read_closeout_baselines_requires_exact_amount_header(self):
+        from app.closeout_reconciliation import read_closeout_baselines
+
+        result = read_closeout_baselines(
+            workbook_bytes(preceding_amount_like_header=True),
+            "Daily BS",
+            "Daily HASH",
+        )
+
+        self.assertEqual(result["paid_in"], 30.00)
+
+
+    def test_default_closeout_actuals_rebuilds_canonical_normalized_float_mapping(self):
+        from app.closeout_reconciliation import default_closeout_actuals
+
+        baselines = {
+            "paid_in": "30.004",
+            "paid_out": "47.064",
+            "vendor_coupons": "188.254",
+            "offline_zon": "12.004",
+            "charge_house": "45.004",
+            "donation": "20.004",
+            "checks": "75.004",
+            "cash": "1250.004",
+            "extra": "999.999",
+        }
+
+        result = default_closeout_actuals(baselines, "-152.256")
+
+        self.assertEqual(tuple(result), STANDARD_ORDER)
+        self.assertTrue(all(isinstance(value, float) for value in result.values()))
+        self.assertEqual(result["cash"], 1250.00)
+        self.assertEqual(result["checks"], 75.00)
+        self.assertEqual(result["donation"], 20.00)
+        self.assertEqual(result["charge_house"], 45.00)
+        self.assertEqual(result["offline_zon"], 0.00)
+        self.assertEqual(result["vendor_coupons"], 152.26)
+        self.assertEqual(result["paid_out"], 47.06)
+        self.assertEqual(result["paid_in"], 30.00)
 
 
     def test_read_closeout_baselines_requires_exact_requested_sheet_names(self):

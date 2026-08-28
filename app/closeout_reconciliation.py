@@ -84,7 +84,7 @@ def read_closeout_baselines(
         ):
             for index, value in enumerate(row):
                 label = str(value or "").strip().casefold()
-                if "amount" in label and "total" not in label:
+                if label == "amount":
                     amount_column = index
                     break
             if amount_column is not None:
@@ -118,7 +118,12 @@ def default_closeout_actuals(
     coupon_actual_total: float,
 ) -> dict[str, float]:
     counted_coupons = abs(_money(coupon_actual_total, "Vendor Coupons actual total"))
-    actuals = dict(baselines)
+    actuals = {
+        field: float(
+            _money(baselines.get(field, 0.0), f"{field} baseline")
+        )
+        for field in STANDARD_CLOSEOUT_ORDER
+    }
     actuals["offline_zon"] = 0.0
     actuals["vendor_coupons"] = float(counted_coupons)
     return actuals

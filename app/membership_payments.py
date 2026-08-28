@@ -54,6 +54,26 @@ def payment_fields_from_option(option: str) -> dict:
         raise ValueError("Unknown membership payment option") from None
 
 
+def quickbooks_name_state_for_payment_option(
+    payment_option: str,
+    previous_option: str | None,
+    current_status: str | None,
+    current_name: str,
+) -> tuple[str | None, str]:
+    payment_fields_from_option(payment_option)
+    if (
+        payment_option == "Paid in full — $100"
+        and previous_option != payment_option
+    ):
+        return "No", ""
+    if (
+        payment_option != "Paid in full — $100"
+        and previous_option == "Paid in full — $100"
+    ):
+        return None, ""
+    return current_status, str(current_name or "").strip()
+
+
 def membership_payment_from_entry(
     *,
     member_name: str,

@@ -556,6 +556,49 @@ class MembershipPaymentTests(unittest.TestCase):
             {"payment_type": "Existing plan", "plan": "5 year"},
         )
 
+    def test_entering_paid_in_full_resets_stale_quickbooks_name_state(self):
+        from app.membership_payments import quickbooks_name_state_for_payment_option
+
+        self.assertEqual(
+            quickbooks_name_state_for_payment_option(
+                "Paid in full — $100", "New plan — 1 year", "Yes", "Stale Name"
+            ),
+            ("No", ""),
+        )
+
+    def test_rerunning_paid_in_full_preserves_deliberate_quickbooks_name(self):
+        from app.membership_payments import quickbooks_name_state_for_payment_option
+
+        self.assertEqual(
+            quickbooks_name_state_for_payment_option(
+                "Paid in full — $100",
+                "Paid in full — $100",
+                "Yes",
+                "  Karl Chester Cruz  ",
+            ),
+            ("Yes", "Karl Chester Cruz"),
+        )
+
+    def test_non_paid_in_full_rerun_preserves_current_quickbooks_name_state(self):
+        from app.membership_payments import quickbooks_name_state_for_payment_option
+
+        self.assertEqual(
+            quickbooks_name_state_for_payment_option(
+                "Existing plan — 1 year", "New plan — 3 year", None, ""
+            ),
+            (None, ""),
+        )
+
+    def test_leaving_paid_in_full_clears_quickbooks_name_default(self):
+        from app.membership_payments import quickbooks_name_state_for_payment_option
+
+        self.assertEqual(
+            quickbooks_name_state_for_payment_option(
+                "New plan — 5 year", "Paid in full — $100", "No", "Karl Chester Cruz"
+            ),
+            (None, ""),
+        )
+
     def test_blank_dynamic_editor_row_does_not_require_a_payment_option(self):
         from app.membership_payments import prepare_membership_editor_rows
 

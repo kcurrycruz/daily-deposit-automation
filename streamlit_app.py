@@ -62,6 +62,7 @@ from app.closeout_reconciliation import (
 )
 from app.membership_payments import (
     PAYMENT_OPTIONS,
+    apply_membership_amount_option_state,
     apply_quickbooks_name_option_state,
     build_membership_lines,
     exclusive_run_lock,
@@ -2329,6 +2330,11 @@ if subscription_total > 0:
                     payment_option,
                 )
             )
+            apply_membership_amount_option_state(
+                st.session_state,
+                entry_key,
+                payment_option,
+            )
         with entry_columns[1]:
             quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
             quickbooks_name_key = f"{entry_key}_member_name"
@@ -2421,7 +2427,6 @@ if subscription_total > 0:
                 amount = st.number_input(
                     "Amount",
                     min_value=0.00,
-                    value=0.00,
                     step=0.01,
                     format="%.2f",
                     key=f"{entry_key}_amount",

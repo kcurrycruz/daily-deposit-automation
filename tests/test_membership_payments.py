@@ -1398,6 +1398,77 @@ class MembershipPaymentTests(unittest.TestCase):
             },
         )
 
+    def test_existing_plan_amount_defaults_match_monthly_payments(self):
+        from app.membership_payments import membership_amount_for_payment_option
+
+        expected_defaults = {
+            "Existing plan — 1 year": 8.45,
+            "Existing plan — 3 year": 15.69,
+            "Existing plan — 5 year": 10.55,
+        }
+        for payment_option, expected_amount in expected_defaults.items():
+            with self.subTest(payment_option=payment_option):
+                self.assertEqual(
+                    membership_amount_for_payment_option(
+                        payment_option,
+                        previous_option="Paid in full — $100",
+                        current_amount=100.00,
+                    ),
+                    expected_amount,
+                )
+
+    def test_existing_plan_amount_preserves_user_override_until_option_changes(self):
+        from app.membership_payments import membership_amount_for_payment_option
+
+        self.assertEqual(
+            membership_amount_for_payment_option(
+                "Existing plan — 1 year",
+                previous_option="Existing plan — 1 year",
+                current_amount=16.90,
+            ),
+            16.90,
+        )
+        self.assertEqual(
+            membership_amount_for_payment_option(
+                "Existing plan — 3 year",
+                previous_option="Existing plan — 1 year",
+                current_amount=16.90,
+            ),
+            15.69,
+        )
+
+    def test_amount_state_adapter_updates_widget_only_when_payment_option_changes(self):
+        from app.membership_payments import apply_membership_amount_option_state
+
+        state = {
+            "entry_previous_amount_option": "Existing plan — 1 year",
+            "entry_amount": 16.90,
+        }
+
+        self.assertEqual(
+            apply_membership_amount_option_state(
+                state,
+                "entry",
+                "Existing plan — 1 year",
+            ),
+            16.90,
+        )
+        self.assertEqual(state["entry_amount"], 16.90)
+
+        self.assertEqual(
+            apply_membership_amount_option_state(
+                state,
+                "entry",
+                "Existing plan — 5 year",
+            ),
+            10.55,
+        )
+        self.assertEqual(state["entry_amount"], 10.55)
+        self.assertEqual(
+            state["entry_previous_amount_option"],
+            "Existing plan — 5 year",
+        )
+
     def test_blank_dynamic_editor_row_does_not_require_a_payment_option(self):
         from app.membership_payments import prepare_membership_editor_rows
 

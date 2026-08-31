@@ -94,6 +94,38 @@ def apply_quickbooks_name_option_state(
     return status, name
 
 
+def membership_amount_for_payment_option(
+    payment_option: str,
+    previous_option: str | None,
+    current_amount,
+) -> float:
+    fields = payment_fields_from_option(payment_option)
+    if previous_option != payment_option:
+        if fields["payment_type"] == "Paid in full":
+            return 100.00
+        if fields["payment_type"] == "Existing plan":
+            return float(PLAN_TERMS[fields["plan"]][0])
+        return 0.00
+    return float(current_amount or 0.00)
+
+
+def apply_membership_amount_option_state(
+    state: dict,
+    entry_key: str,
+    payment_option: str,
+) -> float:
+    previous_option_key = f"{entry_key}_previous_amount_option"
+    amount_key = f"{entry_key}_amount"
+    amount = membership_amount_for_payment_option(
+        payment_option,
+        state.get(previous_option_key),
+        state.get(amount_key, 0.00),
+    )
+    state[previous_option_key] = payment_option
+    state[amount_key] = amount
+    return amount
+
+
 def membership_payment_from_entry(
     *,
     member_name: str,

@@ -44,14 +44,44 @@ def _source_code(value):
         return None
 
 
-def _source_amount(value) -> float | None:
+def _source_number(value) -> float | None:
     try:
         amount = Decimal(str(value)).quantize(_CENTS)
     except (InvalidOperation, TypeError, ValueError):
         return None
     if not amount.is_finite():
         return None
-    return float(abs(amount))
+    return float(amount)
+
+
+def _source_amount(value) -> float | None:
+    amount = _source_number(value)
+    return None if amount is None else abs(amount)
+
+
+def extract_hash_row_amount(
+    row: tuple,
+    amount_column: int,
+    code: int,
+) -> float | None:
+    """Use the HASH Amount cell, then the established shifted-column fallback."""
+    amount = _source_number(
+        row[amount_column] if len(row) > amount_column else None
+    )
+    if amount is not None:
+        return amount
+
+    fallback_values = []
+    for index, value in enumerate(row):
+        if index < 3 or value is None:
+            continue
+        candidate = _source_number(value)
+        if candidate is None or abs(candidate - code) < 0.000001:
+            continue
+        fallback_values.append(candidate)
+    if not fallback_values:
+        return None
+    return fallback_values[1] if len(fallback_values) >= 2 else fallback_values[0]
 
 
 def read_activity_source_totals(
@@ -104,11 +134,9 @@ def read_activity_source_totals(
                 for row in hash_sheet.iter_rows(values_only=True):
                     if not any(_source_code(value) == 34 for value in row[:4]):
                         continue
-                    amount = _source_amount(
-                        row[amount_column] if len(row) > amount_column else None
-                    )
+                    amount = extract_hash_row_amount(row, amount_column, 34)
                     if amount is not None:
-                        totals["paid_in"] = amount
+                        totals["paid_in"] = abs(amount)
         return totals
     finally:
         workbook.close()

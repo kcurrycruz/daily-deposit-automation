@@ -333,6 +333,31 @@ class CloseoutReconciliationTests(unittest.TestCase):
         self.assertEqual(result["paid_in"], 0.00)
 
 
+    def test_read_closeout_baselines_uses_hash_paid_in_fallback_amount(self):
+        """Closeout must match the established HASH parser's shifted-column fallback."""
+        from app.closeout_reconciliation import read_closeout_baselines
+
+        workbook = openpyxl.Workbook()
+        balance_sheet = workbook.active
+        balance_sheet.title = "Daily BS"
+        hash_sheet = workbook.create_sheet("Daily HASH")
+        hash_sheet.append(
+            ["Code", "Description", "Notes", "Qty", "Value", None, None, None, "Amount"]
+        )
+        hash_sheet.append([34, "Paid-Ins", None, 1, 184.35, None, None, None, None])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        result = read_closeout_baselines(
+            output.getvalue(),
+            "Daily BS",
+            "Daily HASH",
+        )
+
+        self.assertEqual(result["paid_in"], 184.35)
+
+
     def test_default_closeout_actuals_rebuilds_canonical_normalized_float_mapping(self):
         from app.closeout_reconciliation import default_closeout_actuals
 

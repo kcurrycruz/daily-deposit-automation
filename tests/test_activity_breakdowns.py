@@ -315,6 +315,27 @@ class ActivityBreakdownTests(unittest.TestCase):
             {"donation": 200.0, "paid_out": 50.0, "paid_in": 125.0},
         )
 
+    def test_activity_source_reader_uses_hash_paid_in_fallback_amount(self):
+        import openpyxl
+
+        api = self.activity_api()
+        workbook = openpyxl.Workbook()
+        balance_sheet = workbook.active
+        balance_sheet.title = "BS"
+        hash_sheet = workbook.create_sheet("HASH")
+        hash_sheet.append(
+            ["Code", "Description", "Notes", "Qty", "Value", None, None, None, "Amount"]
+        )
+        hash_sheet.append([34, "Paid-Ins", None, 1, 184.35, None, None, None, None])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        self.assertEqual(
+            api["read_sources"](output.getvalue(), "BS", "HASH")["paid_in"],
+            184.35,
+        )
+
     def test_each_activity_section_validates_without_other_section_state(self):
         api = self.activity_api()
 

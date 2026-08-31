@@ -6,6 +6,11 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+try:
+    from .activity_breakdowns import extract_hash_row_amount
+except ImportError:
+    from activity_breakdowns import extract_hash_row_amount
+
 
 STANDARD_CLOSEOUT_ORDER: tuple[str, ...] = (
     "cash",
@@ -276,8 +281,13 @@ def read_closeout_baselines(
             if raw_amount is None or (
                 isinstance(raw_amount, str) and not raw_amount.strip()
             ):
-                continue
-            amount = abs(_money(raw_amount, "HASH code 34 amount"))
+                amount = extract_hash_row_amount(row, amount_column, 34)
+                if amount is None:
+                    continue
+            else:
+                fallback_amount = extract_hash_row_amount(row, amount_column, 34)
+                amount = raw_amount if fallback_amount is None else fallback_amount
+            amount = abs(_money(amount, "HASH code 34 amount"))
             baselines["paid_in"] = float(amount)
 
         return baselines

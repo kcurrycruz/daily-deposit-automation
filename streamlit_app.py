@@ -862,15 +862,41 @@ def section_status(log_text: str, section_name: str) -> Optional[bool]:
         return True
     return None
 
-def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
+def detect_sheet_roles(
+    upload_bytes: bytes,
+    preferred_date=None,
+) -> dict[str, Optional[str]]:
     try:
         from io import BytesIO
         import openpyxl
 
         wb = openpyxl.load_workbook(BytesIO(upload_bytes), read_only=True, data_only=True)
         detected = {"sales": None, "coupons": None, "discounts": None, "bs": None, "hash": None}
+        preferred_markers = set()
+        if preferred_date is not None:
+            preferred_markers = {
+                preferred_date.strftime(pattern).casefold()
+                for pattern in (
+                    "%m%d%y",
+                    "%m%d%Y",
+                    "%m-%d-%y",
+                    "%m-%d-%Y",
+                    "%m_%d_%y",
+                    "%m_%d_%Y",
+                )
+            }
+        ordered_sheet_names = sorted(
+            wb.sheetnames,
+            key=lambda name: (
+                0
+                if preferred_markers
+                and any(marker in name.casefold() for marker in preferred_markers)
+                else 1,
+                wb.sheetnames.index(name),
+            ),
+        )
 
-        for name in wb.sheetnames:
+        for name in ordered_sheet_names:
             low = name.strip().lower()
             if "xxxxxx" in low:
                 continue
@@ -890,7 +916,7 @@ def detect_sheet_roles(upload_bytes: bytes) -> dict[str, Optional[str]]:
                 detected["sales"] = name
 
         previews = {}
-        for name in wb.sheetnames:
+        for name in ordered_sheet_names:
             if "xxxxxx" in name.casefold():
                 continue
             ws = wb[name]
@@ -2119,9 +2145,9 @@ with settlement_col:
 
 if uploaded:
     upload_bytes = uploaded.getvalue()
-    roles = detect_sheet_roles(upload_bytes)
     date_info = detect_workbook_dates(upload_bytes)
     deposit_date = date_info["detected_date"]
+    roles = detect_sheet_roles(upload_bytes, preferred_date=deposit_date)
 
     with setup_col:
         if deposit_date is not None:

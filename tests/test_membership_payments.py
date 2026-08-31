@@ -891,6 +891,50 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual(roles["discounts"], "082626 Discounts")
         self.assertEqual(roles["hash"], "082626 Hash")
 
+    def test_workbook_validation_uses_hash_tab_for_detected_deposit_date(self):
+        """An older dated HASH tab must not hide the current deposit's Paid In."""
+        import ast
+        from datetime import date
+        from io import BytesIO
+        from pathlib import Path
+        from typing import Optional
+
+        import openpyxl
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        function_node = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "detect_sheet_roles"
+        )
+        namespace = {"Optional": Optional}
+        exec(
+            compile(
+                ast.Module(body=[function_node], type_ignores=[]),
+                str(source_path),
+                "exec",
+            ),
+            namespace,
+        )
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "SubDept Sales Report 08-28-26"
+        old_hash = workbook.create_sheet("082726 Hash")
+        old_hash.append([34, "Paid-Ins", None, None, 0.00])
+        current_hash = workbook.create_sheet("082826 Hash")
+        current_hash.append([34, "Paid-Ins", None, None, 100.00])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        roles = namespace["detect_sheet_roles"](
+            output.getvalue(),
+            preferred_date=date(2026, 8, 28),
+        )
+
+        self.assertEqual(roles["hash"], "082826 Hash")
+
     def test_discount_parser_prefers_the_dated_tab_over_xxxxxx_placeholder(self):
         from datetime import date
         from pathlib import Path

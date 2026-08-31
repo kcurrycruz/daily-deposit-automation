@@ -320,6 +320,19 @@ class CloseoutReconciliationTests(unittest.TestCase):
         self.assertEqual(result["paid_in"], 30.00)
 
 
+    def test_read_closeout_baselines_treats_blank_paid_in_amount_as_zero(self):
+        """A blank HASH code 34 placeholder means there was no Paid In activity."""
+        from app.closeout_reconciliation import read_closeout_baselines
+
+        result = read_closeout_baselines(
+            workbook_bytes(paid_in_amount=None),
+            "Daily BS",
+            "Daily HASH",
+        )
+
+        self.assertEqual(result["paid_in"], 0.00)
+
+
     def test_default_closeout_actuals_rebuilds_canonical_normalized_float_mapping(self):
         from app.closeout_reconciliation import default_closeout_actuals
 

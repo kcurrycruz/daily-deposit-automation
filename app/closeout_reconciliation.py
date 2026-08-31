@@ -268,11 +268,16 @@ def read_closeout_baselines(
             if not paid_in_row:
                 continue
             try:
-                amount = abs(_money(row[amount_column], "HASH code 34 amount"))
+                raw_amount = row[amount_column]
             except IndexError:
                 raise ValueError(
                     "HASH code 34 does not contain a valid monetary amount"
                 ) from None
+            if raw_amount is None or (
+                isinstance(raw_amount, str) and not raw_amount.strip()
+            ):
+                continue
+            amount = abs(_money(raw_amount, "HASH code 34 amount"))
             baselines["paid_in"] = float(amount)
 
         return baselines

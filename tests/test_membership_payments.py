@@ -2257,8 +2257,8 @@ except RuntimeError:
             ("2.00", "Over/Short per Closeout Sheet - Charge (House)"),
             ("12.00", "Over/Short per Closeout Sheet - Offline Zon"),
             ("-6.75", "Over/Short per Closeout Sheet - Coupon"),
-            ("-10.00", "Over/Short per Closeout Sheet - Paid Out"),
             ("5.00", "Over/Short per Closeout Sheet - Paid In"),
+            ("-10.00", "Over/Short per Closeout Sheet - Paid Out"),
         ]
         adjustment_positions = []
         for amount, memo in expected_adjustments:
@@ -2337,8 +2337,8 @@ except RuntimeError:
             "charge_house",
             "offline_zon",
             "vendor_coupons",
-            "paid_out",
             "paid_in",
+            "paid_out",
         ])
         self.assertEqual(
             [row["kind"] for row in preview["misc_rows"]],

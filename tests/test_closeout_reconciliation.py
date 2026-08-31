@@ -13,8 +13,8 @@ STANDARD_ORDER = (
     "charge_house",
     "offline_zon",
     "vendor_coupons",
-    "paid_out",
     "paid_in",
+    "paid_out",
 )
 
 

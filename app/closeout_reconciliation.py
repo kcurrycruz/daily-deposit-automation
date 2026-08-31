@@ -19,8 +19,8 @@ STANDARD_CLOSEOUT_ORDER: tuple[str, ...] = (
     "charge_house",
     "offline_zon",
     "vendor_coupons",
-    "paid_out",
     "paid_in",
+    "paid_out",
 )
 
 _BS_CODE_TO_FIELD = {
@@ -87,19 +87,19 @@ STANDARD_METADATA = OrderedDict(
             },
         ),
         (
-            "paid_out",
-            {
-                "label": "Paid Out",
-                "memo": "Over/Short per Closeout Sheet - Paid Out",
-                "detail_direction": -1,
-            },
-        ),
-        (
             "paid_in",
             {
                 "label": "Paid In",
                 "memo": "Over/Short per Closeout Sheet - Paid In",
                 "detail_direction": 1,
+            },
+        ),
+        (
+            "paid_out",
+            {
+                "label": "Paid Out",
+                "memo": "Over/Short per Closeout Sheet - Paid Out",
+                "detail_direction": -1,
             },
         ),
     ]

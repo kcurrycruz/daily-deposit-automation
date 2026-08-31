@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
-ACTIVITY_ORDER = ("donation", "paid_out", "paid_in")
+ACTIVITY_ORDER = ("donation", "paid_in", "paid_out")
 _MODES = {"app", "quickbooks"}
 _CENTS = Decimal("0.01")
 
@@ -199,8 +199,9 @@ def _normalize_paid_row(category: str, row: dict) -> dict:
     if not isinstance(row, dict):
         raise ValueError(f"{label} row must be an object")
     row_type = row.get("type")
-    if row_type not in {"esp", "other"}:
-        raise ValueError(f"{label} type must be ESP Deposit or Other")
+    allowed_types = {"esp", "outreach", "other"}
+    if row_type not in allowed_types:
+        raise ValueError(f"{label} type must be ESP Deposit, Outreach, or Other")
     normalized = {
         "type": row_type,
         "amount": float(_money(row.get("amount"), f"{label} amount")),
@@ -240,6 +241,17 @@ def normalize_activity_section(category: str, section: dict) -> dict:
     return {"mode": mode, "rows": [row_builder(row) for row in rows]}
 
 
+def append_activity_entry(category: str, saved_rows: list, entry: dict) -> list[dict]:
+    """Validate one entry and return a new saved-row list for the UI."""
+    if not isinstance(saved_rows, list):
+        raise ValueError("Saved activity rows must be a list")
+    normalized_entry = normalize_activity_section(
+        category,
+        {"mode": "app", "rows": [entry]},
+    )["rows"][0]
+    return [*saved_rows, normalized_entry]
+
+
 def normalize_activity_payload(payload: dict | None) -> dict:
     if payload is None:
         payload = {}
@@ -271,7 +283,7 @@ def activity_actuals(payload: dict) -> dict[str, float | None]:
 
 def _paid_memo(category: str, row: dict) -> str:
     prefix = "PAID IN" if category == "paid_in" else "PAID OUT"
-    if row["type"] == "other":
+    if row["type"] in {"other", "outreach"}:
         return f"{prefix}: {row['memo']}"
     original_date = date.fromisoformat(row["original_date"])
     short_date = f"{original_date.month}/{original_date.day}"
@@ -301,7 +313,11 @@ def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
                     "account": (
                         "1230000 · Miscellaneous Receivable"
                         if row["type"] == "esp"
-                        else "4444 · TBA Purchases"
+                        else (
+                            "8505000 · Outreach"
+                            if row["type"] == "outreach"
+                            else "4444 · TBA Purchases"
+                        )
                     ),
                     "memo": _paid_memo(category, row),
                     "class_name": "",

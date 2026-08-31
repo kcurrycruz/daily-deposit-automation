@@ -38,6 +38,7 @@ from app.activity_breakdowns import (
     activity_actuals,
     activity_closeout_ready,
     activity_workflow_keys,
+    append_activity_entry,
     normalize_activity_payload,
     normalize_activity_section,
     read_activity_source_totals,
@@ -2591,99 +2592,216 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         )
         continue
 
-    row_ids_key = f"activity_row_ids_{activity_key}_{closeout_workbook_key}"
-    if row_ids_key not in st.session_state:
-        st.session_state[row_ids_key] = [uuid4().hex]
-    raw_rows = []
-    for row_number, row_id in enumerate(st.session_state[row_ids_key], start=1):
-        st.markdown(f"**{activity_title} item {row_number}**")
-        if activity_key == "donation":
-            row_columns = st.columns([1.5, 1.8, 1.2, 0.9, 0.35])
-            given_key = f"activity_{activity_key}_{row_id}_given_to"
-            purpose_key = f"activity_{activity_key}_{row_id}_purpose"
-            manager_key = f"activity_{activity_key}_{row_id}_manager"
-            amount_key = f"activity_{activity_key}_{row_id}_amount"
-            given_to = row_columns[0].text_input("Given To", key=given_key)
-            purpose = row_columns[1].text_input("For", key=purpose_key)
-            manager = row_columns[2].text_input("Manager Approval", key=manager_key)
-            amount = row_columns[3].number_input(
-                "Amount",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f",
-                key=amount_key,
+    if activity_key == "paid_in":
+        saved_rows_key = f"activity_saved_rows_{activity_key}_{closeout_workbook_key}"
+        entry_version_key = f"activity_entry_version_{activity_key}_{closeout_workbook_key}"
+        st.session_state.setdefault(saved_rows_key, [])
+        st.session_state.setdefault(entry_version_key, 0)
+        entry_key = (
+            f"activity_entry_{activity_key}_{closeout_workbook_key}_"
+            f"{st.session_state[entry_version_key]}"
+        )
+
+        st.markdown("**Add a Paid In item**")
+        entry_columns = st.columns(
+            [1.2, 2.0, 1.2, 1.0, 1.0],
+            vertical_alignment="bottom",
+        )
+        item_type = entry_columns[0].selectbox(
+            "Type",
+            options=["ESP Deposit", "Outreach", "Other"],
+            key=f"{entry_key}_type",
+        )
+        if item_type == "ESP Deposit":
+            original_date = entry_columns[1].date_input(
+                "Original ESP Deposit Date",
+                value=deposit_date or date.today(),
+                key=f"{entry_key}_date",
             )
-            widget_keys = (given_key, purpose_key, manager_key, amount_key)
-            raw_rows.append(
-                {
-                    "given_to": given_to,
-                    "purpose": purpose,
-                    "manager": manager,
-                    "amount": float(amount),
-                }
+            initials = entry_columns[2].text_input(
+                "Initials",
+                key=f"{entry_key}_initials",
             )
+            new_entry = {
+                "type": "esp",
+                "original_date": original_date,
+                "initials": initials,
+            }
         else:
-            row_columns = st.columns([1.15, 1.8, 1.0, 0.9, 0.35])
-            type_key = f"activity_{activity_key}_{row_id}_type"
-            amount_key = f"activity_{activity_key}_{row_id}_amount"
-            item_type = row_columns[0].selectbox(
-                "Type",
-                options=["ESP Deposit", "Other"],
-                key=type_key,
+            memo = entry_columns[1].text_input(
+                "Description / Memo",
+                key=f"{entry_key}_memo",
             )
-            if item_type == "ESP Deposit":
-                date_key = f"activity_{activity_key}_{row_id}_date"
-                initials_key = f"activity_{activity_key}_{row_id}_initials"
-                original_date = row_columns[1].date_input(
-                    "Original ESP Deposit Date",
-                    value=deposit_date or date.today(),
-                    key=date_key,
-                )
-                initials = row_columns[2].text_input("Initials", key=initials_key)
-                widget_keys = (type_key, date_key, initials_key, amount_key)
-                raw_row = {
-                    "type": "esp",
-                    "original_date": original_date,
-                    "initials": initials,
-                }
+            if item_type == "Outreach":
+                entry_columns[2].caption("Posts to 8505000 · Outreach")
+                new_entry = {"type": "outreach", "memo": memo}
             else:
-                memo_key = f"activity_{activity_key}_{row_id}_memo"
-                memo = row_columns[1].text_input("Description / Memo", key=memo_key)
-                row_columns[2].caption("Posts to TBA Purchases")
-                widget_keys = (type_key, memo_key, amount_key)
-                raw_row = {"type": "other", "memo": memo}
-            amount = row_columns[3].number_input(
-                "Amount",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f",
-                key=amount_key,
-            )
-            raw_rows.append({**raw_row, "amount": float(amount)})
+                entry_columns[2].caption("Posts to TBA Purchases")
+                new_entry = {"type": "other", "memo": memo}
+        amount = entry_columns[3].number_input(
+            "Amount",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=f"{entry_key}_amount",
+        )
+        add_entry_clicked = entry_columns[4].button(
+            "+ Add Paid In item",
+            type="secondary",
+            use_container_width=True,
+            key=f"{entry_key}_add",
+        )
+        if add_entry_clicked:
+            try:
+                updated_rows = append_activity_entry(
+                    "paid_in",
+                    st.session_state[saved_rows_key],
+                    {**new_entry, "amount": float(amount)},
+                )
+            except ValueError as exc:
+                st.error(str(exc), icon="🚫")
+            else:
+                st.session_state[saved_rows_key] = updated_rows
+                st.session_state[entry_version_key] += 1
+                st.rerun()
 
-        delete_key = f"delete_activity_{activity_key}_{row_id}"
-        if row_columns[4].button(
-            "×",
-            key=delete_key,
-            help=f"Delete {activity_title} item {row_number}",
-            disabled=len(st.session_state[row_ids_key]) == 1,
+        raw_rows = list(st.session_state[saved_rows_key])
+        if raw_rows:
+            st.markdown("**Added Paid In items**")
+            saved_headers = st.columns([1.2, 2.0, 1.2, 1.0, 1.0])
+            saved_headers[0].caption("Type")
+            saved_headers[1].caption("Description / Memo")
+            saved_headers[2].caption("Account")
+            saved_headers[3].caption("Amount")
+        for row_index, saved_row in enumerate(raw_rows):
+            saved_columns = st.columns([1.2, 2.0, 1.2, 1.0, 1.0])
+            if saved_row["type"] == "esp":
+                saved_columns[0].write("ESP Deposit")
+                saved_columns[1].write(
+                    f"{saved_row['original_date']} · {saved_row['initials']}"
+                )
+                saved_columns[2].write("Misc. Receivable")
+            elif saved_row["type"] == "outreach":
+                saved_columns[0].write("Outreach")
+                saved_columns[1].write(saved_row["memo"])
+                saved_columns[2].write("8505000 · Outreach")
+            else:
+                saved_columns[0].write("Other")
+                saved_columns[1].write(saved_row["memo"])
+                saved_columns[2].write("TBA Purchases")
+            saved_columns[3].write(f"${float(saved_row['amount']):,.2f}")
+            if saved_columns[4].button(
+                "Remove",
+                key=(
+                    f"remove_activity_{activity_key}_{closeout_workbook_key}_"
+                    f"{row_index}"
+                ),
+            ):
+                st.session_state[saved_rows_key] = [
+                    row
+                    for index, row in enumerate(raw_rows)
+                    if index != row_index
+                ]
+                st.rerun()
+    else:
+        row_ids_key = f"activity_row_ids_{activity_key}_{closeout_workbook_key}"
+        if row_ids_key not in st.session_state:
+            st.session_state[row_ids_key] = [uuid4().hex]
+        raw_rows = []
+        for row_number, row_id in enumerate(st.session_state[row_ids_key], start=1):
+            st.markdown(f"**{activity_title} item {row_number}**")
+            if activity_key == "donation":
+                row_columns = st.columns([1.5, 1.8, 1.2, 0.9, 0.35])
+                given_key = f"activity_{activity_key}_{row_id}_given_to"
+                purpose_key = f"activity_{activity_key}_{row_id}_purpose"
+                manager_key = f"activity_{activity_key}_{row_id}_manager"
+                amount_key = f"activity_{activity_key}_{row_id}_amount"
+                given_to = row_columns[0].text_input("Given To", key=given_key)
+                purpose = row_columns[1].text_input("For", key=purpose_key)
+                manager = row_columns[2].text_input("Manager Approval", key=manager_key)
+                amount = row_columns[3].number_input(
+                    "Amount",
+                    min_value=0.0,
+                    step=0.01,
+                    format="%.2f",
+                    key=amount_key,
+                )
+                widget_keys = (given_key, purpose_key, manager_key, amount_key)
+                raw_rows.append(
+                    {
+                        "given_to": given_to,
+                        "purpose": purpose,
+                        "manager": manager,
+                        "amount": float(amount),
+                    }
+                )
+            else:
+                row_columns = st.columns([1.15, 1.8, 1.0, 0.9, 0.35])
+                type_key = f"activity_{activity_key}_{row_id}_type"
+                amount_key = f"activity_{activity_key}_{row_id}_amount"
+                item_type = row_columns[0].selectbox(
+                    "Type",
+                    options=["ESP Deposit", "Outreach", "Other"],
+                    key=type_key,
+                )
+                if item_type == "ESP Deposit":
+                    date_key = f"activity_{activity_key}_{row_id}_date"
+                    initials_key = f"activity_{activity_key}_{row_id}_initials"
+                    original_date = row_columns[1].date_input(
+                        "Original ESP Deposit Date",
+                        value=deposit_date or date.today(),
+                        key=date_key,
+                    )
+                    initials = row_columns[2].text_input("Initials", key=initials_key)
+                    widget_keys = (type_key, date_key, initials_key, amount_key)
+                    raw_row = {
+                        "type": "esp",
+                        "original_date": original_date,
+                        "initials": initials,
+                    }
+                else:
+                    memo_key = f"activity_{activity_key}_{row_id}_memo"
+                    memo = row_columns[1].text_input("Description / Memo", key=memo_key)
+                    if item_type == "Outreach":
+                        row_columns[2].caption("Posts to 8505000 · Outreach")
+                        raw_type = "outreach"
+                    else:
+                        row_columns[2].caption("Posts to TBA Purchases")
+                        raw_type = "other"
+                    widget_keys = (type_key, memo_key, amount_key)
+                    raw_row = {"type": raw_type, "memo": memo}
+                amount = row_columns[3].number_input(
+                    "Amount",
+                    min_value=0.0,
+                    step=0.01,
+                    format="%.2f",
+                    key=amount_key,
+                )
+                raw_rows.append({**raw_row, "amount": float(amount)})
+
+            delete_key = f"delete_activity_{activity_key}_{row_id}"
+            if row_columns[4].button(
+                "×",
+                key=delete_key,
+                help=f"Delete {activity_title} item {row_number}",
+                disabled=len(st.session_state[row_ids_key]) == 1,
+            ):
+                st.session_state[row_ids_key] = [
+                    existing_id
+                    for existing_id in st.session_state[row_ids_key]
+                    if existing_id != row_id
+                ]
+                for widget_key in (*widget_keys, delete_key):
+                    st.session_state.pop(widget_key, None)
+                st.rerun()
+
+        if st.button(
+            f"+ Add {activity_title} item",
+            key=f"add_activity_{activity_key}_{closeout_workbook_key}",
+            type="secondary",
         ):
-            st.session_state[row_ids_key] = [
-                existing_id
-                for existing_id in st.session_state[row_ids_key]
-                if existing_id != row_id
-            ]
-            for widget_key in (*widget_keys, delete_key):
-                st.session_state.pop(widget_key, None)
+            st.session_state[row_ids_key].append(uuid4().hex)
             st.rerun()
-
-    if st.button(
-        f"+ Add {activity_title} item",
-        key=f"add_activity_{activity_key}_{closeout_workbook_key}",
-        type="secondary",
-    ):
-        st.session_state[row_ids_key].append(uuid4().hex)
-        st.rerun()
 
     try:
         activity_payload[activity_key] = normalize_activity_section(

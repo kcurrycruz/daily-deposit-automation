@@ -13,6 +13,7 @@ class ActivityBreakdownTests(unittest.TestCase):
         try:
             from app.activity_breakdowns import (
                 activity_actuals,
+                append_activity_entry,
                 activity_closeout_ready,
                 activity_workflow_keys,
                 build_activity_lines,
@@ -26,6 +27,7 @@ class ActivityBreakdownTests(unittest.TestCase):
             self.fail(f"activity breakdown feature is missing: {exc}")
         return {
             "actuals": activity_actuals,
+            "append_entry": append_activity_entry,
             "closeout_ready": activity_closeout_ready,
             "workflow_keys": activity_workflow_keys,
             "build_lines": build_activity_lines,
@@ -155,6 +157,62 @@ class ActivityBreakdownTests(unittest.TestCase):
             ],
         )
 
+    def test_paid_in_outreach_requires_memo_and_posts_positive_to_outreach(self):
+        api = self.activity_api()
+        payload = self.complete_payload()
+        payload["paid_in"] = {
+            "mode": "app",
+            "rows": [
+                {
+                    "type": "outreach",
+                    "memo": "Community event repayment",
+                    "amount": 42.50,
+                }
+            ],
+        }
+
+        lines = api["build_lines"](payload)
+
+        self.assertEqual(
+            lines["paid_in"],
+            [
+                {
+                    "account": "8505000 · Outreach",
+                    "memo": "PAID IN: Community event repayment",
+                    "class_name": "",
+                    "qb_effect": 42.50,
+                }
+            ],
+        )
+
+    def test_paid_out_outreach_requires_memo_and_posts_negative_to_outreach(self):
+        api = self.activity_api()
+        payload = self.complete_payload()
+        payload["paid_out"] = {
+            "mode": "app",
+            "rows": [
+                {
+                    "type": "outreach",
+                    "memo": "Community event advance",
+                    "amount": 42.50,
+                }
+            ],
+        }
+
+        lines = api["build_lines"](payload)
+
+        self.assertEqual(
+            lines["paid_out"],
+            [
+                {
+                    "account": "8505000 · Outreach",
+                    "memo": "PAID OUT: Community event advance",
+                    "class_name": "",
+                    "qb_effect": -42.50,
+                }
+            ],
+        )
+
     def test_actuals_are_locked_to_the_sum_of_each_app_breakdown(self):
         api = self.activity_api()
 
@@ -249,7 +307,7 @@ class ActivityBreakdownTests(unittest.TestCase):
             api["workflow_keys"](
                 {"paid_in": 10, "donation": 5, "paid_out": 2}
             ),
-            ("donation", "paid_out", "paid_in"),
+            ("donation", "paid_in", "paid_out"),
         )
         self.assertEqual(
             api["workflow_keys"](
@@ -257,6 +315,45 @@ class ActivityBreakdownTests(unittest.TestCase):
             ),
             (),
         )
+
+    def test_paid_in_entry_is_validated_then_appended_without_changing_saved_rows(self):
+        api = self.activity_api()
+        saved_rows = [
+            {
+                "type": "other",
+                "memo": "First receipt",
+                "amount": 25.0,
+            }
+        ]
+
+        updated_rows = api["append_entry"](
+            "paid_in",
+            saved_rows,
+            {
+                "type": "esp",
+                "original_date": date(2026, 8, 28),
+                "initials": "MR",
+                "amount": 75,
+            },
+        )
+
+        self.assertEqual(
+            updated_rows,
+            [
+                {
+                    "type": "other",
+                    "memo": "First receipt",
+                    "amount": 25.0,
+                },
+                {
+                    "type": "esp",
+                    "original_date": "2026-08-28",
+                    "initials": "MR",
+                    "amount": 75.0,
+                },
+            ],
+        )
+        self.assertEqual(len(saved_rows), 1)
 
     def test_manual_detected_activity_blocks_in_app_closeout(self):
         api = self.activity_api()

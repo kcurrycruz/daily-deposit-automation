@@ -12,6 +12,24 @@ def workflow_heading_html(title: str, description: str) -> str:
     )
 
 
+def deposit_step_card_html(row: dict) -> str:
+    """Render a safe status card for one guided deposit step."""
+    classes = "hwfc-step-card"
+    if row.get("current"):
+        classes += " is-current"
+    elif row.get("complete"):
+        classes += " is-complete"
+    return (
+        f'<div class="{classes}">'
+        '<div class="hwfc-step-number">'
+        f'Step {int(row["number"])}</div>'
+        '<div class="hwfc-step-copy">'
+        f'<strong>{html.escape(str(row["label"]))}</strong>'
+        f'<span>{html.escape(str(row["status"]))}</span>'
+        "</div></div>"
+    )
+
+
 def plan_guide_html(rows: list[dict]) -> str:
     """Render membership plan details as responsive, easy-to-scan cards."""
     cards = []

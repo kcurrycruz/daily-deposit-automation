@@ -221,6 +221,81 @@ class ActivityBreakdownTests(unittest.TestCase):
             {"donation": 200.0, "paid_out": 189.6, "paid_in": 110.15},
         )
 
+    def test_normalized_saved_sections_rebuild_complete_payload(self):
+        api = self.activity_api()
+        original = self.complete_payload()
+        saved = {
+            key: api["normalize_section"](key, original[key])
+            for key in ("donation", "paid_in", "paid_out")
+        }
+
+        rebuilt = api["normalize"](saved)
+
+        self.assertEqual(api["actuals"](rebuilt), api["actuals"](original))
+
+    def test_activity_save_payload_is_the_normalized_section_used_for_persistence(self):
+        from app.guided_deposit_state import validated_activity_save_payload
+
+        raw_section = {
+            "mode": "app",
+            "rows": [{
+                "type": "other",
+                "memo": " Returned cash ",
+                "amount": 25,
+            }],
+        }
+
+        saved = validated_activity_save_payload("paid_in", raw_section)
+
+        self.assertEqual(
+            saved,
+            {
+                "mode": "app",
+                "rows": [{
+                    "type": "other",
+                    "memo": "Returned cash",
+                    "amount": 25.0,
+                }],
+            },
+        )
+        self.assertIsNot(saved, raw_section)
+
+    def test_activity_save_transition_persists_payload_and_app_completion(self):
+        from app.guided_deposit_state import save_activity_transition
+
+        saved_key = "activity_saved_section_donation_workbook-123"
+        transition = save_activity_transition(
+            ("donation", "closeout"),
+            {},
+            "donation",
+            saved_key,
+            {
+                "mode": "app",
+                "rows": [{
+                    "given_to": " Community Church ",
+                    "purpose": " Food pantry ",
+                    "manager": "AB",
+                    "amount": 25,
+                }],
+            },
+        )
+
+        self.assertEqual(
+            transition["saved_payload"],
+            {
+                saved_key: {
+                    "mode": "app",
+                    "rows": [{
+                        "given_to": "Community Church",
+                        "purpose": "Food pantry",
+                        "manager": "AB",
+                        "amount": 25.0,
+                    }],
+                }
+            },
+        )
+        self.assertEqual(transition["completions"], {"donation": "app"})
+
     def test_manual_modes_discard_rows_and_produce_no_detail_lines(self):
         api = self.activity_api()
         payload = {

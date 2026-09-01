@@ -48,13 +48,24 @@ from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
 )
+from app.deposit_workflow import (
+    STEP_CLOSEOUT,
+    STEP_COUPONS,
+    STEP_MEMBER_SHARES,
+    active_deposit_step,
+    complete_deposit_step,
+    deposit_workflow_complete,
+    deposit_step_rows,
+    edit_deposit_step,
+    normalize_step_completions,
+    required_deposit_steps,
+)
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
     build_closeout_form_payload,
     closeout_input_fingerprint,
     closeout_preview_is_fresh,
-    coupon_workflow_is_required,
     default_closeout_actuals,
     normalize_closeout_payload,
     read_closeout_baselines,
@@ -75,7 +86,15 @@ from app.membership_payments import (
     subscription_action_status,
     write_membership_payments_file,
 )
+from app.guided_deposit_state import (
+    hydrate_reopened_closeout_state,
+    recover_completed_membership_state,
+    resolve_activity_detection_workflow,
+    save_activity_transition,
+    save_member_share_transition,
+)
 from app.ui_helpers import (
+    deposit_step_card_html,
     deposit_download_details,
     plan_guide_html,
     workflow_heading_html,
@@ -461,6 +480,50 @@ st.markdown(
         color: #C7D2C2;
         font-size: .92rem;
         margin-top: 4px;
+    }
+
+    .hwfc-step-card {
+        align-items: center;
+        background: #161B22;
+        border: 1px solid var(--hwfc-border);
+        border-radius: 12px;
+        display: flex;
+        gap: 12px;
+        margin: 4px 0;
+        padding: 10px 12px;
+    }
+
+    .hwfc-step-card.is-current {
+        background: rgba(47,82,51,.48);
+        border-color: #78A85B;
+    }
+
+    .hwfc-step-card.is-complete {
+        border-color: #315F3A;
+    }
+
+    .hwfc-step-number {
+        color: #D6C5A8;
+        font-size: .76rem;
+        font-weight: 850;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .hwfc-step-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .hwfc-step-copy strong {
+        color: #FFFDF8;
+    }
+
+    .hwfc-step-copy span {
+        color: #C7D2C2;
+        font-size: .82rem;
     }
 
     .hwfc-plan-guide-grid {
@@ -2207,15 +2270,16 @@ membership_mode = "automatic"
 coupon_bs_total = 0.0
 coupon_valid = True
 coupon_mode = "quickbooks"
-coupon_closeout_total = None
-coupon_ncg_total = None
-coupon_mfg_total = None
+coupon_closeout_total = 0.0
+coupon_ncg_total = 0.0
+coupon_mfg_total = 0.0
 activity_source_totals = {key: 0.0 for key in ("donation", "paid_out", "paid_in")}
 activity_payload = {
     key: {"mode": "quickbooks", "rows": []}
     for key in ("donation", "paid_out", "paid_in")
 }
 activity_valid = True
+activity_detection_valid = True
 closeout_payload = None
 closeout_valid = False
 
@@ -2239,7 +2303,112 @@ if uploaded and membership_valid:
     else:
         st.success(status_text, icon="✅")
 
-if subscription_total > 0:
+closeout_workbook_key = (
+    membership_editor_key(upload_bytes, st.session_state["file_uploader_key"])
+    if uploaded
+    else None
+)
+closeout_payload_key = f"closeout_payload_{closeout_workbook_key}"
+closeout_preview_key = f"closeout_preview_{closeout_workbook_key}"
+closeout_hydration_key = f"closeout_form_needs_hydration_{closeout_workbook_key}"
+closeout_choice_state = (
+    st.session_state.get(f"closeout_handling_{closeout_workbook_key}")
+    if closeout_workbook_key is not None
+    else None
+)
+
+if uploaded:
+    try:
+        activity_source_totals = read_activity_source_totals(
+            upload_bytes,
+            roles.get("bs"),
+            roles.get("hash"),
+        )
+    except Exception as exc:
+        activity_detection_valid = False
+        st.warning(
+            "Optional Donations, Paid Out, and Paid In totals could not be read. "
+            f"The existing QuickBooks process remains available. Details: {exc}",
+            icon="⚠️",
+        )
+
+required_steps = ()
+step_completions = {}
+active_step = None
+workflow_completion_key = None
+workflow_requirements_key = None
+workflow_blocked = False
+guided_workflow_ready = False
+if uploaded:
+    detected_required_steps = None
+    if activity_detection_valid:
+        detected_required_steps = required_deposit_steps(
+            subscription_total,
+            activity_source_totals,
+            coupon_bs_total,
+        )
+    workflow_completion_key = f"deposit_step_completions_{closeout_workbook_key}"
+    workflow_requirements_key = (
+        f"deposit_required_steps_{closeout_workbook_key}"
+    )
+    workflow_state = resolve_activity_detection_workflow(
+        detection_valid=activity_detection_valid,
+        detected_required_steps=detected_required_steps,
+        saved_required_steps=st.session_state.get(workflow_requirements_key),
+        saved_completions=st.session_state.get(workflow_completion_key),
+    )
+    workflow_blocked = workflow_state["blocked"]
+    required_steps = workflow_state["required_steps"]
+    step_completions = workflow_state["completions"]
+    if activity_detection_valid:
+        st.session_state[workflow_requirements_key] = required_steps
+        st.session_state[workflow_completion_key] = step_completions
+    elif not workflow_blocked:
+        st.session_state[workflow_completion_key] = step_completions
+
+    if workflow_blocked:
+        st.markdown("## Today’s Deposit Steps")
+        st.error(
+            "Today’s Deposit Steps are blocked until Donations, Paid Out, and Paid In "
+            "totals can be read successfully. Reload the workbook and try again.",
+            icon="🚫",
+        )
+    else:
+        active_step = active_deposit_step(required_steps, step_completions)
+
+        st.markdown("## Today’s Deposit Steps")
+        for row in deposit_step_rows(required_steps, step_completions):
+            card_col, action_col = st.columns([6, 1], vertical_alignment="center")
+            card_col.markdown(deposit_step_card_html(row), unsafe_allow_html=True)
+            if row["complete"] and action_col.button(
+                "Edit",
+                key=f"edit_deposit_step_{closeout_workbook_key}_{row['step']}",
+            ):
+                st.session_state[workflow_completion_key] = edit_deposit_step(
+                    required_steps,
+                    step_completions,
+                    row["step"],
+                )
+                if row["step"] != STEP_CLOSEOUT:
+                    st.session_state.pop(closeout_preview_key, None)
+                    st.session_state[closeout_hydration_key] = True
+                st.rerun()
+
+        step_completions = normalize_step_completions(
+            required_steps,
+            st.session_state.get(workflow_completion_key),
+        )
+        guided_workflow_ready = deposit_workflow_complete(
+            required_steps,
+            step_completions,
+        ) and activity_detection_valid
+        if guided_workflow_ready:
+            st.success(
+                "All deposit steps are complete. Validate and prepare the QuickBooks IIF below.",
+                icon="✅",
+            )
+
+if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
     st.markdown(
         workflow_heading_html(
             "Member Share Payments",
@@ -2537,37 +2706,97 @@ if subscription_total > 0:
             membership_valid = False
             st.warning(str(exc), icon="⚠️")
 
-closeout_workbook_key = (
-    membership_editor_key(upload_bytes, st.session_state["file_uploader_key"])
-    if uploaded
-    else None
-)
-closeout_choice_state = (
-    st.session_state.get(f"closeout_handling_{closeout_workbook_key}")
-    if closeout_workbook_key is not None
-    else None
-)
+if STEP_MEMBER_SHARES in required_steps:
+    membership_choice_key = f"membership_handling_{closeout_workbook_key}"
+    saved_payments_key = f"membership_saved_payments_{closeout_workbook_key}"
+    saved_choice = st.session_state.get(membership_choice_key)
+    saved_payments = st.session_state.get(saved_payments_key, [])
+    if STEP_MEMBER_SHARES in step_completions:
+        recovered_membership = recover_completed_membership_state(
+            required_steps,
+            step_completions,
+            saved_choice,
+            saved_payments,
+            subscription_total=subscription_total,
+        )
+        if recovered_membership["needs_review"]:
+            st.session_state[workflow_completion_key] = recovered_membership[
+                "completions"
+            ]
+            st.error(recovered_membership["error"], icon="🚫")
+            st.rerun()
+        membership_mode = recovered_membership["membership_mode"]
+        membership_payments = recovered_membership["membership_payments"]
+    else:
+        membership_mode = membership_mode_from_choice(saved_choice)
+        membership_payments = (
+            [dict(payment) for payment in saved_payments]
+            if isinstance(saved_payments, list)
+            else []
+        )
 
-if uploaded:
-    try:
-        activity_source_totals = read_activity_source_totals(
-            upload_bytes,
-            roles.get("bs"),
-            roles.get("hash"),
-        )
-    except Exception as exc:
-        st.warning(
-            "Optional Donations, Paid Out, and Paid In totals could not be read. "
-            f"The existing QuickBooks process remains available. Details: {exc}",
-            icon="⚠️",
-        )
+if active_step == STEP_MEMBER_SHARES and membership_mode == "manual":
+    st.session_state[workflow_completion_key] = complete_deposit_step(
+        required_steps, step_completions, STEP_MEMBER_SHARES, "quickbooks"
+    )
+    st.rerun()
+
+if active_step == STEP_MEMBER_SHARES and membership_mode == "automatic" and membership_valid:
+    if st.button("Save Member Share Payments & Continue", type="primary"):
+        try:
+            save_transition = save_member_share_transition(
+                required_steps,
+                step_completions,
+                saved_payments_key,
+                membership_payments,
+                subscription_total=subscription_total,
+            )
+        except ValueError as exc:
+            membership_valid = False
+            st.error(str(exc), icon="🚫")
+        else:
+            st.session_state.update(save_transition["saved_payload"])
+            st.session_state[workflow_completion_key] = save_transition[
+                "completions"
+            ]
+            st.rerun()
 
 activity_labels = {
     "donation": ("Donations", "Balance Sheet Donation (code 1122)"),
     "paid_out": ("Paid Out", "Balance Sheet Paid Out (code 1114)"),
     "paid_in": ("Paid In", "HASH Paid-Ins (code 34)"),
 }
+activity_save_labels = {
+    "donation": "Save Donations & Continue",
+    "paid_in": "Save Paid In & Continue",
+    "paid_out": "Save Paid Out & Continue",
+}
+activity_valid = activity_detection_valid
 for activity_key in activity_workflow_keys(activity_source_totals):
+    if activity_key not in step_completions:
+        continue
+    saved_section_key = (
+        f"activity_saved_section_{activity_key}_{closeout_workbook_key}"
+    )
+    try:
+        activity_payload[activity_key] = normalize_activity_section(
+            activity_key,
+            st.session_state[saved_section_key],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        st.session_state[workflow_completion_key] = edit_deposit_step(
+            required_steps, step_completions, activity_key
+        )
+        activity_title = activity_labels[activity_key][0]
+        st.error(
+            f"Saved {activity_title} details need to be reviewed again: {exc}",
+            icon="🚫",
+        )
+        st.rerun()
+
+for activity_key in activity_workflow_keys(activity_source_totals):
+    if active_step != activity_key:
+        continue
     activity_title, activity_source_label = activity_labels[activity_key]
     source_total = float(activity_source_totals[activity_key])
     st.markdown(
@@ -2591,11 +2820,18 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         continue
     if handling_choice == "Finish manually in QuickBooks":
         activity_payload[activity_key] = {"mode": "quickbooks", "rows": []}
+        saved_section_key = (
+            f"activity_saved_section_{activity_key}_{closeout_workbook_key}"
+        )
+        st.session_state[saved_section_key] = activity_payload[activity_key]
         st.info(
             f"The current {activity_title} process stays unchanged. Complete its detail and the Closeout Sheet in QuickBooks.",
             icon="ℹ️",
         )
-        continue
+        st.session_state[workflow_completion_key] = complete_deposit_step(
+            required_steps, step_completions, activity_key, "quickbooks"
+        )
+        st.rerun()
 
     if activity_key == "paid_in":
         saved_rows_key = f"activity_saved_rows_{activity_key}_{closeout_workbook_key}"
@@ -2823,15 +3059,57 @@ for activity_key in activity_workflow_keys(activity_source_totals):
             f"Closeout actual minus system total: {discrepancy:+,.2f}.",
             icon="✅",
         )
+        if st.button(
+            activity_save_labels[activity_key],
+            type="primary",
+            key=f"save_activity_{activity_key}_{closeout_workbook_key}",
+        ):
+            saved_section_key = (
+                f"activity_saved_section_{activity_key}_{closeout_workbook_key}"
+            )
+            save_transition = save_activity_transition(
+                required_steps,
+                step_completions,
+                activity_key,
+                saved_section_key,
+                activity_payload[activity_key],
+            )
+            activity_payload[activity_key] = save_transition["saved_payload"][
+                saved_section_key
+            ]
+            st.session_state.update(save_transition["saved_payload"])
+            st.session_state[workflow_completion_key] = save_transition[
+                "completions"
+            ]
+            st.rerun()
     except ValueError as exc:
         activity_valid = False
         activity_payload[activity_key] = {"mode": "app", "rows": raw_rows}
         st.caption(str(exc))
 
-if uploaded and coupon_workflow_is_required(
-    coupon_bs_total,
-    closeout_choice_state,
-):
+coupon_saved_key = f"coupon_saved_payload_{closeout_workbook_key}"
+if STEP_COUPONS in required_steps and STEP_COUPONS in step_completions:
+    try:
+        saved_coupon_payload = st.session_state[coupon_saved_key]
+        coupon_mode = saved_coupon_payload["mode"]
+        coupon_closeout_total = float(saved_coupon_payload["closeout_total"])
+        coupon_ncg_total = float(saved_coupon_payload["ncg_total"])
+        coupon_mfg_total = float(saved_coupon_payload["mfg_total"])
+        reconcile_coupon_receivable(
+            coupon_bs_total,
+            mode=coupon_mode,
+            closeout_actual_total=coupon_closeout_total,
+            ncg_total=coupon_ncg_total,
+            mfg_total=coupon_mfg_total,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        st.session_state[workflow_completion_key] = edit_deposit_step(
+            required_steps, step_completions, STEP_COUPONS
+        )
+        st.error(f"Saved Coupons details need to be reviewed again: {exc}", icon="🚫")
+        st.rerun()
+
+if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
     st.markdown(
         workflow_heading_html(
             "Coupons Receivable",
@@ -2848,7 +3126,7 @@ if uploaded and coupon_workflow_is_required(
         ],
         horizontal=True,
         index=None,
-        key=f"coupon_handling_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        key=f"coupon_handling_{closeout_workbook_key}",
     )
 
     if coupon_handling_choice is None:
@@ -2856,11 +3134,17 @@ if uploaded and coupon_workflow_is_required(
         st.caption("Select how you want to handle Coupons Receivable before building the deposit.")
     elif coupon_handling_choice == "Finish manually in QuickBooks":
         coupon_mode = "quickbooks"
-        st.info(
-            f"The existing process stays unchanged: ${coupon_bs_total:,.2f} will post to NCG Coupons. "
-            "You can make any needed coupon changes in QuickBooks.",
-            icon="ℹ️",
+        coupon_payload = {
+            "mode": coupon_mode,
+            "closeout_total": 0.0,
+            "ncg_total": 0.0,
+            "mfg_total": 0.0,
+        }
+        st.session_state[coupon_saved_key] = coupon_payload
+        st.session_state[workflow_completion_key] = complete_deposit_step(
+            required_steps, step_completions, STEP_COUPONS, "quickbooks"
         )
+        st.rerun()
     else:
         coupon_mode = "closeout"
         st.caption(
@@ -2882,7 +3166,7 @@ if uploaded and coupon_workflow_is_required(
             min_value=0.0,
             step=0.01,
             format="%.2f",
-            key=f"coupon_closeout_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+            key=f"coupon_closeout_{closeout_workbook_key}",
         )
 
         direct_columns = st.columns(2)
@@ -2891,14 +3175,14 @@ if uploaded and coupon_workflow_is_required(
             min_value=0.0,
             step=0.01,
             format="%.2f",
-            key=f"coupon_ncg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+            key=f"coupon_ncg_{closeout_workbook_key}",
         )
         coupon_mfg_total = direct_columns[1].number_input(
             "MFG Coupons counted",
             min_value=0.0,
             step=0.01,
             format="%.2f",
-            key=f"coupon_mfg_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+            key=f"coupon_mfg_{closeout_workbook_key}",
         )
 
         try:
@@ -2915,13 +3199,46 @@ if uploaded and coupon_workflow_is_required(
                 f"Closeout Sheet minus Balance Sheet: {discrepancy:+,.2f}.",
                 icon="✅",
             )
+            if st.button("Save Coupons & Continue", type="primary"):
+                coupon_payload = {
+                    "mode": coupon_mode,
+                    "closeout_total": float(coupon_closeout_total),
+                    "ncg_total": float(coupon_ncg_total),
+                    "mfg_total": float(coupon_mfg_total),
+                }
+                st.session_state[coupon_saved_key] = coupon_payload
+                st.session_state[workflow_completion_key] = complete_deposit_step(
+                    required_steps, step_completions, STEP_COUPONS, "app"
+                )
+                st.rerun()
         except ValueError as exc:
             coupon_valid = False
             st.warning(str(exc), icon="⚠️")
 
-if uploaded:
-    closeout_payload_key = f"closeout_payload_{closeout_workbook_key}"
-    closeout_preview_key = f"closeout_preview_{closeout_workbook_key}"
+if uploaded and STEP_CLOSEOUT in step_completions:
+    try:
+        closeout_payload = normalize_closeout_payload(
+            st.session_state[closeout_payload_key]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        st.session_state[workflow_completion_key] = edit_deposit_step(
+            required_steps,
+            step_completions,
+            STEP_CLOSEOUT,
+        )
+        st.error(f"Saved Closeout Sheet details need to be reviewed again: {exc}", icon="🚫")
+        st.rerun()
+    else:
+        closeout_valid = True
+
+if uploaded and active_step == STEP_CLOSEOUT:
+    if st.session_state.pop(closeout_hydration_key, False):
+        hydrate_reopened_closeout_state(
+            st.session_state,
+            payload_key=closeout_payload_key,
+            preview_key=closeout_preview_key,
+            workbook_key=closeout_workbook_key,
+        )
     st.markdown(
         workflow_heading_html(
             "Closeout Sheet",
@@ -2946,17 +3263,23 @@ if uploaded:
         closeout_payload = {"mode": "manual"}
         closeout_valid = activity_valid
         st.session_state[closeout_payload_key] = closeout_payload
-        st.info(
-            "Any app breakdowns will be itemized and reconciled. Complete the remaining Closeout Sheet changes in QuickBooks.",
-            icon="ℹ️",
+        st.session_state[workflow_completion_key] = complete_deposit_step(
+            required_steps,
+            step_completions,
+            STEP_CLOSEOUT,
+            "quickbooks",
         )
+        st.rerun()
     else:
         st.markdown("### Closeout Sheet reconciliation")
         st.caption(
             "Enter positive amounts exactly as printed on the paper Closeout Sheet. "
             "The app handles which amounts add to or remove from the deposit."
         )
-        coupon_link_ready = coupon_mode == "closeout" and coupon_valid
+        coupon_link_ready = (
+            STEP_COUPONS not in required_steps
+            or (coupon_mode == "closeout" and coupon_valid)
+        )
         if not coupon_link_ready:
             st.warning(
                 "Choose Breakdown in app using Closeout Sheet for Coupons Receivable first. "
@@ -3337,6 +3660,18 @@ if uploaded:
                     and activity_valid
                 )
                 st.session_state[closeout_payload_key] = closeout_payload
+                if closeout_valid and st.button(
+                    "Save Closeout Sheet & Continue",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    st.session_state[workflow_completion_key] = complete_deposit_step(
+                        required_steps,
+                        step_completions,
+                        STEP_CLOSEOUT,
+                        "app",
+                    )
+                    st.rerun()
             elif closeout_form_error and reviewed_closeout:
                 st.caption(closeout_form_error)
 
@@ -3345,6 +3680,15 @@ settlement_date_mismatch = False
 settlement_source_ok = False
 settlement_source_sheet = None
 run_clicked = False
+
+step_completions = normalize_step_completions(
+    required_steps,
+    st.session_state.get(workflow_completion_key),
+)
+guided_workflow_ready = deposit_workflow_complete(
+    required_steps,
+    step_completions,
+) and activity_detection_valid
 
 if settlement_file is not None:
     settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(settlement_file.getvalue())
@@ -3422,6 +3766,7 @@ if settlement_file is not None:
                 or not coupon_valid
                 or not activity_valid
                 or not closeout_valid
+                or not guided_workflow_ready
             ),
         )
 

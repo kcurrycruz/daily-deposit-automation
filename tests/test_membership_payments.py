@@ -25,6 +25,227 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn("Use &quot;QuickBooks&quot; safely", rendered)
         self.assertNotIn("Member & <Share>", rendered)
 
+    def test_deposit_step_card_html_marks_number_status_and_escapes_text(self):
+        from app.ui_helpers import deposit_step_card_html
+
+        rendered = deposit_step_card_html(
+            {
+                "number": 2,
+                "label": "Paid <In>",
+                "status": "Current",
+                "complete": False,
+                "current": True,
+            }
+        )
+
+        self.assertIn('class="hwfc-step-card is-current"', rendered)
+        self.assertIn("Step 2", rendered)
+        self.assertIn("Paid &lt;In&gt;", rendered)
+        self.assertIn("Current", rendered)
+        self.assertNotIn("Paid <In>", rendered)
+
+    def test_streamlit_app_renders_guided_step_summary_with_edit_controls(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+        for required_text in (
+            "Today’s Deposit Steps",
+            "deposit_step_rows",
+            "deposit_step_card_html",
+            "Edit",
+        ):
+            with self.subTest(required_text=required_text):
+                self.assertIn(required_text, source)
+
+    def test_guided_sections_persist_payloads_and_render_only_when_active(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+        for required_text in (
+            "activity_saved_section_",
+            "coupon_saved_payload_",
+            "Save Member Share Payments & Continue",
+            "Save Donations & Continue",
+            "Save Paid In & Continue",
+            "Save Paid Out & Continue",
+            "Save Coupons & Continue",
+            "active_step == STEP_MEMBER_SHARES",
+            "active_step == STEP_COUPONS",
+            'deposit_step_completions_{closeout_workbook_key}',
+            "activity_detection_valid",
+        ):
+            with self.subTest(required_text=required_text):
+                self.assertIn(required_text, source)
+
+    def test_closeout_is_final_guided_step_and_final_button_uses_workflow_gate(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+        for required_text in (
+            "active_step == STEP_CLOSEOUT",
+            "deposit_workflow_complete",
+            "guided_workflow_ready",
+            "st.session_state.pop(closeout_preview_key, None)",
+        ):
+            with self.subTest(required_text=required_text):
+                self.assertIn(required_text, source)
+        self.assertIn("or not guided_workflow_ready", source)
+
+    def test_activity_detection_failure_preserves_and_blocks_last_workflow(self):
+        from app.guided_deposit_state import resolve_activity_detection_workflow
+
+        state = resolve_activity_detection_workflow(
+            detection_valid=False,
+            detected_required_steps=("closeout",),
+            saved_required_steps=("member_shares", "donation", "closeout"),
+            saved_completions={
+                "member_shares": "app",
+                "donation": "quickbooks",
+                "closeout": "app",
+            },
+        )
+
+        self.assertTrue(state["blocked"])
+        self.assertEqual(
+            state["required_steps"],
+            ("member_shares", "donation", "closeout"),
+        )
+        self.assertEqual(
+            state["completions"],
+            {
+                "member_shares": "app",
+                "donation": "quickbooks",
+                "closeout": "app",
+            },
+        )
+
+    def test_activity_detection_failure_without_saved_requirements_blocks_guide(self):
+        from app.guided_deposit_state import resolve_activity_detection_workflow
+
+        state = resolve_activity_detection_workflow(
+            detection_valid=False,
+            detected_required_steps=("closeout",),
+            saved_required_steps=None,
+            saved_completions={"closeout": "app"},
+        )
+
+        self.assertTrue(state["blocked"])
+        self.assertEqual(state["required_steps"], ())
+        self.assertEqual(state["completions"], {})
+
+    def test_activity_detection_failure_with_malformed_saved_requirements_blocks_guide(self):
+        from app.guided_deposit_state import resolve_activity_detection_workflow
+
+        state = resolve_activity_detection_workflow(
+            detection_valid=False,
+            detected_required_steps=("closeout",),
+            saved_required_steps=("closeout", []),
+            saved_completions={"closeout": "app"},
+        )
+
+        self.assertTrue(state["blocked"])
+        self.assertEqual(state["required_steps"], ())
+        self.assertEqual(state["completions"], {})
+
+    def test_malformed_completed_membership_state_reopens_step_without_crashing(self):
+        from app.guided_deposit_state import recover_completed_membership_state
+
+        required_steps = ("member_shares", "closeout")
+        completed = {"member_shares": "app", "closeout": "app"}
+        malformed_states = (
+            ("obsolete choice", []),
+            ("Breakdown in app using the Ownership Payments sheet", None),
+            ("Breakdown in app using the Ownership Payments sheet", ["not a row"]),
+        )
+
+        for choice, saved_payments in malformed_states:
+            with self.subTest(choice=choice, saved_payments=saved_payments):
+                state = recover_completed_membership_state(
+                    required_steps,
+                    completed,
+                    choice,
+                    saved_payments,
+                    subscription_total=100.0,
+                )
+                self.assertTrue(state["needs_review"])
+                self.assertEqual(state["completions"], {})
+                self.assertIn("Saved Member Share Payments need review", state["error"])
+
+    def test_membership_validator_exception_reopens_step_without_crashing(self):
+        from unittest.mock import patch
+
+        from app.guided_deposit_state import recover_completed_membership_state
+
+        with patch(
+            "app.guided_deposit_state.build_membership_lines",
+            side_effect=RuntimeError("validator unavailable"),
+        ):
+            state = recover_completed_membership_state(
+                ("member_shares", "closeout"),
+                {"member_shares": "app", "closeout": "app"},
+                "Breakdown in app using the Ownership Payments sheet",
+                [{
+                    "member_name": "Paid Member",
+                    "member_number": "50001",
+                    "payment_type": "Paid in full",
+                    "plan": "",
+                    "amount": 100.0,
+                    "interest_periods": None,
+                }],
+                subscription_total=100.0,
+            )
+
+        self.assertTrue(state["needs_review"])
+        self.assertEqual(state["completions"], {})
+        self.assertIn("Saved Member Share Payments need review", state["error"])
+
+    def test_validated_membership_save_payload_keeps_values_just_validated(self):
+        from app.guided_deposit_state import validated_membership_save_payload
+
+        payments = [
+            {
+                "member_name": "Paid Member",
+                "member_number": "50001",
+                "payment_type": "Paid in full",
+                "plan": "",
+                "amount": 100.0,
+                "interest_periods": None,
+            }
+        ]
+
+        saved = validated_membership_save_payload(payments, 100.0)
+
+        self.assertEqual(saved, payments)
+        self.assertIsNot(saved, payments)
+        self.assertIsNot(saved[0], payments[0])
+
+    def test_member_share_save_transition_persists_payload_and_app_completion(self):
+        from app.guided_deposit_state import save_member_share_transition
+
+        saved_key = "membership_saved_payments_workbook-123"
+        payments = [{
+            "member_name": "Paid Member",
+            "member_number": "50001",
+            "payment_type": "Paid in full",
+            "plan": "",
+            "amount": 100.0,
+            "interest_periods": None,
+        }]
+
+        transition = save_member_share_transition(
+            ("member_shares", "closeout"),
+            {},
+            saved_key,
+            payments,
+            subscription_total=100.0,
+        )
+
+        self.assertEqual(transition["saved_payload"], {saved_key: payments})
+        self.assertEqual(
+            transition["completions"],
+            {"member_shares": "app"},
+        )
+
     def test_plan_guide_html_renders_each_plan_as_a_readable_card(self):
         try:
             from app.ui_helpers import plan_guide_html

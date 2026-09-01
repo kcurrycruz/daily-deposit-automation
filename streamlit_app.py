@@ -93,8 +93,8 @@ from app.guided_deposit_state import (
     save_activity_transition,
     save_member_share_transition,
 )
+from app.guided_step_ui import render_deposit_step_panels
 from app.ui_helpers import (
-    deposit_step_card_html,
     deposit_download_details,
     plan_guide_html,
     workflow_heading_html,
@@ -2339,6 +2339,7 @@ workflow_completion_key = None
 workflow_requirements_key = None
 workflow_blocked = False
 guided_workflow_ready = False
+active_step_content = None
 if uploaded:
     detected_required_steps = None
     if activity_detection_valid:
@@ -2377,22 +2378,21 @@ if uploaded:
         active_step = active_deposit_step(required_steps, step_completions)
 
         st.markdown("## Today’s Deposit Steps")
-        for row in deposit_step_rows(required_steps, step_completions):
-            card_col, action_col = st.columns([6, 1], vertical_alignment="center")
-            card_col.markdown(deposit_step_card_html(row), unsafe_allow_html=True)
-            if row["complete"] and action_col.button(
-                "Edit",
-                key=f"edit_deposit_step_{closeout_workbook_key}_{row['step']}",
-            ):
-                st.session_state[workflow_completion_key] = edit_deposit_step(
-                    required_steps,
-                    step_completions,
-                    row["step"],
-                )
-                if row["step"] != STEP_CLOSEOUT:
-                    st.session_state.pop(closeout_preview_key, None)
-                    st.session_state[closeout_hydration_key] = True
-                st.rerun()
+        active_step_content, edited_step = render_deposit_step_panels(
+            st,
+            deposit_step_rows(required_steps, step_completions),
+            edit_key_prefix=f"edit_deposit_step_{closeout_workbook_key}",
+        )
+        if edited_step is not None:
+            st.session_state[workflow_completion_key] = edit_deposit_step(
+                required_steps,
+                step_completions,
+                edited_step,
+            )
+            if edited_step != STEP_CLOSEOUT:
+                st.session_state.pop(closeout_preview_key, None)
+                st.session_state[closeout_hydration_key] = True
+            st.rerun()
 
         step_completions = normalize_step_completions(
             required_steps,
@@ -2409,6 +2409,8 @@ if uploaded:
             )
 
 if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
+    active_step_panel = active_step_content.container()
+    active_step_panel.__enter__()
     st.markdown(
         workflow_heading_html(
             "Member Share Payments",
@@ -2705,6 +2707,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         except ValueError as exc:
             membership_valid = False
             st.warning(str(exc), icon="⚠️")
+    active_step_panel.__exit__(None, None, None)
 
 if STEP_MEMBER_SHARES in required_steps:
     membership_choice_key = f"membership_handling_{closeout_workbook_key}"
@@ -2797,6 +2800,8 @@ for activity_key in activity_workflow_keys(activity_source_totals):
 for activity_key in activity_workflow_keys(activity_source_totals):
     if active_step != activity_key:
         continue
+    active_step_panel = active_step_content.container()
+    active_step_panel.__enter__()
     activity_title, activity_source_label = activity_labels[activity_key]
     source_total = float(activity_source_totals[activity_key])
     st.markdown(
@@ -3086,6 +3091,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         activity_valid = False
         activity_payload[activity_key] = {"mode": "app", "rows": raw_rows}
         st.caption(str(exc))
+    active_step_panel.__exit__(None, None, None)
 
 coupon_saved_key = f"coupon_saved_payload_{closeout_workbook_key}"
 if STEP_COUPONS in required_steps and STEP_COUPONS in step_completions:
@@ -3110,6 +3116,8 @@ if STEP_COUPONS in required_steps and STEP_COUPONS in step_completions:
         st.rerun()
 
 if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
+    active_step_panel = active_step_content.container()
+    active_step_panel.__enter__()
     st.markdown(
         workflow_heading_html(
             "Coupons Receivable",
@@ -3214,6 +3222,7 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
         except ValueError as exc:
             coupon_valid = False
             st.warning(str(exc), icon="⚠️")
+    active_step_panel.__exit__(None, None, None)
 
 if uploaded and STEP_CLOSEOUT in step_completions:
     try:
@@ -3232,6 +3241,8 @@ if uploaded and STEP_CLOSEOUT in step_completions:
         closeout_valid = True
 
 if uploaded and active_step == STEP_CLOSEOUT:
+    active_step_panel = active_step_content.container()
+    active_step_panel.__enter__()
     if st.session_state.pop(closeout_hydration_key, False):
         hydrate_reopened_closeout_state(
             st.session_state,
@@ -3674,6 +3685,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     st.rerun()
             elif closeout_form_error and reviewed_closeout:
                 st.caption(closeout_form_error)
+    active_step_panel.__exit__(None, None, None)
 
 settlement_date_info = None
 settlement_date_mismatch = False

@@ -9,6 +9,85 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_guided_step_renderer_places_active_content_before_next_step(self):
+        from app.guided_step_ui import render_deposit_step_panels
+
+        class RecordingContainer:
+            def __init__(self, ui, container_id):
+                self.ui = ui
+                self.container_id = container_id
+
+            def __enter__(self):
+                self.ui.current_container = self.container_id
+                self.ui.events.append(("enter", self.container_id))
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                self.ui.events.append(("exit", self.container_id))
+                self.ui.current_container = None
+
+        class RecordingColumn:
+            def __init__(self, ui):
+                self.ui = ui
+
+            def markdown(self, body, unsafe_allow_html=False):
+                self.ui.events.append(("card", self.ui.current_container))
+
+            def button(self, label, key=None):
+                return False
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+                self.current_container = None
+                self.container_count = 0
+
+            def container(self):
+                container = RecordingContainer(self, self.container_count)
+                self.container_count += 1
+                return container
+
+            def columns(self, widths, vertical_alignment=None):
+                return RecordingColumn(self), RecordingColumn(self)
+
+            def empty(self):
+                slot = object()
+                self.events.append(("active_slot", self.current_container))
+                return slot
+
+        ui = RecordingUI()
+        rows = (
+            {
+                "step": "member_shares",
+                "number": 1,
+                "label": "Member Share Payments",
+                "status": "Current",
+                "complete": False,
+                "current": True,
+            },
+            {
+                "step": "paid_in",
+                "number": 2,
+                "label": "Paid In",
+                "status": "Pending",
+                "complete": False,
+                "current": False,
+            },
+        )
+
+        active_slot, edited_step = render_deposit_step_panels(
+            ui,
+            rows,
+            edit_key_prefix="deposit-test",
+        )
+
+        self.assertIsNotNone(active_slot)
+        self.assertIsNone(edited_step)
+        self.assertLess(
+            ui.events.index(("active_slot", 0)),
+            ui.events.index(("enter", 1)),
+        )
+
     def test_workflow_heading_html_escapes_visible_content(self):
         try:
             from app.ui_helpers import workflow_heading_html
@@ -45,8 +124,13 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertNotIn("Paid <In>", rendered)
 
     def test_streamlit_app_renders_guided_step_summary_with_edit_controls(self):
-        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
-            encoding="utf-8"
+        project_root = Path(__file__).parents[1]
+        source = (
+            (project_root / "streamlit_app.py").read_text(encoding="utf-8")
+            + (project_root / "app" / "guided_step_ui.py").read_text(
+                encoding="utf-8"
+            )
+            + (project_root / "app" / "ui_helpers.py").read_text(encoding="utf-8")
         )
         for required_text in (
             "Today’s Deposit Steps",

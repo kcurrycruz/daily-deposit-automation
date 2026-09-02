@@ -23,6 +23,31 @@ AUTOMATIC_MEMBERSHIP_CHOICE = (
 MANUAL_MEMBERSHIP_CHOICE = "Finish manually in QuickBooks"
 
 
+def reopen_step_for_edit(
+    session_state,
+    *,
+    required_steps,
+    completions,
+    step: str,
+    workbook_key: str,
+) -> dict:
+    """Reopen a step without allowing its manual radio value to re-complete it."""
+    normalized = normalize_step_completions(required_steps, completions)
+    if normalized.get(step) == "quickbooks":
+        handling_keys = {
+            "member_shares": f"membership_handling_{workbook_key}",
+            "donation": f"activity_handling_donation_{workbook_key}",
+            "paid_in": f"activity_handling_paid_in_{workbook_key}",
+            "paid_out": f"activity_handling_paid_out_{workbook_key}",
+            "coupons": f"coupon_handling_{workbook_key}",
+            "closeout": f"closeout_handling_{workbook_key}",
+        }
+        handling_key = handling_keys.get(step)
+        if handling_key is not None:
+            session_state.pop(handling_key, None)
+    return edit_deposit_step(required_steps, normalized, step)
+
+
 def hydrate_reopened_closeout_state(
     session_state,
     *,

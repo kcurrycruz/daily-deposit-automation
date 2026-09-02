@@ -68,6 +68,44 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertNotIn("scroll_requested", state)
 
+    def test_adding_an_entry_requests_one_smooth_scroll_to_save_and_continue(self):
+        import app.guided_step_ui as guided_step_ui
+
+        queue_scroll = getattr(guided_step_ui, "queue_continue_scroll", None)
+        render_target = getattr(
+            guided_step_ui,
+            "render_breakdown_scroll_target",
+            None,
+        )
+        self.assertIsNotNone(queue_scroll)
+        self.assertIsNotNone(render_target)
+
+        state = {}
+        queue_scroll(state, "scroll_requested")
+        self.assertTrue(state["scroll_requested"])
+
+        events = []
+
+        class RecordingUI:
+            def markdown(self, body, **kwargs):
+                events.append(("target", body, kwargs))
+
+        def record_component(body, **kwargs):
+            events.append(("script", body, kwargs))
+
+        render_target(
+            RecordingUI(),
+            record_component,
+            state,
+            target_id="paid-in-save-and-continue",
+            request_key="scroll_requested",
+        )
+
+        self.assertNotIn("scroll_requested", state)
+        self.assertEqual([event[0] for event in events], ["target", "script"])
+        self.assertIn('id="paid-in-save-and-continue"', events[0][1])
+        self.assertIn("scrollIntoView", events[1][1])
+
     def test_prepare_iif_action_is_hidden_until_guided_steps_are_complete(self):
         import app.guided_step_ui as guided_step_ui
 

@@ -89,6 +89,7 @@ from app.membership_payments import (
 )
 from app.guided_deposit_state import (
     hydrate_reopened_closeout_state,
+    reopen_step_for_edit,
     recover_completed_membership_state,
     resolve_activity_detection_workflow,
     save_activity_transition,
@@ -97,6 +98,7 @@ from app.guided_deposit_state import (
 )
 from app.guided_step_ui import (
     queue_breakdown_scroll,
+    queue_continue_scroll,
     render_card_settlement_verification,
     render_breakdown_scroll_target,
     render_deposit_step_panels,
@@ -2506,10 +2508,12 @@ if uploaded:
             edit_key_prefix=f"edit_deposit_step_{closeout_workbook_key}",
         )
         if edited_step is not None:
-            st.session_state[workflow_completion_key] = edit_deposit_step(
-                required_steps,
-                step_completions,
-                edited_step,
+            st.session_state[workflow_completion_key] = reopen_step_for_edit(
+                st.session_state,
+                required_steps=required_steps,
+                completions=step_completions,
+                step=edited_step,
+                workbook_key=closeout_workbook_key,
             )
             if edited_step != STEP_CLOSEOUT:
                 st.session_state.pop(closeout_preview_key, None)
@@ -2532,6 +2536,7 @@ if uploaded:
 
 membership_choice_key = f"membership_handling_{closeout_workbook_key}"
 membership_scroll_request_key = f"membership_scroll_{closeout_workbook_key}"
+membership_continue_scroll_key = f"membership_continue_scroll_{closeout_workbook_key}"
 membership_saved_choice_key = f"membership_saved_choice_{closeout_workbook_key}"
 saved_payments_key = f"membership_saved_payments_{closeout_workbook_key}"
 if active_step == STEP_MEMBER_SHARES and membership_choice_key not in st.session_state:
@@ -2779,6 +2784,10 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                     new_payment,
                 ]
                 st.session_state[entry_version_key] += 1
+                queue_continue_scroll(
+                    st.session_state,
+                    membership_continue_scroll_key,
+                )
                 st.rerun()
 
         saved_payments = st.session_state[saved_payments_key]
@@ -2820,6 +2829,13 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
             dict(payment) for payment in st.session_state[saved_payments_key]
         )
 
+        render_breakdown_scroll_target(
+            st,
+            components.html,
+            st.session_state,
+            target_id="member-share-save-and-continue",
+            request_key=membership_continue_scroll_key,
+        )
         try:
             membership_preview = build_membership_lines(
                 membership_payments,
@@ -2956,6 +2972,9 @@ for activity_key in activity_workflow_keys(activity_source_totals):
     activity_scroll_request_key = (
         f"activity_scroll_{activity_key}_{closeout_workbook_key}"
     )
+    activity_continue_scroll_key = (
+        f"activity_continue_scroll_{activity_key}_{closeout_workbook_key}"
+    )
     handling_choice = st.radio(
         f"How should {activity_title} be handled?",
         options=["Breakdown in app", "Finish manually in QuickBooks"],
@@ -3067,6 +3086,10 @@ for activity_key in activity_workflow_keys(activity_source_totals):
             else:
                 st.session_state[saved_rows_key] = updated_rows
                 st.session_state[entry_version_key] += 1
+                queue_continue_scroll(
+                    st.session_state,
+                    activity_continue_scroll_key,
+                )
                 st.rerun()
 
         raw_rows = list(st.session_state[saved_rows_key])
@@ -3205,8 +3228,19 @@ for activity_key in activity_workflow_keys(activity_source_totals):
             type="secondary",
         ):
             st.session_state[row_ids_key].append(uuid4().hex)
+            queue_continue_scroll(
+                st.session_state,
+                activity_continue_scroll_key,
+            )
             st.rerun()
 
+    render_breakdown_scroll_target(
+        st,
+        components.html,
+        st.session_state,
+        target_id=f"{activity_key}-save-and-continue",
+        request_key=activity_continue_scroll_key,
+    )
     try:
         activity_payload[activity_key] = normalize_activity_section(
             activity_key,
@@ -3417,6 +3451,9 @@ if uploaded and active_step == STEP_CLOSEOUT:
             workbook_key=closeout_workbook_key,
         )
     closeout_choice_key = f"closeout_handling_{closeout_workbook_key}"
+    closeout_continue_scroll_key = (
+        f"closeout_continue_scroll_{closeout_workbook_key}"
+    )
     closeout_scroll_request_key = f"closeout_scroll_{closeout_workbook_key}"
     closeout_choice = st.radio(
         "How should the Closeout Sheet be handled?",
@@ -3612,6 +3649,10 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     next_id,
                 ]
                 st.session_state[custom_next_key] = next_id + 1
+                queue_continue_scroll(
+                    st.session_state,
+                    closeout_continue_scroll_key,
+                )
                 st.rerun()
             for custom_id in list(st.session_state[custom_ids_key]):
                 custom_columns = st.columns([2.2, 1.1, 1.4, 0.8])
@@ -3845,6 +3886,13 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     and activity_valid
                 )
                 st.session_state[closeout_payload_key] = closeout_payload
+                render_breakdown_scroll_target(
+                    st,
+                    components.html,
+                    st.session_state,
+                    target_id="closeout-save-and-continue",
+                    request_key=closeout_continue_scroll_key,
+                )
                 if closeout_valid and st.button(
                     "Save Closeout Sheet & Continue",
                     type="primary",

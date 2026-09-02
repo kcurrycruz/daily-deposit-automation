@@ -2,6 +2,71 @@ import unittest
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_reopening_manual_step_clears_choice_so_it_cannot_immediately_recomplete(self):
+        import app.guided_deposit_state as guided_state
+
+        reopen = getattr(guided_state, "reopen_step_for_edit", None)
+        self.assertIsNotNone(reopen)
+
+        required_steps = ("member_shares", "paid_in", "closeout")
+        completions = {
+            "member_shares": "app",
+            "paid_in": "quickbooks",
+            "closeout": "app",
+        }
+        workbook_key = "workbook-123"
+        handling_key = f"activity_handling_paid_in_{workbook_key}"
+        session_state = {
+            handling_key: "Finish manually in QuickBooks",
+            f"activity_saved_rows_paid_in_{workbook_key}": [{"amount": 100.0}],
+        }
+
+        reopened = reopen(
+            session_state,
+            required_steps=required_steps,
+            completions=completions,
+            step="paid_in",
+            workbook_key=workbook_key,
+        )
+
+        self.assertEqual(reopened, {"member_shares": "app"})
+        self.assertNotIn(handling_key, session_state)
+        self.assertEqual(
+            session_state[f"activity_saved_rows_paid_in_{workbook_key}"],
+            [{"amount": 100.0}],
+        )
+
+    def test_reopening_app_breakdown_preserves_choice_and_saved_entries(self):
+        import app.guided_deposit_state as guided_state
+
+        reopen = getattr(guided_state, "reopen_step_for_edit", None)
+        self.assertIsNotNone(reopen)
+
+        workbook_key = "workbook-123"
+        handling_key = f"coupon_handling_{workbook_key}"
+        session_state = {
+            handling_key: "Breakdown in app using Closeout Sheet",
+            f"coupon_saved_payload_{workbook_key}": {"mode": "closeout"},
+        }
+
+        reopened = reopen(
+            session_state,
+            required_steps=("coupons", "closeout"),
+            completions={"coupons": "app", "closeout": "app"},
+            step="coupons",
+            workbook_key=workbook_key,
+        )
+
+        self.assertEqual(reopened, {})
+        self.assertEqual(
+            session_state[handling_key],
+            "Breakdown in app using Closeout Sheet",
+        )
+        self.assertEqual(
+            session_state[f"coupon_saved_payload_{workbook_key}"],
+            {"mode": "closeout"},
+        )
+
     def workflow_api(self):
         try:
             from app.deposit_workflow import (

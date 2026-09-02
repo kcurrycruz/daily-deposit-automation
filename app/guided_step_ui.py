@@ -14,6 +14,11 @@ def queue_breakdown_scroll(session_state, choice_key: str, request_key: str) -> 
         session_state.pop(request_key, None)
 
 
+def queue_continue_scroll(session_state, request_key: str) -> None:
+    """Queue one smooth scroll to the active step's Save & Continue action."""
+    session_state[request_key] = True
+
+
 def render_breakdown_scroll_target(
     ui,
     component_html,

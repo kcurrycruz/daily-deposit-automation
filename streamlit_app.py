@@ -97,6 +97,7 @@ from app.guided_deposit_state import (
     save_member_share_transition,
 )
 from app.guided_step_ui import (
+    closeout_review_blockers,
     queue_breakdown_scroll,
     queue_continue_scroll,
     render_card_settlement_verification,
@@ -3579,11 +3580,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 row_columns[3].write(f"{difference:+,.2f}")
                 row_columns[4].write("Match" if difference == 0 else "Review")
 
-            reviewed_closeout = st.checkbox(
-                "I reviewed these amounts against the paper Closeout Sheet",
-                value=False,
-                key=f"closeout_reviewed_{closeout_workbook_key}",
-            )
+            reviewed_closeout = True
 
             st.markdown("#### Other Closeout Sheet activity")
             payroll_choice = st.selectbox(
@@ -3702,6 +3699,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     }
                 )
 
+            st.markdown("**Final Closeout Sheet Deposit Total — Required**")
             final_closeout_total = st.number_input(
                 "Final Closeout Sheet Deposit Total",
                 min_value=0.0,
@@ -3709,6 +3707,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 step=0.01,
                 format="%.2f",
                 key=f"closeout_final_total_{closeout_workbook_key}",
+                label_visibility="collapsed",
             )
 
             try:
@@ -3763,18 +3762,26 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     settlement_file.getvalue()
                 )[0]
             )
+            review_blockers = closeout_review_blockers(
+                form_error=closeout_form_error,
+                coupon_ready=coupon_link_ready,
+                activity_ready=activity_link_ready,
+                activity_valid=activity_valid,
+                membership_valid=membership_valid,
+                deposit_date_ready=deposit_date is not None,
+                settlement_ready=review_settlement_ok,
+            )
+            review_help = (
+                "Review Closeout is unavailable until:\n\n- "
+                + "\n- ".join(review_blockers)
+                if review_blockers
+                else "Review the full deposit against the Closeout Sheet."
+            )
             review_clicked = st.button(
                 "Review Closeout",
                 type="secondary",
-                disabled=(
-                    current_closeout_payload is None
-                    or not coupon_link_ready
-                    or not activity_link_ready
-                    or not activity_valid
-                    or not membership_valid
-                    or deposit_date is None
-                    or not review_settlement_ok
-                ),
+                disabled=bool(review_blockers),
+                help=review_help,
                 key=f"review_closeout_{closeout_workbook_key}",
             )
             if review_clicked:
@@ -3905,7 +3912,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                         "app",
                     )
                     st.rerun()
-            elif closeout_form_error and reviewed_closeout:
+            elif closeout_form_error:
                 st.caption(closeout_form_error)
     active_step_panel.__exit__(None, None, None)
 

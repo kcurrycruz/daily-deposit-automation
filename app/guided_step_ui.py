@@ -19,6 +19,40 @@ def queue_continue_scroll(session_state, request_key: str) -> None:
     session_state[request_key] = True
 
 
+def closeout_review_blockers(
+    *,
+    form_error: str | None,
+    coupon_ready: bool,
+    activity_ready: bool,
+    activity_valid: bool,
+    membership_valid: bool,
+    deposit_date_ready: bool,
+    settlement_ready: bool,
+) -> tuple[str, ...]:
+    """Describe exactly why the Closeout review action is unavailable."""
+    blockers = []
+    if form_error:
+        if "Final Closeout Sheet Deposit Total" in form_error:
+            blockers.append(
+                "Enter the required Final Closeout Sheet Deposit Total."
+            )
+        else:
+            blockers.append(form_error.rstrip(".") + ".")
+    if not coupon_ready:
+        blockers.append("Complete the Coupons Receivable step in the app.")
+    if not activity_ready or not activity_valid:
+        blockers.append(
+            "Complete the detected Donations, Paid In, and Paid Out steps in the app."
+        )
+    if not membership_valid:
+        blockers.append("Complete the Member Share Payments step.")
+    if not deposit_date_ready:
+        blockers.append("Confirm the workbook report date.")
+    if not settlement_ready:
+        blockers.append("Upload a valid Card Settlement workbook.")
+    return tuple(blockers)
+
+
 def render_breakdown_scroll_target(
     ui,
     component_html,

@@ -134,6 +134,50 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertFalse(clicked)
         self.assertEqual(ui.events, [])
 
+    def test_closeout_review_blockers_explain_every_missing_requirement(self):
+        import app.guided_step_ui as guided_step_ui
+
+        blockers = getattr(guided_step_ui, "closeout_review_blockers", None)
+        self.assertIsNotNone(blockers)
+
+        self.assertEqual(
+            blockers(
+                form_error=(
+                    "Final Closeout Sheet Deposit Total must be greater than zero"
+                ),
+                coupon_ready=False,
+                activity_ready=False,
+                activity_valid=True,
+                membership_valid=False,
+                deposit_date_ready=False,
+                settlement_ready=False,
+            ),
+            (
+                "Enter the required Final Closeout Sheet Deposit Total.",
+                "Complete the Coupons Receivable step in the app.",
+                "Complete the detected Donations, Paid In, and Paid Out steps in the app.",
+                "Complete the Member Share Payments step.",
+                "Confirm the workbook report date.",
+                "Upload a valid Card Settlement workbook.",
+            ),
+        )
+
+    def test_closeout_review_has_no_blockers_when_all_requirements_are_ready(self):
+        from app.guided_step_ui import closeout_review_blockers
+
+        self.assertEqual(
+            closeout_review_blockers(
+                form_error=None,
+                coupon_ready=True,
+                activity_ready=True,
+                activity_valid=True,
+                membership_valid=True,
+                deposit_date_ready=True,
+                settlement_ready=True,
+            ),
+            (),
+        )
+
     def test_prepare_iif_action_appears_after_guided_steps_are_complete(self):
         import app.guided_step_ui as guided_step_ui
 

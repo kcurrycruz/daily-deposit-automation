@@ -1,6 +1,47 @@
 import html
+import json
+import re
 
 from app.ui_helpers import deposit_stepper_html
+
+
+def queue_breakdown_scroll(session_state, choice_key: str, request_key: str) -> None:
+    """Queue one form scroll when a handling choice enters app breakdown mode."""
+    choice = str(session_state.get(choice_key) or "")
+    if choice.startswith("Breakdown in app"):
+        session_state[request_key] = True
+    else:
+        session_state.pop(request_key, None)
+
+
+def render_breakdown_scroll_target(
+    ui,
+    component_html,
+    session_state,
+    *,
+    target_id: str,
+    request_key: str,
+) -> None:
+    """Render a form anchor and consume a queued smooth-scroll request once."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", target_id):
+        raise ValueError("Scroll target id must contain only letters, numbers, _ or -")
+    ui.markdown(
+        f'<div id="{html.escape(target_id, quote=True)}"></div>',
+        unsafe_allow_html=True,
+    )
+    if not session_state.pop(request_key, False):
+        return
+    encoded_target = json.dumps(target_id)
+    component_html(
+        "<script>"
+        f"const target = window.parent.document.getElementById({encoded_target});"
+        "if (target) { window.setTimeout(() => target.scrollIntoView({"
+        "behavior: 'smooth', block: 'start'"
+        "}), 0); }"
+        "</script>",
+        height=0,
+        width=0,
+    )
 
 
 def render_deposit_step_panels(

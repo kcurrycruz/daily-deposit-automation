@@ -9,6 +9,65 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_breakdown_selection_requests_one_smooth_scroll_to_the_form(self):
+        import app.guided_step_ui as guided_step_ui
+
+        queue_scroll = getattr(guided_step_ui, "queue_breakdown_scroll", None)
+        render_target = getattr(
+            guided_step_ui,
+            "render_breakdown_scroll_target",
+            None,
+        )
+        self.assertIsNotNone(queue_scroll)
+        self.assertIsNotNone(render_target)
+
+        state = {"handling": "Breakdown in app"}
+        queue_scroll(state, "handling", "scroll_requested")
+        self.assertTrue(state["scroll_requested"])
+
+        events = []
+
+        class RecordingUI:
+            def markdown(self, body, **kwargs):
+                events.append(("target", body, kwargs))
+
+        def record_component(body, **kwargs):
+            events.append(("script", body, kwargs))
+
+        render_target(
+            RecordingUI(),
+            record_component,
+            state,
+            target_id="member-share-breakdown",
+            request_key="scroll_requested",
+        )
+
+        self.assertNotIn("scroll_requested", state)
+        self.assertEqual([event[0] for event in events], ["target", "script"])
+        self.assertIn('id="member-share-breakdown"', events[0][1])
+        self.assertIn("scrollIntoView", events[1][1])
+        self.assertIn("smooth", events[1][1])
+
+        render_target(
+            RecordingUI(),
+            record_component,
+            state,
+            target_id="member-share-breakdown",
+            request_key="scroll_requested",
+        )
+        self.assertEqual([event[0] for event in events], ["target", "script", "target"])
+
+    def test_manual_quickbooks_selection_does_not_request_form_scroll(self):
+        import app.guided_step_ui as guided_step_ui
+
+        queue_scroll = getattr(guided_step_ui, "queue_breakdown_scroll", None)
+        self.assertIsNotNone(queue_scroll)
+
+        state = {"handling": "Finish manually in QuickBooks"}
+        queue_scroll(state, "handling", "scroll_requested")
+
+        self.assertNotIn("scroll_requested", state)
+
     def test_prepare_iif_action_is_hidden_until_guided_steps_are_complete(self):
         import app.guided_step_ui as guided_step_ui
 

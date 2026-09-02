@@ -33,6 +33,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from app.activity_breakdowns import (
     activity_actuals,
@@ -95,7 +96,9 @@ from app.guided_deposit_state import (
     save_member_share_transition,
 )
 from app.guided_step_ui import (
+    queue_breakdown_scroll,
     render_card_settlement_verification,
+    render_breakdown_scroll_target,
     render_deposit_step_panels,
     render_prepare_iif_action,
 )
@@ -2528,6 +2531,7 @@ if uploaded:
             )
 
 membership_choice_key = f"membership_handling_{closeout_workbook_key}"
+membership_scroll_request_key = f"membership_scroll_{closeout_workbook_key}"
 membership_saved_choice_key = f"membership_saved_choice_{closeout_workbook_key}"
 saved_payments_key = f"membership_saved_payments_{closeout_workbook_key}"
 if active_step == STEP_MEMBER_SHARES and membership_choice_key not in st.session_state:
@@ -2549,6 +2553,12 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         horizontal=True,
         index=None,
         key=membership_choice_key,
+        on_change=queue_breakdown_scroll,
+        args=(
+            st.session_state,
+            membership_choice_key,
+            membership_scroll_request_key,
+        ),
     )
     membership_mode = membership_mode_from_choice(handling_choice)
 
@@ -2594,6 +2604,13 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         entry_base_key = membership_editor_key(
             upload_bytes,
             st.session_state["file_uploader_key"],
+        )
+        render_breakdown_scroll_target(
+            st,
+            components.html,
+            st.session_state,
+            target_id="member-share-breakdown",
+            request_key=membership_scroll_request_key,
         )
         saved_payments_key = f"membership_saved_payments_{entry_base_key}"
         entry_version_key = f"membership_entry_version_{entry_base_key}"
@@ -2933,12 +2950,24 @@ for activity_key in activity_workflow_keys(activity_source_totals):
     activity_title, activity_source_label = activity_labels[activity_key]
     source_total = float(activity_source_totals[activity_key])
     st.caption(f"{activity_source_label}: ${source_total:,.2f}")
+    activity_choice_key = (
+        f"activity_handling_{activity_key}_{closeout_workbook_key}"
+    )
+    activity_scroll_request_key = (
+        f"activity_scroll_{activity_key}_{closeout_workbook_key}"
+    )
     handling_choice = st.radio(
         f"How should {activity_title} be handled?",
         options=["Breakdown in app", "Finish manually in QuickBooks"],
         horizontal=True,
         index=None,
-        key=f"activity_handling_{activity_key}_{closeout_workbook_key}",
+        key=activity_choice_key,
+        on_change=queue_breakdown_scroll,
+        args=(
+            st.session_state,
+            activity_choice_key,
+            activity_scroll_request_key,
+        ),
     )
     if handling_choice is None:
         activity_valid = False
@@ -2958,6 +2987,14 @@ for activity_key in activity_workflow_keys(activity_source_totals):
             required_steps, step_completions, activity_key, "quickbooks"
         )
         st.rerun()
+
+    render_breakdown_scroll_target(
+        st,
+        components.html,
+        st.session_state,
+        target_id=f"{activity_key}-breakdown",
+        request_key=activity_scroll_request_key,
+    )
 
     if activity_key == "paid_in":
         saved_rows_key = f"activity_saved_rows_{activity_key}_{closeout_workbook_key}"
@@ -3240,6 +3277,8 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
     st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
+    coupon_choice_key = f"coupon_handling_{closeout_workbook_key}"
+    coupon_scroll_request_key = f"coupon_scroll_{closeout_workbook_key}"
     coupon_handling_choice = st.radio(
         "How should Coupons Receivable be handled?",
         options=[
@@ -3248,7 +3287,13 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
         ],
         horizontal=True,
         index=None,
-        key=f"coupon_handling_{closeout_workbook_key}",
+        key=coupon_choice_key,
+        on_change=queue_breakdown_scroll,
+        args=(
+            st.session_state,
+            coupon_choice_key,
+            coupon_scroll_request_key,
+        ),
     )
 
     if coupon_handling_choice is None:
@@ -3283,6 +3328,13 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
                     key="download_coupon_counter_reference",
                 )
 
+        render_breakdown_scroll_target(
+            st,
+            components.html,
+            st.session_state,
+            target_id="coupon-breakdown",
+            request_key=coupon_scroll_request_key,
+        )
         coupon_closeout_total = st.number_input(
             "Closeout Sheet Coupon Actual Total",
             min_value=0.0,
@@ -3364,6 +3416,8 @@ if uploaded and active_step == STEP_CLOSEOUT:
             preview_key=closeout_preview_key,
             workbook_key=closeout_workbook_key,
         )
+    closeout_choice_key = f"closeout_handling_{closeout_workbook_key}"
+    closeout_scroll_request_key = f"closeout_scroll_{closeout_workbook_key}"
     closeout_choice = st.radio(
         "How should the Closeout Sheet be handled?",
         options=[
@@ -3372,7 +3426,13 @@ if uploaded and active_step == STEP_CLOSEOUT:
         ],
         horizontal=True,
         index=None,
-        key=f"closeout_handling_{closeout_workbook_key}",
+        key=closeout_choice_key,
+        on_change=queue_breakdown_scroll,
+        args=(
+            st.session_state,
+            closeout_choice_key,
+            closeout_scroll_request_key,
+        ),
     )
 
     if closeout_choice is None:
@@ -3389,6 +3449,13 @@ if uploaded and active_step == STEP_CLOSEOUT:
         )
         st.rerun()
     else:
+        render_breakdown_scroll_target(
+            st,
+            components.html,
+            st.session_state,
+            target_id="closeout-breakdown",
+            request_key=closeout_scroll_request_key,
+        )
         st.markdown("### Closeout Sheet reconciliation")
         st.caption(
             "Enter positive amounts exactly as printed on the paper Closeout Sheet. "

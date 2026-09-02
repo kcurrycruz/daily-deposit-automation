@@ -105,7 +105,7 @@ def membership_amount_for_payment_option(
             return 100.00
         if fields["payment_type"] == "Existing plan":
             return float(PLAN_TERMS[fields["plan"]][0])
-        return 0.00
+        return float(PLAN_DEPOSITS[fields["plan"]])
     return float(current_amount or 0.00)
 
 

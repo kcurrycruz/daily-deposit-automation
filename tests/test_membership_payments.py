@@ -2138,6 +2138,45 @@ class MembershipPaymentTests(unittest.TestCase):
                     expected_amount,
                 )
 
+    def test_new_plan_amount_defaults_match_required_deposits(self):
+        from app.membership_payments import membership_amount_for_payment_option
+
+        expected_defaults = {
+            "New plan — 1 year": 10.00,
+            "New plan — 3 year": 15.00,
+            "New plan — 5 year": 10.00,
+        }
+        for payment_option, expected_amount in expected_defaults.items():
+            with self.subTest(payment_option=payment_option):
+                self.assertEqual(
+                    membership_amount_for_payment_option(
+                        payment_option,
+                        previous_option="Paid in full — $100",
+                        current_amount=100.00,
+                    ),
+                    expected_amount,
+                )
+
+    def test_new_plan_amount_preserves_user_override_until_option_changes(self):
+        from app.membership_payments import membership_amount_for_payment_option
+
+        self.assertEqual(
+            membership_amount_for_payment_option(
+                "New plan — 1 year",
+                previous_option="New plan — 1 year",
+                current_amount=25.00,
+            ),
+            25.00,
+        )
+        self.assertEqual(
+            membership_amount_for_payment_option(
+                "New plan — 3 year",
+                previous_option="New plan — 1 year",
+                current_amount=25.00,
+            ),
+            15.00,
+        )
+
     def test_existing_plan_amount_preserves_user_override_until_option_changes(self):
         from app.membership_payments import membership_amount_for_payment_option
 

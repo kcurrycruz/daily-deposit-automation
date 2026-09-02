@@ -91,6 +91,7 @@ from app.guided_deposit_state import (
     recover_completed_membership_state,
     resolve_activity_detection_workflow,
     save_activity_transition,
+    save_manual_member_share_transition,
     save_member_share_transition,
 )
 from app.guided_step_ui import render_deposit_step_panels
@@ -2408,6 +2409,16 @@ if uploaded:
                 icon="✅",
             )
 
+membership_choice_key = f"membership_handling_{closeout_workbook_key}"
+membership_saved_choice_key = f"membership_saved_choice_{closeout_workbook_key}"
+saved_payments_key = f"membership_saved_payments_{closeout_workbook_key}"
+if active_step == STEP_MEMBER_SHARES and membership_choice_key not in st.session_state:
+    canonical_membership_choice = st.session_state.get(
+        membership_saved_choice_key
+    )
+    if membership_mode_from_choice(canonical_membership_choice) is not None:
+        st.session_state[membership_choice_key] = canonical_membership_choice
+
 if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
@@ -2426,7 +2437,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         ],
         horizontal=True,
         index=None,
-        key=f"membership_handling_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+        key=membership_choice_key,
     )
     membership_mode = membership_mode_from_choice(handling_choice)
 
@@ -2710,9 +2721,9 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
     active_step_panel.__exit__(None, None, None)
 
 if STEP_MEMBER_SHARES in required_steps:
-    membership_choice_key = f"membership_handling_{closeout_workbook_key}"
-    saved_payments_key = f"membership_saved_payments_{closeout_workbook_key}"
-    saved_choice = st.session_state.get(membership_choice_key)
+    saved_choice = st.session_state.get(membership_saved_choice_key)
+    if active_step == STEP_MEMBER_SHARES:
+        saved_choice = st.session_state.get(membership_choice_key)
     saved_payments = st.session_state.get(saved_payments_key, [])
     if STEP_MEMBER_SHARES in step_completions:
         recovered_membership = recover_completed_membership_state(
@@ -2739,9 +2750,15 @@ if STEP_MEMBER_SHARES in required_steps:
         )
 
 if active_step == STEP_MEMBER_SHARES and membership_mode == "manual":
-    st.session_state[workflow_completion_key] = complete_deposit_step(
-        required_steps, step_completions, STEP_MEMBER_SHARES, "quickbooks"
+    manual_transition = save_manual_member_share_transition(
+        required_steps,
+        step_completions,
+        membership_saved_choice_key,
     )
+    st.session_state.update(manual_transition["saved_payload"])
+    st.session_state[workflow_completion_key] = manual_transition[
+        "completions"
+    ]
     st.rerun()
 
 if active_step == STEP_MEMBER_SHARES and membership_mode == "automatic" and membership_valid:

@@ -324,10 +324,88 @@ class MembershipPaymentTests(unittest.TestCase):
             subscription_total=100.0,
         )
 
-        self.assertEqual(transition["saved_payload"], {saved_key: payments})
+        self.assertEqual(
+            transition["saved_payload"],
+            {
+                saved_key: payments,
+                "membership_saved_choice_workbook-123":
+                    "Breakdown in app using the Ownership Payments sheet",
+            },
+        )
         self.assertEqual(
             transition["completions"],
             {"member_shares": "app"},
+        )
+
+    def test_completed_member_shares_survive_hidden_radio_widget_cleanup(self):
+        from app.guided_deposit_state import (
+            recover_completed_membership_state,
+            save_member_share_transition,
+        )
+
+        saved_payments_key = "membership_saved_payments_workbook-123"
+        saved_choice_key = "membership_saved_choice_workbook-123"
+        payments = [{
+            "member_name": "Paid Member",
+            "member_number": "50001",
+            "payment_type": "Paid in full",
+            "plan": "",
+            "amount": 100.0,
+            "interest_periods": None,
+        }]
+
+        transition = save_member_share_transition(
+            ("member_shares", "paid_in", "closeout"),
+            {},
+            saved_payments_key,
+            payments,
+            subscription_total=100.0,
+        )
+        session_state = dict(transition["saved_payload"])
+
+        # Streamlit removes the hidden radio widget key after Step 1 is no
+        # longer rendered. Recovery must use the canonical non-widget choice.
+        self.assertNotIn("membership_handling_workbook-123", session_state)
+        recovered = recover_completed_membership_state(
+            ("member_shares", "paid_in", "closeout"),
+            transition["completions"],
+            session_state.get(saved_choice_key),
+            session_state.get(saved_payments_key),
+            subscription_total=100.0,
+        )
+
+        self.assertFalse(recovered["needs_review"])
+        self.assertEqual(
+            recovered["completions"],
+            {"member_shares": "app"},
+        )
+
+    def test_manual_member_share_transition_persists_non_widget_choice(self):
+        import app.guided_deposit_state as guided_state
+
+        save_manual = getattr(
+            guided_state,
+            "save_manual_member_share_transition",
+            None,
+        )
+        self.assertIsNotNone(save_manual)
+
+        transition = save_manual(
+            ("member_shares", "paid_in", "closeout"),
+            {},
+            "membership_saved_choice_workbook-123",
+        )
+
+        self.assertEqual(
+            transition["saved_payload"],
+            {
+                "membership_saved_choice_workbook-123":
+                    "Finish manually in QuickBooks",
+            },
+        )
+        self.assertEqual(
+            transition["completions"],
+            {"member_shares": "quickbooks"},
         )
 
     def test_plan_guide_html_renders_each_plan_as_a_readable_card(self):

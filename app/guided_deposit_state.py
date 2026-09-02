@@ -17,6 +17,12 @@ from app.membership_payments import (
 )
 
 
+AUTOMATIC_MEMBERSHIP_CHOICE = (
+    "Breakdown in app using the Ownership Payments sheet"
+)
+MANUAL_MEMBERSHIP_CHOICE = "Finish manually in QuickBooks"
+
+
 def hydrate_reopened_closeout_state(
     session_state,
     *,
@@ -173,9 +179,33 @@ def save_member_share_transition(
 ) -> dict:
     """Validate Member Shares, then produce its payload/completion together."""
     payload = validated_membership_save_payload(payments, subscription_total)
-    return _save_payload_transition(
+    transition = _save_payload_transition(
         required_steps, completions, "member_shares", saved_key, payload
     )
+    saved_choice_key = saved_key.replace(
+        "membership_saved_payments_",
+        "membership_saved_choice_",
+        1,
+    )
+    transition["saved_payload"][saved_choice_key] = AUTOMATIC_MEMBERSHIP_CHOICE
+    return transition
+
+
+def save_manual_member_share_transition(
+    required_steps,
+    completions,
+    saved_choice_key: str,
+) -> dict:
+    """Persist manual handling independently from Streamlit's radio widget."""
+    return {
+        "saved_payload": {saved_choice_key: MANUAL_MEMBERSHIP_CHOICE},
+        "completions": complete_deposit_step(
+            required_steps,
+            completions,
+            "member_shares",
+            "quickbooks",
+        ),
+    }
 
 
 def save_activity_transition(

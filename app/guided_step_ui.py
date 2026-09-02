@@ -19,6 +19,25 @@ def queue_continue_scroll(session_state, request_key: str) -> None:
     session_state[request_key] = True
 
 
+def update_upload_pair_readiness(
+    session_state,
+    *,
+    daily_workbook_ready: bool,
+    settlement_ready: bool,
+    readiness_key: str,
+    request_key: str,
+) -> bool:
+    """Unlock the guide and queue one scroll when the upload pair becomes ready."""
+    was_ready = bool(session_state.get(readiness_key, False))
+    is_ready = bool(daily_workbook_ready and settlement_ready)
+    session_state[readiness_key] = is_ready
+    if is_ready and not was_ready:
+        session_state[request_key] = True
+    elif not is_ready:
+        session_state.pop(request_key, None)
+    return is_ready
+
+
 def closeout_review_blockers(
     *,
     form_error: str | None,

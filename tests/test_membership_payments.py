@@ -106,6 +106,51 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn('id="paid-in-save-and-continue"', events[0][1])
         self.assertIn("scrollIntoView", events[1][1])
 
+    def test_deposit_steps_unlock_and_scroll_once_when_both_uploads_are_ready(self):
+        import app.guided_step_ui as guided_step_ui
+
+        update_readiness = getattr(
+            guided_step_ui,
+            "update_upload_pair_readiness",
+            None,
+        )
+        self.assertIsNotNone(update_readiness)
+
+        state = {}
+        self.assertFalse(
+            update_readiness(
+                state,
+                daily_workbook_ready=True,
+                settlement_ready=False,
+                readiness_key="uploads_ready",
+                request_key="scroll_to_steps",
+            )
+        )
+        self.assertNotIn("scroll_to_steps", state)
+
+        self.assertTrue(
+            update_readiness(
+                state,
+                daily_workbook_ready=True,
+                settlement_ready=True,
+                readiness_key="uploads_ready",
+                request_key="scroll_to_steps",
+            )
+        )
+        self.assertTrue(state["scroll_to_steps"])
+
+        state.pop("scroll_to_steps")
+        self.assertTrue(
+            update_readiness(
+                state,
+                daily_workbook_ready=True,
+                settlement_ready=True,
+                readiness_key="uploads_ready",
+                request_key="scroll_to_steps",
+            )
+        )
+        self.assertNotIn("scroll_to_steps", state)
+
     def test_prepare_iif_action_is_hidden_until_guided_steps_are_complete(self):
         import app.guided_step_ui as guided_step_ui
 

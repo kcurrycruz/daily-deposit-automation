@@ -104,6 +104,7 @@ from app.guided_step_ui import (
     render_breakdown_scroll_target,
     render_deposit_step_panels,
     render_prepare_iif_action,
+    update_upload_pair_readiness,
 )
 from app.ui_helpers import (
     deposit_download_details,
@@ -2278,6 +2279,20 @@ with settlement_col:
         key=f"card_settlement_{st.session_state['file_uploader_key']}",
     )
 
+upload_pair_readiness_key = (
+    f"upload_pair_ready_{st.session_state['file_uploader_key']}"
+)
+deposit_steps_scroll_key = (
+    f"deposit_steps_scroll_{st.session_state['file_uploader_key']}"
+)
+uploads_ready = update_upload_pair_readiness(
+    st.session_state,
+    daily_workbook_ready=uploaded is not None,
+    settlement_ready=settlement_file is not None,
+    readiness_key=upload_pair_readiness_key,
+    request_key=deposit_steps_scroll_key,
+)
+
 settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
@@ -2465,7 +2480,7 @@ workflow_requirements_key = None
 workflow_blocked = False
 guided_workflow_ready = False
 active_step_content = None
-if uploaded:
+if uploads_ready:
     detected_required_steps = None
     if activity_detection_valid:
         detected_required_steps = required_deposit_steps(
@@ -2492,6 +2507,13 @@ if uploaded:
     elif not workflow_blocked:
         st.session_state[workflow_completion_key] = step_completions
 
+    render_breakdown_scroll_target(
+        st,
+        components.html,
+        st.session_state,
+        target_id="todays-deposit-steps",
+        request_key=deposit_steps_scroll_key,
+    )
     if workflow_blocked:
         st.markdown("## Today’s Deposit Steps")
         st.error(
@@ -3487,17 +3509,17 @@ if uploaded and active_step == STEP_CLOSEOUT:
         )
         st.rerun()
     else:
+        st.markdown("### Closeout Sheet reconciliation")
+        st.caption(
+            "Enter positive amounts exactly as printed on the paper Closeout Sheet. "
+            "The app handles which amounts add to or remove from the deposit."
+        )
         render_breakdown_scroll_target(
             st,
             components.html,
             st.session_state,
             target_id="closeout-breakdown",
             request_key=closeout_scroll_request_key,
-        )
-        st.markdown("### Closeout Sheet reconciliation")
-        st.caption(
-            "Enter positive amounts exactly as printed on the paper Closeout Sheet. "
-            "The app handles which amounts add to or remove from the deposit."
         )
         coupon_link_ready = (
             STEP_COUPONS not in required_steps

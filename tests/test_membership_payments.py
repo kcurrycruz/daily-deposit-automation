@@ -2002,7 +2002,7 @@ class MembershipPaymentTests(unittest.TestCase):
         except TypeError as exc:
             self.fail(f"automatic membership handling mode is missing: {exc}")
 
-    def test_subscription_action_status_distinguishes_clear_and_action_required(self):
+    def test_subscription_action_status_hides_the_action_required_banner(self):
         try:
             from app.membership_payments import subscription_action_status
         except ImportError as exc:
@@ -2012,6 +2012,7 @@ class MembershipPaymentTests(unittest.TestCase):
             subscription_action_status(0),
             {
                 "needs_action": False,
+                "show_banner": True,
                 "title": "No Subscription Revenue",
                 "message": "No member-share action is needed for this deposit.",
             },
@@ -2020,6 +2021,7 @@ class MembershipPaymentTests(unittest.TestCase):
             subscription_action_status(8.45),
             {
                 "needs_action": True,
+                "show_banner": False,
                 "title": "Subscription Revenue found: $8.45",
                 "message": (
                     "Choose automatic splitting or finish manually in QuickBooks "

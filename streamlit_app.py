@@ -2298,11 +2298,15 @@ if uploaded:
 
 if uploaded and membership_valid:
     subscription_status = subscription_action_status(subscription_total)
-    status_text = f"**{subscription_status['title']}** — {subscription_status['message']}"
-    if subscription_status["needs_action"]:
-        st.warning(status_text, icon="⚠️")
-    else:
-        st.success(status_text, icon="✅")
+    if subscription_status["show_banner"]:
+        status_text = (
+            f"**{subscription_status['title']}** — "
+            f"{subscription_status['message']}"
+        )
+        if subscription_status["needs_action"]:
+            st.warning(status_text, icon="⚠️")
+        else:
+            st.success(status_text, icon="✅")
 
 closeout_workbook_key = (
     membership_editor_key(upload_bytes, st.session_state["file_uploader_key"])

@@ -224,11 +224,13 @@ def subscription_action_status(subscription_total: float) -> dict:
     if total == Decimal("0.00"):
         return {
             "needs_action": False,
+            "show_banner": True,
             "title": "No Subscription Revenue",
             "message": "No member-share action is needed for this deposit.",
         }
     return {
         "needs_action": True,
+        "show_banner": False,
         "title": f"Subscription Revenue found: ${total:,.2f}",
         "message": (
             "Choose automatic splitting or finish manually in QuickBooks "

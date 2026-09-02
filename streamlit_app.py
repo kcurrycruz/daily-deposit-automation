@@ -94,7 +94,11 @@ from app.guided_deposit_state import (
     save_manual_member_share_transition,
     save_member_share_transition,
 )
-from app.guided_step_ui import render_deposit_step_panels
+from app.guided_step_ui import (
+    render_card_settlement_verification,
+    render_deposit_step_panels,
+    render_prepare_iif_action,
+)
 from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
@@ -2268,6 +2272,11 @@ with settlement_col:
         key=f"card_settlement_{st.session_state['file_uploader_key']}",
     )
 
+settlement_date_info = None
+settlement_date_mismatch = False
+settlement_source_ok = False
+settlement_source_sheet = None
+
 if uploaded:
     upload_bytes = uploaded.getvalue()
     date_info = detect_workbook_dates(upload_bytes)
@@ -2313,6 +2322,52 @@ if uploaded:
                     )
                 else:
                     st.warning(f"{label}\n\nNot detected", icon="⚠️")
+
+    if settlement_file is not None:
+        settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(
+            settlement_file.getvalue()
+        )
+        try:
+            from io import BytesIO
+            import openpyxl
+
+            swb = openpyxl.load_workbook(
+                BytesIO(settlement_file.getvalue()),
+                read_only=True,
+                data_only=True,
+            )
+            sws = swb[swb.sheetnames[0]]
+            raw_settlement_date = None
+            for row in sws.iter_rows(
+                min_row=1,
+                max_row=min(sws.max_row, 12),
+                values_only=True,
+            ):
+                for idx, value in enumerate(row):
+                    if (
+                        str(value or "").strip().lower() == "date"
+                        and idx + 1 < len(row)
+                    ):
+                        raw_settlement_date = row[idx + 1]
+                        break
+                if raw_settlement_date is not None:
+                    break
+            if isinstance(raw_settlement_date, datetime):
+                settlement_date_info = raw_settlement_date.date()
+            elif isinstance(raw_settlement_date, date):
+                settlement_date_info = raw_settlement_date
+        except Exception as exc:
+            st.warning(
+                f"Could not read the Daily Card Settlement Report date: {exc}",
+                icon="⚠️",
+            )
+
+        settlement_date_mismatch = render_card_settlement_verification(
+            st,
+            source_ok=settlement_source_ok,
+            settlement_date=settlement_date_info,
+            deposit_date=deposit_date,
+        )
 
     missing_roles = [k for k, v in roles.items() if not v]
 else:
@@ -3739,10 +3794,6 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 st.caption(closeout_form_error)
     active_step_panel.__exit__(None, None, None)
 
-settlement_date_info = None
-settlement_date_mismatch = False
-settlement_source_ok = False
-settlement_source_sheet = None
 run_clicked = False
 
 step_completions = normalize_step_completions(
@@ -3754,85 +3805,23 @@ guided_workflow_ready = deposit_workflow_complete(
     step_completions,
 ) and activity_detection_valid
 
-if settlement_file is not None:
-    settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(settlement_file.getvalue())
-    try:
-        from io import BytesIO
-        import openpyxl
-        swb = openpyxl.load_workbook(BytesIO(settlement_file.getvalue()), read_only=True, data_only=True)
-        sws = swb[swb.sheetnames[0]]
-        raw_settlement_date = None
-        for row in sws.iter_rows(min_row=1, max_row=min(sws.max_row, 12), values_only=True):
-            for idx, value in enumerate(row):
-                if str(value or "").strip().lower() == "date" and idx + 1 < len(row):
-                    raw_settlement_date = row[idx + 1]
-                    break
-            if raw_settlement_date is not None:
-                break
-        if isinstance(raw_settlement_date, datetime):
-            settlement_date_info = raw_settlement_date.date()
-        elif isinstance(raw_settlement_date, date):
-            settlement_date_info = raw_settlement_date
-    except Exception as exc:
-        st.warning(f"Could not read the Daily Card Settlement Report date: {exc}", icon="⚠️")
-
-    if not settlement_source_ok:
-        st.error(
-            "CARD SETTLEMENT COLUMN MISMATCH — exact headers 'Network' and 'Processed Net Amount' were not found. "
-            "Gross, Submitted, or other amount columns will not be substituted.",
-            icon="🚫",
-        )
-    else:
-        settlement_status = (
-            f"💳 Card Settlement · {settlement_date_info.strftime('%m/%d/%Y')} · ✓ Verified"
-            if settlement_date_info
-            else "💳 Card Settlement · ✓ Verified"
-        )
-        st.markdown(
-            f'<div class="hwfc-source-strip">{html.escape(settlement_status)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    if deposit_date and settlement_date_info and settlement_date_info != deposit_date:
-        settlement_date_mismatch = True
-        st.warning(
-            "**CARD SETTLEMENT DATE MISMATCH**\n\n"
-            f"Daily workbook: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
-            f"Card settlement: **{settlement_date_info.strftime('%m/%d/%Y')}**  \n\n"
-            "You can still run the deposit, but verify that you uploaded the intended settlement report.",
-            icon="⚠️",
-        )
-
-    download_details = deposit_download_details(
-        st.session_state.get("run_result")
-    )
-    if download_details is not None:
-        st.download_button(
-            "⬇ Download QuickBooks IIF",
-            data=download_details["data"],
-            file_name=download_details["file_name"],
-            mime="text/plain",
-            type="primary",
-            use_container_width=True,
-        )
-        run_clicked = False
-    else:
-        run_clicked = st.button(
-            "🌿  Validate & Prepare IIF",
-            type="primary",
-            use_container_width=True,
-            disabled=(
-                uploaded is None
-                or settlement_file is None
-                or deposit_date is None
-                or not settlement_source_ok
-                or not membership_valid
-                or not coupon_valid
-                or not activity_valid
-                or not closeout_valid
-                or not guided_workflow_ready
-            ),
-        )
+download_details = deposit_download_details(
+    st.session_state.get("run_result")
+)
+run_clicked = render_prepare_iif_action(
+    st,
+    visible=bool(uploaded is not None and guided_workflow_ready),
+    download_details=download_details,
+    disabled=(
+        settlement_file is None
+        or deposit_date is None
+        or not settlement_source_ok
+        or not membership_valid
+        or not coupon_valid
+        or not activity_valid
+        or not closeout_valid
+    ),
+)
 
 if run_clicked:
     try:

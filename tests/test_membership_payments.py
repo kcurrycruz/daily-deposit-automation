@@ -9,6 +9,117 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_prepare_iif_action_is_hidden_until_guided_steps_are_complete(self):
+        import app.guided_step_ui as guided_step_ui
+
+        renderer = getattr(guided_step_ui, "render_prepare_iif_action", None)
+        self.assertIsNotNone(renderer)
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def button(self, *args, **kwargs):
+                self.events.append(("button", args, kwargs))
+                return True
+
+            def download_button(self, *args, **kwargs):
+                self.events.append(("download", args, kwargs))
+
+        ui = RecordingUI()
+        clicked = renderer(
+            ui,
+            visible=False,
+            download_details=None,
+            disabled=False,
+        )
+
+        self.assertFalse(clicked)
+        self.assertEqual(ui.events, [])
+
+    def test_prepare_iif_action_appears_after_guided_steps_are_complete(self):
+        import app.guided_step_ui as guided_step_ui
+
+        renderer = getattr(guided_step_ui, "render_prepare_iif_action", None)
+        self.assertIsNotNone(renderer)
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def button(self, *args, **kwargs):
+                self.events.append(("button", args, kwargs))
+                return True
+
+            def download_button(self, *args, **kwargs):
+                self.events.append(("download", args, kwargs))
+
+        ui = RecordingUI()
+        clicked = renderer(
+            ui,
+            visible=True,
+            download_details=None,
+            disabled=False,
+        )
+
+        self.assertTrue(clicked)
+        self.assertEqual(ui.events[0][0], "button")
+        self.assertEqual(ui.events[0][1][0], "🌿  Validate & Prepare IIF")
+
+    def test_card_settlement_verification_is_rendered_before_guided_steps(self):
+        tree = ast.parse(
+            (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+                encoding="utf-8"
+            )
+        )
+        settlement_render_lines = []
+        guided_heading_lines = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                function_name = (
+                    node.func.id if isinstance(node.func, ast.Name) else None
+                )
+                if function_name == "render_card_settlement_verification":
+                    settlement_render_lines.append(node.lineno)
+            if (
+                isinstance(node, ast.Constant)
+                and node.value == "## Today’s Deposit Steps"
+            ):
+                guided_heading_lines.append(node.lineno)
+
+        self.assertEqual(len(settlement_render_lines), 1)
+        self.assertTrue(guided_heading_lines)
+        self.assertLess(settlement_render_lines[0], min(guided_heading_lines))
+
+    def test_card_settlement_verification_preserves_verified_status_and_date_check(self):
+        from app.guided_step_ui import render_card_settlement_verification
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
+
+            def error(self, body, **kwargs):
+                self.events.append(("error", body, kwargs))
+
+            def warning(self, body, **kwargs):
+                self.events.append(("warning", body, kwargs))
+
+        ui = RecordingUI()
+        mismatch = render_card_settlement_verification(
+            ui,
+            source_ok=True,
+            settlement_date=date(2026, 8, 31),
+            deposit_date=date(2026, 8, 31),
+        )
+
+        self.assertFalse(mismatch)
+        self.assertEqual([event[0] for event in ui.events], ["markdown"])
+        self.assertIn("Card Settlement · 08/31/2026 · ✓ Verified", ui.events[0][1])
+
+
     def test_guided_step_renderer_places_active_content_before_next_step(self):
         from app.guided_step_ui import render_deposit_step_panels
 
@@ -24,7 +135,7 @@ class MembershipPaymentTests(unittest.TestCase):
                 self.ui = ui
                 self.index = index
 
-            def button(self, label, key=None):
+            def button(self, label, key=None, **kwargs):
                 self.ui.events.append(("edit", self.index, key))
                 return False
 
@@ -84,6 +195,56 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn(
             ("edit", 0, "deposit-test_member_shares"),
             ui.events,
+        )
+
+    def test_guided_step_edit_action_uses_seamless_tertiary_style(self):
+        from app.guided_step_ui import render_deposit_step_panels
+
+        class RecordingColumn:
+            def __init__(self, events):
+                self.events = events
+
+            def button(self, label, **kwargs):
+                self.events.append((label, kwargs))
+                return False
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def columns(self, count):
+                return tuple(RecordingColumn(self.events) for _ in range(count))
+
+            def empty(self):
+                return object()
+
+        ui = RecordingUI()
+        render_deposit_step_panels(
+            ui,
+            ({
+                "step": "paid_in",
+                "number": 1,
+                "label": "Paid In",
+                "status": "Completed in app",
+                "complete": True,
+                "current": False,
+            },),
+            edit_key_prefix="deposit-test",
+        )
+
+        self.assertEqual(
+            ui.events,
+            [(
+                "↶ Edit",
+                {
+                    "key": "deposit-test_paid_in",
+                    "type": "tertiary",
+                    "use_container_width": True,
+                },
+            )],
         )
 
     def test_workflow_heading_html_escapes_visible_content(self):
@@ -192,7 +353,6 @@ class MembershipPaymentTests(unittest.TestCase):
         ):
             with self.subTest(required_text=required_text):
                 self.assertIn(required_text, source)
-        self.assertIn("or not guided_workflow_ready", source)
 
     def test_activity_detection_failure_preserves_and_blocks_last_workflow(self):
         from app.guided_deposit_state import resolve_activity_detection_workflow
@@ -473,49 +633,22 @@ class MembershipPaymentTests(unittest.TestCase):
         )
 
     def test_deposit_action_is_safe_before_files_are_uploaded(self):
-        source_path = Path(__file__).parents[1] / "streamlit_app.py"
-        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        from app.guided_step_ui import render_prepare_iif_action
 
-        settlement_block = next(
-            node
-            for node in source_tree.body
-            if isinstance(node, ast.If)
-            and any(
-                isinstance(child, ast.Name)
-                and child.id == "run_clicked"
-                and isinstance(child.ctx, ast.Store)
-                for child in ast.walk(node)
-            )
-        )
-        run_block = next(
-            node
-            for node in source_tree.body
-            if isinstance(node, ast.If)
-            and isinstance(node.test, ast.Name)
-            and node.test.id == "run_clicked"
-        )
-        safe_defaults = [
-            node
-            for node in source_tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "run_clicked"
-                for target in node.targets
-            )
-            and source_tree.body.index(node) < source_tree.body.index(settlement_block)
-        ]
+        class NoActionUI:
+            def button(self, *args, **kwargs):
+                raise AssertionError("Prepare button rendered before upload")
 
-        namespace = {"settlement_file": None}
-        exec(
-            compile(
-                ast.Module(
-                    body=[*safe_defaults, settlement_block, run_block],
-                    type_ignores=[],
-                ),
-                str(source_path),
-                "exec",
-            ),
-            namespace,
+            def download_button(self, *args, **kwargs):
+                raise AssertionError("Download button rendered before upload")
+
+        self.assertFalse(
+            render_prepare_iif_action(
+                NoActionUI(),
+                visible=False,
+                download_details=None,
+                disabled=True,
+            )
         )
 
     def test_rejected_final_closeout_removes_generated_iif(self):

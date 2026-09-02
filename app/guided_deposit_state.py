@@ -1,5 +1,7 @@
 """Pure state transitions for the guided deposit UI."""
 
+from datetime import date
+
 from app.deposit_workflow import (
     STEP_LABELS,
     complete_deposit_step,
@@ -23,6 +25,91 @@ AUTOMATIC_MEMBERSHIP_CHOICE = (
 MANUAL_MEMBERSHIP_CHOICE = "Finish manually in QuickBooks"
 
 
+def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> bool:
+    """Restore canonical saved data into the widgets for one reopened app step."""
+    if step == "member_shares":
+        saved_choice = session_state.get(
+            f"membership_saved_choice_{workbook_key}"
+        )
+        if saved_choice != AUTOMATIC_MEMBERSHIP_CHOICE:
+            return False
+        session_state[f"membership_handling_{workbook_key}"] = saved_choice
+        return True
+
+    if step in {"donation", "paid_in", "paid_out"}:
+        saved_key = f"activity_saved_section_{step}_{workbook_key}"
+        try:
+            section = normalize_activity_section(step, session_state[saved_key])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if section["mode"] != "app":
+            return False
+        session_state[f"activity_handling_{step}_{workbook_key}"] = (
+            "Breakdown in app"
+        )
+        if step == "paid_in":
+            session_state[f"activity_saved_rows_{step}_{workbook_key}"] = [
+                dict(row) for row in section["rows"]
+            ]
+            return True
+
+        row_ids = [f"restored_{index}" for index in range(len(section["rows"]))]
+        session_state[f"activity_row_ids_{step}_{workbook_key}"] = row_ids
+        for row_id, row in zip(row_ids, section["rows"]):
+            prefix = f"activity_{step}_{row_id}"
+            session_state[f"{prefix}_amount"] = row["amount"]
+            if step == "donation":
+                session_state[f"{prefix}_given_to"] = row["given_to"]
+                session_state[f"{prefix}_purpose"] = row["purpose"]
+                session_state[f"{prefix}_manager"] = row["manager"]
+            else:
+                type_labels = {
+                    "esp": "ESP Deposit",
+                    "outreach": "Outreach",
+                    "other": "Other",
+                }
+                session_state[f"{prefix}_type"] = type_labels[row["type"]]
+                if row["type"] == "esp":
+                    session_state[f"{prefix}_date"] = date.fromisoformat(
+                        row["original_date"]
+                    )
+                    session_state[f"{prefix}_initials"] = row["initials"]
+                else:
+                    session_state[f"{prefix}_memo"] = row["memo"]
+        return True
+
+    if step == "coupons":
+        payload = session_state.get(f"coupon_saved_payload_{workbook_key}")
+        if not isinstance(payload, dict) or payload.get("mode") != "closeout":
+            return False
+        try:
+            closeout_total = float(payload["closeout_total"])
+            ncg_total = float(payload["ncg_total"])
+            mfg_total = float(payload["mfg_total"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        session_state.update(
+            {
+                f"coupon_handling_{workbook_key}": (
+                    "Breakdown in app using Closeout Sheet"
+                ),
+                f"coupon_closeout_{workbook_key}": closeout_total,
+                f"coupon_ncg_{workbook_key}": ncg_total,
+                f"coupon_mfg_{workbook_key}": mfg_total,
+            }
+        )
+        return True
+
+    if step == "closeout":
+        return hydrate_reopened_closeout_state(
+            session_state,
+            payload_key=f"closeout_payload_{workbook_key}",
+            preview_key=f"closeout_preview_{workbook_key}",
+            workbook_key=workbook_key,
+        )
+    return False
+
+
 def reopen_step_for_edit(
     session_state,
     *,
@@ -33,7 +120,8 @@ def reopen_step_for_edit(
 ) -> dict:
     """Reopen a step without allowing its manual radio value to re-complete it."""
     normalized = normalize_step_completions(required_steps, completions)
-    if normalized.get(step) == "quickbooks":
+    completion_method = normalized.get(step)
+    if completion_method == "quickbooks":
         handling_keys = {
             "member_shares": f"membership_handling_{workbook_key}",
             "donation": f"activity_handling_donation_{workbook_key}",
@@ -45,6 +133,8 @@ def reopen_step_for_edit(
         handling_key = handling_keys.get(step)
         if handling_key is not None:
             session_state.pop(handling_key, None)
+    elif completion_method == "app":
+        _hydrate_reopened_app_step(session_state, step, workbook_key)
     return edit_deposit_step(required_steps, normalized, step)
 
 

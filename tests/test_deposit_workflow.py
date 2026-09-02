@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 
 
 class DepositWorkflowTests(unittest.TestCase):
@@ -66,6 +67,128 @@ class DepositWorkflowTests(unittest.TestCase):
             session_state[f"coupon_saved_payload_{workbook_key}"],
             {"mode": "closeout"},
         )
+
+    def test_reopening_member_shares_restores_saved_app_choice(self):
+        from app.guided_deposit_state import reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"membership_saved_choice_{workbook_key}": (
+                "Breakdown in app using the Ownership Payments sheet"
+            ),
+            f"membership_saved_payments_{workbook_key}": [{"amount": 100.0}],
+        }
+
+        reopen_step_for_edit(
+            session_state,
+            required_steps=("member_shares", "closeout"),
+            completions={"member_shares": "app", "closeout": "app"},
+            step="member_shares",
+            workbook_key=workbook_key,
+        )
+
+        self.assertEqual(
+            session_state[f"membership_handling_{workbook_key}"],
+            "Breakdown in app using the Ownership Payments sheet",
+        )
+        self.assertEqual(
+            session_state[f"membership_saved_payments_{workbook_key}"],
+            [{"amount": 100.0}],
+        )
+
+    def test_reopening_activity_restores_saved_rows_into_editable_fields(self):
+        from app.guided_deposit_state import reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"activity_saved_section_donation_{workbook_key}": {
+                "mode": "app",
+                "rows": [{
+                    "given_to": "Food Pantry",
+                    "purpose": "Groceries",
+                    "manager": "KC",
+                    "amount": 75.0,
+                }],
+            },
+            f"activity_saved_section_paid_out_{workbook_key}": {
+                "mode": "app",
+                "rows": [{
+                    "type": "esp",
+                    "original_date": "2026-08-28",
+                    "initials": "MR",
+                    "amount": 40.0,
+                }],
+            },
+        }
+
+        for step in ("donation", "paid_out"):
+            reopen_step_for_edit(
+                session_state,
+                required_steps=("donation", "paid_out", "closeout"),
+                completions={
+                    "donation": "app",
+                    "paid_out": "app",
+                    "closeout": "app",
+                },
+                step=step,
+                workbook_key=workbook_key,
+            )
+
+        donation_id = session_state[
+            f"activity_row_ids_donation_{workbook_key}"
+        ][0]
+        self.assertEqual(
+            session_state[f"activity_donation_{donation_id}_given_to"],
+            "Food Pantry",
+        )
+        self.assertEqual(
+            session_state[f"activity_donation_{donation_id}_amount"],
+            75.0,
+        )
+        paid_out_id = session_state[
+            f"activity_row_ids_paid_out_{workbook_key}"
+        ][0]
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_type"],
+            "ESP Deposit",
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_date"],
+            date(2026, 8, 28),
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_amount"],
+            40.0,
+        )
+
+    def test_reopening_coupons_restores_saved_totals_into_editable_fields(self):
+        from app.guided_deposit_state import reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"coupon_saved_payload_{workbook_key}": {
+                "mode": "closeout",
+                "closeout_total": 183.25,
+                "ncg_total": 146.0,
+                "mfg_total": 37.25,
+            }
+        }
+
+        reopen_step_for_edit(
+            session_state,
+            required_steps=("coupons", "closeout"),
+            completions={"coupons": "app", "closeout": "app"},
+            step="coupons",
+            workbook_key=workbook_key,
+        )
+
+        self.assertEqual(
+            session_state[f"coupon_handling_{workbook_key}"],
+            "Breakdown in app using Closeout Sheet",
+        )
+        self.assertEqual(session_state[f"coupon_closeout_{workbook_key}"], 183.25)
+        self.assertEqual(session_state[f"coupon_ncg_{workbook_key}"], 146.0)
+        self.assertEqual(session_state[f"coupon_mfg_{workbook_key}"], 37.25)
 
     def workflow_api(self):
         try:
@@ -140,7 +263,7 @@ class DepositWorkflowTests(unittest.TestCase):
 
     def test_reopened_closeout_hydrates_canonical_form_and_drops_preview(self):
         from app.closeout_reconciliation import STANDARD_CLOSEOUT_ORDER
-        from app.guided_deposit_state import hydrate_reopened_closeout_state
+        from app.guided_deposit_state import reopen_step_for_edit
 
         workbook_key = "workbook-123"
         payload_key = f"closeout_payload_{workbook_key}"
@@ -169,14 +292,15 @@ class DepositWorkflowTests(unittest.TestCase):
             preview_key: {"input_fingerprint": "stale", "preview": {}},
         }
 
-        hydrated = hydrate_reopened_closeout_state(
+        reopened = reopen_step_for_edit(
             session_state,
-            payload_key=payload_key,
-            preview_key=preview_key,
+            required_steps=("closeout",),
+            completions={"closeout": "app"},
+            step="closeout",
             workbook_key=workbook_key,
         )
 
-        self.assertTrue(hydrated)
+        self.assertEqual(reopened, {})
         self.assertNotIn(preview_key, session_state)
         self.assertEqual(
             session_state[f"closeout_handling_{workbook_key}"],

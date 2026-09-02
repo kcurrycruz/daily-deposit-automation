@@ -1,4 +1,4 @@
-from app.ui_helpers import deposit_step_card_html
+from app.ui_helpers import deposit_stepper_html
 
 
 def render_deposit_step_panels(
@@ -7,24 +7,16 @@ def render_deposit_step_panels(
     *,
     edit_key_prefix: str,
 ):
-    """Render compressed step cards and reserve an inline slot for the current step."""
-    active_slot = None
+    """Render one bubble stepper and reserve the form slot beneath it."""
+    rows = tuple(rows)
     edited_step = None
-    for row in rows:
-        with ui.container():
-            card_col, action_col = ui.columns(
-                [6, 1],
-                vertical_alignment="center",
-            )
-            card_col.markdown(
-                deposit_step_card_html(row),
-                unsafe_allow_html=True,
-            )
-            if row["complete"] and action_col.button(
-                "Edit",
-                key=f"{edit_key_prefix}_{row['step']}",
-            ):
-                edited_step = row["step"]
-            if row["current"]:
-                active_slot = ui.empty()
+    ui.markdown(deposit_stepper_html(rows), unsafe_allow_html=True)
+    edit_columns = ui.columns(len(rows))
+    for edit_column, row in zip(edit_columns, rows):
+        if row["complete"] and edit_column.button(
+            "Edit",
+            key=f"{edit_key_prefix}_{row['step']}",
+        ):
+            edited_step = row["step"]
+    active_slot = ui.empty()
     return active_slot, edited_step

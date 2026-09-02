@@ -13,46 +13,41 @@ class MembershipPaymentTests(unittest.TestCase):
         from app.guided_step_ui import render_deposit_step_panels
 
         class RecordingContainer:
-            def __init__(self, ui, container_id):
-                self.ui = ui
-                self.container_id = container_id
-
             def __enter__(self):
-                self.ui.current_container = self.container_id
-                self.ui.events.append(("enter", self.container_id))
                 return self
 
             def __exit__(self, exc_type, exc, traceback):
-                self.ui.events.append(("exit", self.container_id))
-                self.ui.current_container = None
+                return None
 
         class RecordingColumn:
-            def __init__(self, ui):
+            def __init__(self, ui, index):
                 self.ui = ui
-
-            def markdown(self, body, unsafe_allow_html=False):
-                self.ui.events.append(("card", self.ui.current_container))
+                self.index = index
 
             def button(self, label, key=None):
+                self.ui.events.append(("edit", self.index, key))
                 return False
+
+            def markdown(self, body, unsafe_allow_html=False):
+                self.ui.events.append(("legacy_card", self.index))
 
         class RecordingUI:
             def __init__(self):
                 self.events = []
-                self.current_container = None
-                self.container_count = 0
+
+            def markdown(self, body, unsafe_allow_html=False):
+                self.events.append(("stepper", body, unsafe_allow_html))
 
             def container(self):
-                container = RecordingContainer(self, self.container_count)
-                self.container_count += 1
-                return container
+                return RecordingContainer()
 
             def columns(self, widths, vertical_alignment=None):
-                return RecordingColumn(self), RecordingColumn(self)
+                count = widths if isinstance(widths, int) else len(widths)
+                return tuple(RecordingColumn(self, index) for index in range(count))
 
             def empty(self):
                 slot = object()
-                self.events.append(("active_slot", self.current_container))
+                self.events.append(("active_slot", slot))
                 return slot
 
         ui = RecordingUI()
@@ -61,17 +56,17 @@ class MembershipPaymentTests(unittest.TestCase):
                 "step": "member_shares",
                 "number": 1,
                 "label": "Member Share Payments",
-                "status": "Current",
-                "complete": False,
-                "current": True,
+                "status": "Completed in app",
+                "complete": True,
+                "current": False,
             },
             {
                 "step": "paid_in",
                 "number": 2,
                 "label": "Paid In",
-                "status": "Pending",
+                "status": "Current",
                 "complete": False,
-                "current": False,
+                "current": True,
             },
         )
 
@@ -83,9 +78,12 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertIsNotNone(active_slot)
         self.assertIsNone(edited_step)
-        self.assertLess(
-            ui.events.index(("active_slot", 0)),
-            ui.events.index(("enter", 1)),
+        self.assertEqual(ui.events[0][0], "stepper")
+        self.assertTrue(ui.events[0][2])
+        self.assertEqual(ui.events[-1], ("active_slot", active_slot))
+        self.assertIn(
+            ("edit", 0, "deposit-test_member_shares"),
+            ui.events,
         )
 
     def test_workflow_heading_html_escapes_visible_content(self):
@@ -104,23 +102,44 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn("Use &quot;QuickBooks&quot; safely", rendered)
         self.assertNotIn("Member & <Share>", rendered)
 
-    def test_deposit_step_card_html_marks_number_status_and_escapes_text(self):
-        from app.ui_helpers import deposit_step_card_html
+    def test_deposit_stepper_html_renders_connected_bubble_states(self):
+        import app.ui_helpers as ui_helpers
 
-        rendered = deposit_step_card_html(
+        renderer = getattr(ui_helpers, "deposit_stepper_html", None)
+        self.assertIsNotNone(renderer)
+
+        rendered = renderer((
+            {
+                "number": 1,
+                "label": "Member Share Payments",
+                "status": "Completed in app",
+                "complete": True,
+                "current": False,
+            },
             {
                 "number": 2,
                 "label": "Paid <In>",
                 "status": "Current",
                 "complete": False,
                 "current": True,
-            }
-        )
+            },
+            {
+                "number": 3,
+                "label": "Closeout Sheet",
+                "status": "Pending",
+                "complete": False,
+                "current": False,
+            },
+        ))
 
-        self.assertIn('class="hwfc-step-card is-current"', rendered)
-        self.assertIn("Step 2", rendered)
+        self.assertIn('class="hwfc-deposit-stepper"', rendered)
+        self.assertIn('class="hwfc-stepper-item is-complete"', rendered)
+        self.assertIn('class="hwfc-stepper-item is-current"', rendered)
+        self.assertIn('class="hwfc-stepper-item is-pending"', rendered)
+        self.assertIn('aria-label="Completed"', rendered)
+        self.assertIn("Step 1", rendered)
+        self.assertIn("Member Share Payments", rendered)
         self.assertIn("Paid &lt;In&gt;", rendered)
-        self.assertIn("Current", rendered)
         self.assertNotIn("Paid <In>", rendered)
 
     def test_streamlit_app_renders_guided_step_summary_with_edit_controls(self):
@@ -135,7 +154,7 @@ class MembershipPaymentTests(unittest.TestCase):
         for required_text in (
             "Today’s Deposit Steps",
             "deposit_step_rows",
-            "deposit_step_card_html",
+            "deposit_stepper_html",
             "Edit",
         ):
             with self.subTest(required_text=required_text):

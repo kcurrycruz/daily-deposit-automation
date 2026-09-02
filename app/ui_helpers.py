@@ -12,21 +12,38 @@ def workflow_heading_html(title: str, description: str) -> str:
     )
 
 
-def deposit_step_card_html(row: dict) -> str:
-    """Render a safe status card for one guided deposit step."""
-    classes = "hwfc-step-card"
-    if row.get("current"):
-        classes += " is-current"
-    elif row.get("complete"):
-        classes += " is-complete"
+def deposit_stepper_html(rows) -> str:
+    """Render safe connected bubbles for the guided deposit workflow."""
+    items = []
+    for row in rows:
+        number = int(row["number"])
+        if row.get("complete"):
+            state = "is-complete"
+            bubble = "✓"
+            bubble_label = "Completed"
+        elif row.get("current"):
+            state = "is-current"
+            bubble = str(number)
+            bubble_label = f"Current step {number}"
+        else:
+            state = "is-pending"
+            bubble = str(number)
+            bubble_label = f"Pending step {number}"
+        items.append(
+            f'<div class="hwfc-stepper-item {state}" role="listitem">'
+            '<div class="hwfc-stepper-track">'
+            f'<span class="hwfc-stepper-bubble" aria-label="{bubble_label}">'
+            f"{bubble}</span>"
+            "</div>"
+            '<div class="hwfc-stepper-label">'
+            f'<span>Step {number}</span>'
+            f'<strong>{html.escape(str(row["label"]))}</strong>'
+            "</div></div>"
+        )
     return (
-        f'<div class="{classes}">'
-        '<div class="hwfc-step-number">'
-        f'Step {int(row["number"])}</div>'
-        '<div class="hwfc-step-copy">'
-        f'<strong>{html.escape(str(row["label"]))}</strong>'
-        f'<span>{html.escape(str(row["status"]))}</span>'
-        "</div></div>"
+        '<div class="hwfc-deposit-stepper" role="list" '
+        'aria-label="Today’s Deposit Steps">'
+        f'{"".join(items)}</div>'
     )
 
 

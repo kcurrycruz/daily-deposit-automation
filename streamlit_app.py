@@ -98,7 +98,6 @@ from app.guided_step_ui import render_deposit_step_panels
 from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
-    workflow_heading_html,
 )
 
 # ---------------------------------------------------------------------
@@ -483,48 +482,108 @@ st.markdown(
         margin-top: 4px;
     }
 
-    .hwfc-step-card {
+    .hwfc-deposit-stepper {
+        display: flex;
+        align-items: flex-start;
+        overflow-x: auto;
+        padding: 8px 2px 14px;
+        margin: 2px 0 0;
+        scrollbar-width: thin;
+    }
+
+    .hwfc-stepper-item {
+        flex: 1 0 130px;
+        min-width: 130px;
+        position: relative;
+        text-align: center;
+    }
+
+    .hwfc-stepper-track {
+        align-items: center;
+        display: flex;
+        height: 38px;
+        justify-content: center;
+        position: relative;
+    }
+
+    .hwfc-stepper-item:not(:last-child) .hwfc-stepper-track::after {
+        background: #38414C;
+        content: "";
+        height: 3px;
+        left: calc(50% + 17px);
+        position: absolute;
+        right: calc(-50% + 17px);
+        top: calc(50% - 1px);
+    }
+
+    .hwfc-stepper-item.is-complete .hwfc-stepper-track::after {
+        background: #78A85B;
+    }
+
+    .hwfc-stepper-bubble {
         align-items: center;
         background: #161B22;
-        border: 1px solid var(--hwfc-border);
-        border-radius: 12px;
-        display: flex;
-        gap: 12px;
-        margin: 4px 0;
-        padding: 10px 12px;
-    }
-
-    .hwfc-step-card.is-current {
-        background: rgba(47,82,51,.48);
-        border-color: #78A85B;
-    }
-
-    .hwfc-step-card.is-complete {
-        border-color: #315F3A;
-    }
-
-    .hwfc-step-number {
-        color: #D6C5A8;
-        font-size: .76rem;
+        border: 2px solid #56606C;
+        border-radius: 50%;
+        color: #C7D2C2;
+        display: inline-flex;
+        font-size: .88rem;
         font-weight: 850;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-        white-space: nowrap;
+        height: 34px;
+        justify-content: center;
+        position: relative;
+        width: 34px;
+        z-index: 1;
     }
 
-    .hwfc-step-copy {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .hwfc-step-copy strong {
+    .hwfc-stepper-item.is-complete .hwfc-stepper-bubble {
+        background: #315F3A;
+        border-color: #78A85B;
         color: #FFFDF8;
     }
 
-    .hwfc-step-copy span {
-        color: #C7D2C2;
-        font-size: .82rem;
+    .hwfc-stepper-item.is-current .hwfc-stepper-bubble {
+        background: #78A85B;
+        border-color: #A9D18E;
+        box-shadow: 0 0 0 5px rgba(120,168,91,.18);
+        color: #0F1410;
+    }
+
+    .hwfc-stepper-label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 7px auto 0;
+        max-width: 150px;
+    }
+
+    .hwfc-stepper-label span {
+        color: #D6C5A8;
+        font-size: .68rem;
+        font-weight: 850;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .hwfc-stepper-label strong {
+        color: #FFFDF8;
+        font-size: .86rem;
+        line-height: 1.2;
+    }
+
+    .hwfc-stepper-item.is-pending .hwfc-stepper-label strong {
+        color: #87919D;
+    }
+
+    @media (max-width: 700px) {
+        .hwfc-stepper-item {
+            flex-basis: 112px;
+            min-width: 112px;
+        }
+
+        .hwfc-stepper-label strong {
+            font-size: .78rem;
+        }
     }
 
     .hwfc-plan-guide-grid {
@@ -2426,13 +2485,6 @@ if active_step == STEP_MEMBER_SHARES and membership_choice_key not in st.session
 if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
-    st.markdown(
-        workflow_heading_html(
-            "Member Share Payments",
-            "Handle membership revenue for this deposit.",
-        ),
-        unsafe_allow_html=True,
-    )
     handling_choice = st.radio(
         "How should these payments be handled?",
         options=[
@@ -2825,13 +2877,6 @@ for activity_key in activity_workflow_keys(activity_source_totals):
     active_step_panel.__enter__()
     activity_title, activity_source_label = activity_labels[activity_key]
     source_total = float(activity_source_totals[activity_key])
-    st.markdown(
-        workflow_heading_html(
-            activity_title,
-            "Enter the paper slips here or finish this activity manually in QuickBooks.",
-        ),
-        unsafe_allow_html=True,
-    )
     st.caption(f"{activity_source_label}: ${source_total:,.2f}")
     handling_choice = st.radio(
         f"How should {activity_title} be handled?",
@@ -3139,13 +3184,6 @@ if STEP_COUPONS in required_steps and STEP_COUPONS in step_completions:
 if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
-    st.markdown(
-        workflow_heading_html(
-            "Coupons Receivable",
-            "Reconcile NCG and MFG coupons.",
-        ),
-        unsafe_allow_html=True,
-    )
     st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
     coupon_handling_choice = st.radio(
         "How should Coupons Receivable be handled?",
@@ -3271,13 +3309,6 @@ if uploaded and active_step == STEP_CLOSEOUT:
             preview_key=closeout_preview_key,
             workbook_key=closeout_workbook_key,
         )
-    st.markdown(
-        workflow_heading_html(
-            "Closeout Sheet",
-            "Match the deposit to the paper Closeout Sheet.",
-        ),
-        unsafe_allow_html=True,
-    )
     closeout_choice = st.radio(
         "How should the Closeout Sheet be handled?",
         options=[

@@ -569,6 +569,11 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws, found_tab = _dated_report_sheet(wb, report_date, "Hash")
     if ws is None:
+        for sheet_name in wb.sheetnames:
+            if sheet_name.strip().casefold() == "hash":
+                ws, found_tab = wb[sheet_name], sheet_name
+                break
+    if ws is None:
         ws, found_tab = _content_report_sheet(
             wb,
             ("refunded discounts", "pass through donations", "paid-ins", "paid ins"),
@@ -587,7 +592,7 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             if value is None:
                 continue
             label = str(value).strip().casefold()
-            if label == "amount":
+            if label == "amount" or label.startswith("amount "):
                 amount_col = idx
                 amount_header_row = row_num
                 break
@@ -597,7 +602,7 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     if amount_col is None:
         log.warning("  HASH Amount column not found — HASH values cannot be imported safely.")
         wb.close()
-        return 0.0, 0.0, 0.0
+        raise ValueError("HASH Amount column not found; the IIF was not created.")
 
     log.info(f"  HASH Amount header found at row {amount_header_row}, column {amount_col + 1}")
     refunded_discounts = 0.0
@@ -647,13 +652,13 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
             continue
         row_type = target_codes[code]
         if row_type == "refunded":
-            refunded_discounts = amount
+            refunded_discounts = round(refunded_discounts + amount, 2)
             log.info(f"    HASH code 23 Refunded Discounts: ${amount:,.2f}")
         elif row_type == "pass_through":
-            pass_through_total = amount
+            pass_through_total = round(pass_through_total + amount, 2)
             log.info(f"    HASH code 32 Pass Through Donations: ${amount:,.2f}")
         elif row_type == "paid_in":
-            paid_in_total = amount
+            paid_in_total = round(paid_in_total + amount, 2)
             log.info(f"    HASH code 34 Paid-Ins: ${amount:,.2f}")
 
     log.info(f"  HASH values used: Refunded=${refunded_discounts:,.2f}, PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}")

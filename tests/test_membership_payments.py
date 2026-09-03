@@ -1842,6 +1842,117 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertEqual(parsed, (6.96, 5.00, 0.0))
 
+    def test_plain_hash_tab_with_amount_weight_header_reaches_iif(self):
+        """The production HASH layout must not silently drop codes 23 and 32."""
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        fixture_root = Path(__file__).parent / f"_plain_hash_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "daily.xlsx"
+        workbook = openpyxl.Workbook()
+        hash_sheet = workbook.active
+        hash_sheet.title = "Hash"
+        hash_sheet.append(["Sub-department Single Total"])
+        hash_sheet.append(["Date:", "9/2/2026", "to", "9/2/2026"])
+        hash_sheet.append(["S-Dept.", 0, "to", 999999])
+        hash_sheet.append(["Tlz.:", 6, "to", 6])
+        hash_sheet.append(["Target:", "RAL", "Report all"])
+        hash_sheet.append([None, None, "Sub-Department", None, None, None, "Qty", "Amount g/Weight"])
+        hash_sheet.append([None, 23, "Refunded Discounts", None, None, None, 8, 4.90])
+        hash_sheet.append([None, 32, "PASS THROUGH DONATIONS", None, None, None, 1, 1.00])
+        workbook.save(workbook_path)
+        workbook.close()
+
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            refunded, pass_through, paid_in = engine.parse_hash_sheet(
+                workbook_path, date(2026, 9, 2)
+            )
+            iif_path = engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 9, 2),
+                refunded_discounts=refunded,
+                pass_through_total=pass_through,
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertEqual((refunded, pass_through, paid_in), (4.90, 1.00, 0.0))
+        self.assertIn(
+            "8140026 · Weekly Time Discount (24%)\t\t-4.90\tRefunded Discounts",
+            iif_text,
+        )
+        self.assertIn(
+            "4160000 · Charitable Donations Payable\t\t-1.00\tCharity/Pass through Donations (Round up)",
+            iif_text,
+        )
+
+    def test_hash_parser_totals_repeated_target_codes(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / f"_repeated_hash_{uuid4().hex}.xlsx"
+        workbook = openpyxl.Workbook()
+        hash_sheet = workbook.active
+        hash_sheet.title = "Hash"
+        hash_sheet.append(["Code", "Description", "Amount g/Weight"])
+        hash_sheet.append([23, "Refunded Discounts", 2.40])
+        hash_sheet.append([23, "Refunded Discounts", 2.50])
+        hash_sheet.append([32, "PASS THROUGH DONATIONS", 0.40])
+        hash_sheet.append([32, "PASS THROUGH DONATIONS", 0.60])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            parsed = engine.parse_hash_sheet(workbook_path, date(2026, 9, 2))
+        finally:
+            workbook_path.unlink()
+
+        self.assertEqual(parsed, (4.90, 1.00, 0.0))
+
+    def test_present_hash_tab_without_amount_column_is_rejected(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook_path = Path(__file__).parent / f"_unreadable_hash_{uuid4().hex}.xlsx"
+        workbook = openpyxl.Workbook()
+        hash_sheet = workbook.active
+        hash_sheet.title = "Hash"
+        hash_sheet.append(["Code", "Description", "Value"])
+        hash_sheet.append([23, "Refunded Discounts", 4.90])
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            with self.assertRaisesRegex(ValueError, "HASH Amount column not found"):
+                engine.parse_hash_sheet(workbook_path, date(2026, 9, 2))
+        finally:
+            workbook_path.unlink()
+
     def test_automatic_split_leaves_new_quickbooks_member_name_blank(self):
         from app.membership_payments import (
             build_membership_lines,

@@ -9,6 +9,15 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_donation_items_default_to_editable_normal_amount(self):
+        import app.guided_step_ui as guided_step_ui
+
+        default_amount = getattr(guided_step_ui, "activity_default_amount", None)
+        self.assertIsNotNone(default_amount)
+        self.assertEqual(default_amount("donation"), 100.00)
+        self.assertEqual(default_amount("paid_in"), 0.00)
+        self.assertEqual(default_amount("paid_out"), 0.00)
+
     def test_breakdown_selection_requests_one_smooth_scroll_to_the_form(self):
         import app.guided_step_ui as guided_step_ui
 
@@ -1904,6 +1913,76 @@ class MembershipPaymentTests(unittest.TestCase):
             "4160000 · Charitable Donations Payable\t\t-1.00\tCharity/Pass through Donations (Round up)",
             iif_text,
         )
+
+    def test_books_combine_with_magazines_and_coop_scoop_becomes_star_pass_sale(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        fixture_root = Path(__file__).parent / f"_sales_mapping_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "daily.xlsx"
+        workbook = openpyxl.Workbook()
+        sales_sheet = workbook.active
+        sales_sheet.title = "SubDept Sales Report"
+        for _ in range(3):
+            sales_sheet.append([None] * 16)
+        sales_sheet.append([540, "Books", None, None, None, None, 11.99])
+        sales_sheet.append([550, "Magazines", None, None, None, None, 61.90])
+        sales_sheet.append([22, "Coop Scoop Ad payment", None, None, None, None, 60.00])
+        workbook.save(workbook_path)
+        workbook.close()
+
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            parsed = engine.parse_excel_report(workbook_path)
+            iif_path = engine.generate_iif(
+                parsed[0],
+                {},
+                {},
+                date(2026, 9, 2),
+                misc_tba_lines=parsed[1],
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertIn(
+            "7110550 · Sales - Magazines\t\t-73.89\t",
+            iif_text,
+        )
+        self.assertIn(
+            "7111300 · Promotional Sales\t\t-60.00\tSale of 2 CDTA Star Passes\t9 - Promotional",
+            iif_text,
+        )
+        self.assertNotIn("Coop Scoop Ad payment", iif_text)
+
+    def test_one_star_pass_uses_singular_memo(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        self.assertEqual(
+            engine.star_pass_memo(30.00),
+            "Sale of 1 CDTA Star Pass",
+        )
+
+    def test_non_multiple_star_pass_amount_is_rejected(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        with self.assertRaisesRegex(ValueError, "multiple of \\$30"):
+            engine.star_pass_memo(45.00)
 
     def test_hash_parser_totals_repeated_target_codes(self):
         from datetime import date

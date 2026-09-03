@@ -97,6 +97,7 @@ from app.guided_deposit_state import (
     save_member_share_transition,
 )
 from app.guided_step_ui import (
+    activity_default_amount,
     closeout_review_blockers,
     queue_breakdown_scroll,
     queue_continue_scroll,
@@ -3171,6 +3172,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 manager = row_columns[2].text_input("Manager Approval", key=manager_key)
                 amount = row_columns[3].number_input(
                     "Amount",
+                    value=activity_default_amount(activity_key),
                     min_value=0.0,
                     step=0.01,
                     format="%.2f",

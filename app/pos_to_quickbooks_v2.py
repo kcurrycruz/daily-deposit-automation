@@ -76,6 +76,7 @@ CONFIG = {
 }
 
 SUBDEPT_TO_QB = {
+    22:   "7111300 · Promotional Sales|CDTA Star Pass",
     110:  "7110110 · Sales - Packaged Grocery - NT",
     120:  "7110120 · Sales - Dairy/Refrigerated",
     130:  "7110130 · Sales - Frozen Foods",
@@ -100,6 +101,7 @@ SUBDEPT_TO_QB = {
     420:  "7110420 · Sales - Gardening/Plants",
     510:  "7110510 · Sales - Personal Care Taxable",
     520:  "7110520 · Sales - Vitamins & Supplements",
+    540:  "7110550 · Sales - Magazines",
     550:  "7110550 · Sales - Magazines",
     1300: "7111300 · Promotional Sales",
     27:   "8515000 · Marketing - Coupons, Store",
@@ -362,12 +364,12 @@ def parse_coupon_file(filepath: Path) -> tuple:
 
 
 MISC_SUBDEPTS = {
-    170: "Adjustments", 22: "Coop Scoop Ad payment", 23: "Refunded Discounts",
+    170: "Adjustments", 23: "Refunded Discounts",
     24: "Bottle Deposits", 25: "Gift Certificates", 26: "Share Payment",
     29: "Building Blocks", 30: "Groupon", 31: "Crowd Savings",
     32: "Pass Through Donations", 33: "Bag Credits", 34: "Paid-Ins",
     35: "Owner Appreciation 5%", 37: "Staff Appreciation", 50: "Envirotokens",
-    260: "Maria College Cafe", 530: "Herbs", 540: "Books",
+    260: "Maria College Cafe", 530: "Herbs",
     560: "Candles/Incense/Baskets", 999: "UnAssigned",
 }
 
@@ -387,6 +389,7 @@ def parse_excel_report(filepath: Path) -> tuple:
     if 'SubDept Sales Report' not in wb.sheetnames:
         log.error(f"  Sheet 'SubDept Sales Report' not found in {filepath.name}")
         log.error(f"  Available sheets: {wb.sheetnames}")
+        wb.close()
         return {}, [], 0.0, 0.0, 0.0
 
     ws = wb['SubDept Sales Report']
@@ -534,6 +537,7 @@ def parse_excel_report(filepath: Path) -> tuple:
         sales[qb] = round(sales.get(qb, 0.0) + amount, 2)
 
     log.info(f"  Excel: {len(sales)} accounts mapped, {len(misc_lines)} misc TBA lines")
+    wb.close()
     return sales, misc_lines, milk_bottle_return, store_coupons_amt, owner_apprec_amt, sales_total_xl, pass_through_total, dust_bunnies_total, milk_bottles_returns, refunded_discounts, hash_sales_total
 
 
@@ -1010,6 +1014,20 @@ def spl(date_str, acct, name, amount, memo, class_name=""):
     return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t{class_name}"
 
 
+def star_pass_memo(amount: float) -> str:
+    """Describe an exact $30-per-pass Coop Scoop sale for QuickBooks."""
+    normalized = Decimal(str(abs(amount))).quantize(Decimal("0.01"))
+    pass_count, remainder = divmod(normalized, Decimal("30.00"))
+    if remainder != 0 or pass_count < 1:
+        raise ValueError(
+            "Coop Scoop Ad payment must be a positive multiple of $30 "
+            "so the CDTA Star Pass count can be verified."
+        )
+    count = int(pass_count)
+    suffix = "Pass" if count == 1 else "Passes"
+    return f"Sale of {count} CDTA Star {suffix}"
+
+
 def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> list[dict]:
     """Return signed adjustments needed to bring settlement amounts back to BS totals.
 
@@ -1218,6 +1236,21 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             continue
         spl_total += amt
         spls.append(spl(date_str, acct, "", amt, memo))
+
+    star_pass_key = "7111300 · Promotional Sales|CDTA Star Pass"
+    star_pass_amt = s(star_pass_key)
+    if has_amount(star_pass_amt):
+        spl_total += star_pass_amt
+        spls.append(
+            spl(
+                date_str,
+                "7111300 · Promotional Sales",
+                "",
+                star_pass_amt,
+                star_pass_memo(star_pass_amt),
+                "9 - Promotional",
+            )
+        )
 
     bag_amt = -(abs(sales.get("4150300 · NYS Paper Bag Fees Payable", 0))) or None
     if has_amount(bag_amt):

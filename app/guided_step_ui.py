@@ -5,6 +5,11 @@ import re
 from app.ui_helpers import deposit_stepper_html
 
 
+def activity_default_amount(activity_key: str) -> float:
+    """Return the editable starting amount for a new activity row."""
+    return 100.0 if activity_key == "donation" else 0.0
+
+
 def queue_breakdown_scroll(session_state, choice_key: str, request_key: str) -> None:
     """Queue one form scroll when a handling choice enters app breakdown mode."""
     choice = str(session_state.get(choice_key) or "")

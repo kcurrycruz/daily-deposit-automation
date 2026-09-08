@@ -1812,6 +1812,21 @@ st.markdown(
 if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = 0
 
+action_left, action_right = st.columns([0.80, 0.20])
+with action_left:
+    render_need_help_label(st)
+with action_right:
+    if st.button(
+        "↻ Start Over",
+        use_container_width=True,
+        help="Clear the current upload and results. Run History is preserved.",
+    ):
+        reset_current_work()
+        st.rerun()
+
+render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+render_known_exceptions(st)
+
 has_results = "run_result" in st.session_state
 
 st.markdown(
@@ -3839,21 +3854,6 @@ if "run_result" in st.session_state:
         ):
             reset_current_work()
             st.rerun()
-
-action_left, action_right = st.columns([0.80, 0.20])
-with action_left:
-    render_need_help_label(st)
-with action_right:
-    if st.button(
-        "↻ Start Over",
-        use_container_width=True,
-        help="Clear the current upload and results. Run History is preserved.",
-    ):
-        reset_current_work()
-        st.rerun()
-
-render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-render_known_exceptions(st)
 
 st.markdown(
     """

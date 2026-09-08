@@ -111,13 +111,7 @@ from app.guided_step_ui import (
     render_prepare_iif_action,
     update_upload_pair_readiness,
 )
-from app.upload_intake_ui import (
-    render_upload_inputs,
-    upload_readiness,
-    upload_readiness_html,
-    uploaded_file_summary_html,
-    workbook_role_badges_html,
-)
+from app.upload_intake_ui import render_upload_inputs
 from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
@@ -481,188 +475,6 @@ st.markdown(
         letter-spacing: .12em;
         text-transform: uppercase;
         margin: 8px 0 6px;
-    }
-
-    .hwfc-upload-heading {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-        margin: 22px 0 14px;
-    }
-
-    .hwfc-upload-title {
-        color: #FFFDF8;
-        font-family: Georgia, 'Times New Roman', serif;
-        font-size: 1.75rem;
-        font-weight: 800;
-        letter-spacing: -.02em;
-    }
-
-    .hwfc-upload-subtitle {
-        color: var(--hwfc-muted);
-        font-size: .94rem;
-    }
-
-    .hwfc-upload-card-copy {
-        align-items: flex-start;
-        display: flex;
-        gap: 13px;
-        min-height: 90px;
-        padding: 8px 2px;
-    }
-
-    .hwfc-upload-card-copy > div {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-    }
-
-    .hwfc-upload-card-copy strong {
-        color: #FFFDF8;
-        font-size: 1.03rem;
-    }
-
-    .hwfc-upload-card-copy > div > span {
-        color: var(--hwfc-muted);
-        font-size: .82rem;
-    }
-
-    .hwfc-upload-expected,
-    .hwfc-upload-role-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-top: 4px;
-    }
-
-    .hwfc-upload-expected span,
-    .hwfc-upload-role {
-        background: #202A23;
-        border: 1px solid #405744;
-        border-radius: 999px;
-        color: #D9E5D4;
-        font-size: .67rem;
-        padding: 3px 8px;
-    }
-
-    .hwfc-upload-role.is-missing {
-        background: var(--hwfc-yellow-soft);
-        border-color: #78682D;
-        color: #E4D6A6;
-    }
-
-    .hwfc-upload-divider {
-        border-top: 1px solid var(--hwfc-border);
-        margin: 10px 0 14px;
-    }
-
-    .hwfc-upload-file-summary {
-        background: var(--hwfc-yellow-soft);
-        border: 1px solid #78682D;
-        border-radius: 10px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px 12px;
-        margin: 8px 0;
-        padding: 9px 11px;
-    }
-
-    .hwfc-upload-file-summary.is-valid {
-        background: var(--hwfc-green-soft);
-        border-color: var(--hwfc-forest);
-    }
-
-    .hwfc-upload-file-name {
-        color: #FFFDF8;
-        flex-basis: 100%;
-        font-size: .78rem;
-        font-weight: 800;
-        overflow-wrap: anywhere;
-    }
-
-    .hwfc-upload-file-date,
-    .hwfc-upload-file-status {
-        color: #BFC9BC;
-        font-size: .7rem;
-    }
-
-    .hwfc-upload-readiness {
-        align-items: center;
-        background: #10151A;
-        border: 1px solid var(--hwfc-border);
-        border-radius: 11px;
-        display: flex;
-        justify-content: space-between;
-        margin-top: 15px;
-        padding: 12px 14px;
-    }
-
-    .hwfc-upload-readiness-progress {
-        color: #AEB8BF;
-        font-size: .74rem;
-        min-width: 190px;
-    }
-
-    .hwfc-upload-progress {
-        background: #2E373E;
-        border-radius: 999px;
-        height: 6px;
-        margin-top: 6px;
-        overflow: hidden;
-        width: 190px;
-    }
-
-    .hwfc-upload-progress-fill {
-        background: var(--hwfc-leaf);
-        border-radius: 999px;
-        height: 100%;
-        transition: width .25s ease;
-    }
-
-    .hwfc-upload-ready-action {
-        background: #283139;
-        border-radius: 8px;
-        color: #87919D;
-        font-size: .75rem;
-        font-weight: 800;
-        padding: 8px 12px;
-    }
-
-    .hwfc-upload-readiness.is-ready .hwfc-upload-ready-action {
-        background: var(--hwfc-forest);
-        color: #FFFDF8;
-    }
-
-    .hwfc-upload-help-label {
-        color: var(--hwfc-muted);
-        font-size: .72rem;
-        font-weight: 800;
-        letter-spacing: .08em;
-        margin: 16px 2px 7px;
-        text-transform: uppercase;
-    }
-
-    @media (max-width: 700px) {
-        .hwfc-upload-card-copy,
-        .hwfc-upload-file-name {
-            overflow-wrap: anywhere;
-        }
-
-        .hwfc-upload-readiness {
-            align-items: stretch;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .hwfc-upload-readiness-progress,
-        .hwfc-upload-progress {
-            min-width: 0;
-            width: 100%;
-        }
-
-        .hwfc-upload-ready-action {
-            text-align: center;
-        }
     }
 
     .hwfc-workflow-heading {
@@ -2125,6 +1937,9 @@ with st.sidebar:
 # Input area
 # ---------------------------------------------------------------------
 
+render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+render_known_exceptions(st)
+
 roles = {}
 date_info = {
     "detected_date": None,
@@ -2141,13 +1956,6 @@ upload_render = render_upload_inputs(
 )
 uploaded = upload_render.daily_workbook
 settlement_file = upload_render.card_settlement
-
-upload_render.readiness_slot.markdown(
-    upload_readiness_html(
-        upload_readiness(uploaded is not None, settlement_file is not None)
-    ),
-    unsafe_allow_html=True,
-)
 
 upload_pair_readiness_key = (
     f"upload_pair_ready_{st.session_state['file_uploader_key']}"
@@ -2175,68 +1983,68 @@ if uploaded is not None:
     date_info = detect_workbook_dates(upload_bytes)
     deposit_date = date_info["detected_date"]
     roles = detect_sheet_roles(upload_bytes, preferred_date=deposit_date)
-    workbook_role_labels = [
-        ("Sales", roles.get("sales")),
-        ("Coupons", roles.get("coupons")),
-        ("Discounts", roles.get("discounts")),
-        ("Balance Sheet", roles.get("bs")),
-        ("HASH", roles.get("hash")),
-    ]
     missing_roles = [
         key
         for key in ("sales", "coupons", "discounts", "bs", "hash")
         if not roles.get(key)
     ]
-    workbook_summary_valid = deposit_date is not None and not missing_roles
 
-    with upload_render.daily_details_slot.container():
-        st.markdown(
-            uploaded_file_summary_html(
-                uploaded.name,
-                deposit_date,
-                valid=workbook_summary_valid,
-                status_text=(
-                    "Workbook verified"
-                    if workbook_summary_valid
-                    else "Review workbook details"
-                ),
-            ),
+    if deposit_date is not None:
+        upload_render.date_slot.markdown(
+            '<div class="hwfc-mini-card">'
+            '<div class="hwfc-mini-label">Detected</div>'
+            f'<div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div>'
+            "</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(
-            workbook_role_badges_html(workbook_role_labels),
-            unsafe_allow_html=True,
+    else:
+        upload_render.date_slot.error("Report date not detected", icon="⚠️")
+
+    if date_info["has_mismatch"]:
+        detail_lines = [
+            f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
+            for sheet, dt in date_info["dates_by_sheet"].items()
+        ]
+        source = date_info.get("source_sheet") or "workbook"
+        st.warning(
+            "**DATE MISMATCH WARNING**\n\n"
+            + "The workbook contains more than one report date. "
+            + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
+            + f"from **{source}**. You can still run the deposit, but review "
+            + "the dates first.\n\n"
+            + "  \n".join(detail_lines),
+            icon="⚠️",
         )
-        if deposit_date is None:
-            st.error("Report date not detected", icon="⚠️")
-        if date_info["has_mismatch"]:
-            detail_lines = [
-                f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
-                for sheet, dt in date_info["dates_by_sheet"].items()
-            ]
-            source = date_info.get("source_sheet") or "workbook"
-            st.warning(
-                "**DATE MISMATCH WARNING**\n\n"
-                + "The workbook contains more than one report date. "
-                + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
-                + f"from **{source}**. You can still run the deposit, but review "
-                + "the dates first.\n\n"
-                + "  \n".join(detail_lines),
-                icon="⚠️",
-            )
-        if missing_roles:
-            missing_role_labels = {
-                "sales": "Sales",
-                "coupons": "Coupons",
-                "discounts": "Discounts",
-                "bs": "Balance Sheet",
-                "hash": "HASH",
-            }
-            st.warning(
-                "Not detected: "
-                + ", ".join(missing_role_labels[key] for key in missing_roles),
-                icon="⚠️",
-            )
+
+    with st.expander("Workbook validation", expanded=True):
+        columns = st.columns(5)
+        labels = [
+            ("Sales", roles.get("sales")),
+            ("Coupons", roles.get("coupons")),
+            ("Discounts", roles.get("discounts")),
+            ("Balance Sheet", roles.get("bs")),
+            ("HASH", roles.get("hash")),
+        ]
+        for column, (label, sheet_name) in zip(columns, labels):
+            with column:
+                if sheet_name:
+                    st.markdown(
+                        '<div class="hwfc-check-card">'
+                        f'<div class="hwfc-check-title">✓ {html.escape(label)}</div>'
+                        f'<div class="hwfc-check-sheet">{html.escape(sheet_name)}</div>'
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.warning(f"{label}\n\nNot detected", icon="⚠️")
+else:
+    upload_render.date_slot.markdown(
+        '<div class="hwfc-mini-card">'
+        '<div class="hwfc-mini-label">Detected</div>'
+        '<div class="hwfc-mini-value">Upload workbook</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 if settlement_file is not None:
     settlement_source_ok, settlement_source_sheet = (
@@ -2275,40 +2083,18 @@ if settlement_file is not None:
     except Exception as exc:
         settlement_date_error = exc
 
-    with upload_render.settlement_details_slot.container():
-        st.markdown(
-            uploaded_file_summary_html(
-                settlement_file.name,
-                settlement_date_info,
-                valid=settlement_source_ok,
-                status_text=(
-                    "Settlement verified"
-                    if settlement_source_ok
-                    else "Review settlement details"
-                ),
-            ),
-            unsafe_allow_html=True,
+    if settlement_date_error is not None:
+        st.warning(
+            "Could not read the Daily Card Settlement Report date: "
+            f"{settlement_date_error}",
+            icon="⚠️",
         )
-        if settlement_date_error is not None:
-            st.warning(
-                "Could not read the Daily Card Settlement Report date: "
-                f"{settlement_date_error}",
-                icon="⚠️",
-            )
-        settlement_date_mismatch = render_card_settlement_verification(
-            st,
-            source_ok=settlement_source_ok,
-            settlement_date=settlement_date_info,
-            deposit_date=deposit_date,
-            show_verified_strip=False,
-        )
-
-st.markdown(
-    '<div class="hwfc-upload-help-label">Need help?</div>',
-    unsafe_allow_html=True,
-)
-render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-render_known_exceptions(st)
+    settlement_date_mismatch = render_card_settlement_verification(
+        st,
+        source_ok=settlement_source_ok,
+        settlement_date=settlement_date_info,
+        deposit_date=deposit_date,
+    )
 
 
 subscription_total = 0.0

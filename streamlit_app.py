@@ -61,7 +61,11 @@ from app.deposit_workflow import (
     normalize_step_completions,
     required_deposit_steps,
 )
-from app.deposit_help_ui import render_daily_workbook_sop, render_known_exceptions
+from app.deposit_help_ui import (
+    render_daily_workbook_sop,
+    render_known_exceptions,
+    render_need_help_control,
+)
 from app.run_history_ui import render_run_history
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
@@ -1809,10 +1813,16 @@ if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = 0
 
 action_left, action_right = st.columns([0.80, 0.20])
+with action_left:
+    show_deposit_help = render_need_help_control(st)
 with action_right:
     if st.button("↻ Start Over", use_container_width=True, help="Clear the current upload and results. Run History is preserved."):
         reset_current_work()
         st.rerun()
+
+if show_deposit_help:
+    render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+    render_known_exceptions(st)
 
 has_results = "run_result" in st.session_state
 
@@ -1848,10 +1858,6 @@ with st.sidebar:
         option_labeler=build_history_option_label,
         run_time_formatter=format_history_run_time,
     )
-    st.divider()
-    st.markdown("## Need Help?")
-    render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-    render_known_exceptions(st)
 
 # ---------------------------------------------------------------------
 # Input area

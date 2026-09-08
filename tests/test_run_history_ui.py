@@ -6,6 +6,12 @@ class RecordingUI:
     def __init__(self):
         self.events = []
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
     def markdown(self, body, **kwargs):
         self.events.append(("markdown", body, kwargs))
 
@@ -28,7 +34,7 @@ class RecordingUI:
 
 
 class RunHistoryUITests(unittest.TestCase):
-    def test_run_history_renders_static_details_without_expanders(self):
+    def test_run_history_is_collapsed_by_default(self):
         self.assertIsNotNone(find_spec("app.run_history_ui"))
         import app.run_history_ui as run_history_ui
 
@@ -54,13 +60,15 @@ class RunHistoryUITests(unittest.TestCase):
             run_time_formatter=lambda value, include_date=False: "09/08/2026 08:22 AM",
         )
 
-        self.assertFalse(any(event[0] == "expander" for event in ui.events))
+        history_expanders = [event for event in ui.events if event[0] == "expander"]
+        self.assertEqual(len(history_expanders), 1)
+        self.assertEqual(history_expanders[0][1], "Run History")
+        self.assertFalse(history_expanders[0][2]["expanded"])
         rendered_text = " ".join(
             str(event[1])
             for event in ui.events
             if event[0] in {"markdown", "caption"}
         )
-        self.assertIn("Run History", rendered_text)
         self.assertIn("Run details", rendered_text)
         self.assertIn("Files from this run", rendered_text)
         self.assertIn("daily.xlsx", rendered_text)

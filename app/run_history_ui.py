@@ -12,8 +12,23 @@ def render_run_history(
     option_labeler,
     run_time_formatter,
 ) -> None:
-    """Render Run History as a fixed sidebar section without expanders."""
-    ui.markdown("## Run History")
+    """Render Run History in a collapsed sidebar section."""
+    with ui.expander("Run History", expanded=False):
+        _render_run_history_content(
+            ui,
+            records=records,
+            option_labeler=option_labeler,
+            run_time_formatter=run_time_formatter,
+        )
+
+
+def _render_run_history_content(
+    ui,
+    *,
+    records: list[dict],
+    option_labeler,
+    run_time_formatter,
+) -> None:
     ui.caption("Prior deposit records")
 
     if not records:

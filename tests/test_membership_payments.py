@@ -286,6 +286,22 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertTrue(guided_heading_lines)
         self.assertLess(settlement_render_lines[0], min(guided_heading_lines))
 
+    def test_operations_status_uses_existing_upload_validation_and_iif_state(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+
+        for argument in (
+            "daily_uploaded=uploaded is not None",
+            "settlement_uploaded=settlement_file is not None",
+            "workbook_valid=workbook_status_valid",
+            "settlement_valid=settlement_status_valid",
+            "workflow_complete=guided_workflow_ready",
+            "iif_generated=download_details is not None",
+        ):
+            with self.subTest(argument=argument):
+                self.assertIn(argument, source)
+
     def test_card_settlement_verification_preserves_verified_status_and_date_check(self):
         from app.guided_step_ui import render_card_settlement_verification
 

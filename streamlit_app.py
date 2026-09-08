@@ -66,6 +66,11 @@ from app.deposit_help_ui import (
     render_known_exceptions,
     render_need_help_label,
 )
+from app.operations_status_ui import (
+    build_operations_status,
+    deposit_run_context,
+    render_operations_status,
+)
 from app.run_history_ui import render_run_history
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
@@ -477,6 +482,47 @@ st.markdown(
         letter-spacing: .12em;
         text-transform: uppercase;
         margin: 8px 0 6px;
+    }
+
+    .hwfc-ops-status {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 18px 0 20px;
+    }
+
+    .hwfc-ops-status-item {
+        min-width: 0;
+        padding: 5px 10px 10px;
+        border-bottom: 2px solid var(--hwfc-border);
+    }
+
+    .hwfc-ops-status-label {
+        display: block;
+        color: var(--hwfc-muted);
+        font-size: .78rem;
+        margin-bottom: 5px;
+    }
+
+    .hwfc-ops-status-value {
+        display: block;
+        color: #FFFDF8;
+        font-weight: 750;
+        overflow-wrap: anywhere;
+    }
+
+    .hwfc-ops-status.is-ready .hwfc-ops-status-item:last-child {
+        border-bottom-color: #78A85B;
+    }
+
+    .hwfc-ops-status.is-attention .hwfc-ops-status-item:last-child {
+        border-bottom-color: #D7A84B;
+    }
+
+    @media (max-width: 720px) {
+        .hwfc-ops-status {
+            grid-template-columns: 1fr;
+        }
     }
 
     .hwfc-workflow-heading {
@@ -1308,7 +1354,7 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
     return record
 
 def reset_current_work() -> None:
-    for key in ("run_result", "run_date", "run_filename", "run_date_mismatch", "run_settlement_filename", "last_history_id"):
+    for key in ("run_result", "run_context", "run_date", "run_filename", "run_date_mismatch", "run_settlement_filename", "last_history_id"):
         st.session_state.pop(key, None)
     st.session_state["file_uploader_key"] = st.session_state.get("file_uploader_key", 0) + 1
 
@@ -1826,6 +1872,7 @@ with action_right:
 
 render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
 render_known_exceptions(st)
+operations_status_slot = st.empty()
 
 has_results = "run_result" in st.session_state
 
@@ -1888,13 +1935,6 @@ upload_pair_readiness_key = (
 )
 deposit_steps_scroll_key = (
     f"deposit_steps_scroll_{st.session_state['file_uploader_key']}"
-)
-uploads_ready = update_upload_pair_readiness(
-    st.session_state,
-    daily_workbook_ready=uploaded is not None,
-    settlement_ready=settlement_file is not None,
-    readiness_key=upload_pair_readiness_key,
-    request_key=deposit_steps_scroll_key,
 )
 
 settlement_date_info = None
@@ -2022,6 +2062,17 @@ if settlement_file is not None:
         deposit_date=deposit_date,
     )
 
+workbook_status_valid = bool(
+    uploaded is not None and deposit_date is not None and not missing_roles
+)
+settlement_status_valid = bool(settlement_file is not None and settlement_source_ok)
+uploads_ready = update_upload_pair_readiness(
+    st.session_state,
+    daily_workbook_ready=workbook_status_valid,
+    settlement_ready=settlement_status_valid,
+    readiness_key=upload_pair_readiness_key,
+    request_key=deposit_steps_scroll_key,
+)
 
 subscription_total = 0.0
 membership_payments: list[dict] = []
@@ -3574,9 +3625,46 @@ guided_workflow_ready = deposit_workflow_complete(
     step_completions,
 ) and activity_detection_valid
 
-download_details = deposit_download_details(
-    st.session_state.get("run_result")
+current_run_context = (
+    deposit_run_context(
+        upload_bytes,
+        settlement_file.getvalue(),
+        {
+            "deposit_date": deposit_date.isoformat(),
+            "membership_payments": membership_payments,
+            "membership_mode": membership_mode,
+            "coupon_mode": coupon_mode,
+            "coupon_closeout_total": coupon_closeout_total,
+            "coupon_ncg_total": coupon_ncg_total,
+            "coupon_mfg_total": coupon_mfg_total,
+            "activity_payload": activity_payload,
+            "closeout_payload": closeout_payload,
+            "step_completions": step_completions,
+        },
+    )
+    if (uploaded is not None and settlement_file is not None
+        and workbook_status_valid and settlement_status_valid
+        and guided_workflow_ready and membership_valid and coupon_valid
+        and activity_valid and closeout_valid)
+    else None
 )
+current_result = (
+    st.session_state.get("run_result")
+    if current_run_context is not None
+    and st.session_state.get("run_context") == current_run_context
+    else None
+)
+download_details = deposit_download_details(current_result)
+operations_status = build_operations_status(
+    deposit_date=deposit_date,
+    daily_uploaded=uploaded is not None,
+    settlement_uploaded=settlement_file is not None,
+    workbook_valid=workbook_status_valid,
+    settlement_valid=settlement_status_valid,
+    workflow_complete=guided_workflow_ready,
+    iif_generated=download_details is not None,
+)
+render_operations_status(operations_status_slot, operations_status)
 run_clicked = render_prepare_iif_action(
     st,
     visible=bool(uploaded is not None and guided_workflow_ready),
@@ -3610,6 +3698,7 @@ if run_clicked:
                     closeout_payload=closeout_payload,
                 )
                 st.session_state["run_result"] = result
+                st.session_state["run_context"] = current_run_context
                 st.session_state["run_date"] = deposit_date
                 st.session_state["run_filename"] = uploaded.name
                 st.session_state["run_settlement_filename"] = settlement_file.name
@@ -3627,8 +3716,8 @@ if run_clicked:
 # Results
 # ---------------------------------------------------------------------
 
-if "run_result" in st.session_state:
-    result = st.session_state["run_result"]
+if current_result is not None:
+    result = current_result
     v = result["validation"]
     lines = result["lines"]
     iif_df = result["iif_df"]

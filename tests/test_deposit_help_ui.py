@@ -25,6 +25,18 @@ class RecordingUI:
 
 
 class DepositHelpUITests(unittest.TestCase):
+    def test_operations_status_slot_sits_between_help_and_upload_inputs(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+
+        tips_position = app_source.find("render_known_exceptions(st)")
+        status_position = app_source.find("operations_status_slot = st.empty()")
+        upload_position = app_source.find("upload_render = render_upload_inputs(")
+
+        self.assertLess(tips_position, status_position)
+        self.assertLess(status_position, upload_position)
+
     def test_help_and_start_over_are_at_the_top_before_the_step_bar(self):
         app_source = (
             Path(__file__).resolve().parents[1] / "streamlit_app.py"

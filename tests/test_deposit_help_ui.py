@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 
 
 class RecordingUI:
@@ -12,60 +11,50 @@ class RecordingUI:
     def __exit__(self, exc_type, exc, traceback):
         return None
 
+    def tabs(self, labels):
+        self.events.append(("tabs", labels))
+        return [self for _ in labels]
+
     def expander(self, label, **kwargs):
         self.events.append(("expander", label, kwargs))
         return self
 
-    def __getattr__(self, name):
-        def record(*args, **kwargs):
-            self.events.append((name, args, kwargs))
-            return False
+    def markdown(self, body, **kwargs):
+        self.events.append(("markdown", body, kwargs))
 
-        return record
+    def caption(self, body, **kwargs):
+        self.events.append(("caption", body, kwargs))
 
 
 class DepositHelpUITests(unittest.TestCase):
-    def test_sop_renderer_keeps_daily_workbook_and_card_settlement_help(self):
-        from app.deposit_help_ui import render_daily_workbook_sop
+    def test_sidebar_help_is_static_and_documents_current_workflow(self):
+        import app.deposit_help_ui as deposit_help_ui
+
+        renderer = getattr(deposit_help_ui, "render_sidebar_help", None)
+        self.assertIsNotNone(renderer)
 
         ui = RecordingUI()
-        render_daily_workbook_sop(
-            ui,
-            root=Path("tests/nonexistent-help-assets"),
-            sop_steps=[],
-        )
+        renderer(ui)
 
-        expander_labels = [
-            event[1] for event in ui.events if event[0] == "expander"
-        ]
+        self.assertEqual(
+            [event[1] for event in ui.events if event[0] == "tabs"],
+            [["Daily Workbook", "Tips & Exceptions"]],
+        )
+        self.assertFalse(any(event[0] == "expander" for event in ui.events))
         rendered_text = " ".join(
-            str(event[1][0])
+            str(event[1])
             for event in ui.events
-            if event[0] == "markdown" and event[1]
+            if event[0] in {"markdown", "caption"}
         )
-        self.assertIn("📘 Daily Workbook SOP", expander_labels)
-        self.assertIn("View Daily Card Settlement Example", expander_labels)
-        self.assertIn("How to Build the Daily Workbook", rendered_text)
-        self.assertIn("Before You Run", rendered_text)
-
-    def test_known_exceptions_renderer_keeps_operational_disclosures(self):
-        from app.deposit_help_ui import render_known_exceptions
-
-        ui = RecordingUI()
-        render_known_exceptions(ui)
-
-        expander_labels = [
-            event[1] for event in ui.events if event[0] == "expander"
-        ]
-        rendered_text = " ".join(
-            str(event[1][0])
-            for event in ui.events
-            if event[0] == "markdown" and event[1]
-        )
-        self.assertIn("💡 Tips & Known Exceptions · WIP", expander_labels)
-        self.assertIn("Unique / unrecognized items", rendered_text)
-        self.assertIn("Automation Does Not Replace Final Review", rendered_text)
-        self.assertIn("Future tips to document", rendered_text)
+        self.assertIn("Need Help?", rendered_text)
+        self.assertIn("Processed Net Amount", rendered_text)
+        self.assertIn("HASH", rendered_text)
+        self.assertIn("Books", rendered_text)
+        self.assertIn("CDTA Star Pass", rendered_text)
+        self.assertIn("TBA", rendered_text)
+        self.assertIn("Paid In", rendered_text)
+        self.assertIn("Paid Out", rendered_text)
+        self.assertIn("Closeout Sheet", rendered_text)
 
 
 if __name__ == "__main__":

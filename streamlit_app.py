@@ -61,10 +61,8 @@ from app.deposit_workflow import (
     normalize_step_completions,
     required_deposit_steps,
 )
-from app.deposit_help_ui import (
-    render_daily_workbook_sop,
-    render_known_exceptions,
-)
+from app.deposit_help_ui import render_sidebar_help
+from app.run_history_ui import render_run_history
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
@@ -1844,101 +1842,18 @@ st.markdown(
 
 with st.sidebar:
     st.markdown("## 🌿 HWFC Daily Deposit")
-    st.caption("Prior deposit records")
-
-    with st.expander("📜 Run History", expanded=False):
-        st.caption("Open only when you need to review a prior deposit.")
-
-        history_records = load_run_history()
-        if not history_records:
-            st.caption("No completed runs yet.")
-        else:
-            selectable_history = history_records[:25]
-            history_ids = [record.get("id", str(idx)) for idx, record in enumerate(selectable_history)]
-            history_by_id = dict(zip(history_ids, selectable_history))
-
-            selected_history_id = st.selectbox(
-                "Prior deposit",
-                options=history_ids,
-                format_func=lambda record_id: build_history_option_label(history_by_id[record_id]),
-                key="run_history_selection",
-            )
-            record = history_by_id[selected_history_id]
-
-            try:
-                report_label = datetime.fromisoformat(record.get("report_date", "")).strftime("%m/%d/%Y")
-            except Exception:
-                report_label = record.get("report_date", "—")
-            run_label = format_history_run_time(record.get("run_at", ""), include_date=True)
-
-            status_icon = "✓" if record.get("status") == "Passed" else "⚠"
-            st.markdown(
-                f"**{status_icon} {html.escape(str(report_label))} · "
-                f"{html.escape(str(record.get('status', '—')))}**"
-            )
-            st.caption(f"Run {run_label}")
-
-            history_checks = [
-                ("Sales", record.get("sales_status", "N/A")),
-                ("Discounts", record.get("discount_status", "N/A")),
-                ("HASH", record.get("hash_status", "N/A")),
-                ("IIF", record.get("iif_status", "N/A")),
-                ("Card Settlement", record.get("card_settlement_status", "N/A")),
-            ]
-
-            status_text = []
-            for label, status in history_checks:
-                icon = "✓" if status == "MATCH" else ("⚠" if status == "REVIEW" else "—")
-                status_text.append(f"{icon} {label}")
-            st.caption("  ·  ".join(status_text))
-
-            with st.expander("Run details", expanded=False):
-                st.caption(f"Workbook: {record.get('uploaded_filename', '—')}")
-                st.caption(f"Card Settlement: {record.get('settlement_filename', '—')}")
-                if record.get("date_mismatch"):
-                    st.warning("This run had a workbook date mismatch warning.", icon="⚠️")
-
-            with st.expander("Files from this run", expanded=False):
-                archived_upload = Path(record.get("archived_upload", ""))
-                archived_settlement = Path(record.get("archived_settlement", ""))
-                archived_iif = Path(record.get("archived_iif", ""))
-
-                if archived_upload.is_file():
-                    st.download_button(
-                        "Download Daily Workbook",
-                        data=archived_upload.read_bytes(),
-                        file_name=record.get("uploaded_filename", archived_upload.name),
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"history_upload_{selected_history_id}",
-                        use_container_width=True,
-                    )
-
-                if archived_settlement.is_file():
-                    st.download_button(
-                        "Download Card Settlement",
-                        data=archived_settlement.read_bytes(),
-                        file_name=record.get("settlement_filename", archived_settlement.name),
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"history_settlement_{selected_history_id}",
-                        use_container_width=True,
-                    )
-
-                if archived_iif.is_file():
-                    st.download_button(
-                        "Download IIF",
-                        data=archived_iif.read_bytes(),
-                        file_name=record.get("iif_filename", archived_iif.name),
-                        mime="text/plain",
-                        key=f"history_iif_{selected_history_id}",
-                        use_container_width=True,
-                    )
+    render_run_history(
+        st,
+        records=load_run_history(),
+        option_labeler=build_history_option_label,
+        run_time_formatter=format_history_run_time,
+    )
+    st.divider()
+    render_sidebar_help(st)
 
 # ---------------------------------------------------------------------
 # Input area
 # ---------------------------------------------------------------------
-
-render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-render_known_exceptions(st)
 
 roles = {}
 date_info = {

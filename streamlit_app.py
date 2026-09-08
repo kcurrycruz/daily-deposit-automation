@@ -61,7 +61,7 @@ from app.deposit_workflow import (
     normalize_step_completions,
     required_deposit_steps,
 )
-from app.deposit_help_ui import render_sidebar_help
+from app.deposit_help_ui import render_daily_workbook_sop, render_known_exceptions
 from app.run_history_ui import render_run_history
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
@@ -1849,7 +1849,9 @@ with st.sidebar:
         run_time_formatter=format_history_run_time,
     )
     st.divider()
-    render_sidebar_help(st)
+    st.markdown("## Need Help?")
+    render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+    render_known_exceptions(st)
 
 # ---------------------------------------------------------------------
 # Input area

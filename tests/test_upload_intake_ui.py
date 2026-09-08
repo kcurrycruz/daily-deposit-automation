@@ -73,20 +73,16 @@ class UploadIntakeUITests(unittest.TestCase):
         self.assertIn("Upload deposit reports", rendered_html)
         self.assertIn("Expected workbook contents", rendered_html)
         self.assertIn("Processed Net Amount", rendered_html)
-
-    def test_zero_uploads_marks_daily_current_and_reports_zero_of_two(self):
-        from app.upload_intake_ui import upload_readiness, upload_step_rows
-
-        rows = upload_step_rows(False, False)
-
+        self.assertNotIn("hwfc-upload-card-number", rendered_html)
+        self.assertFalse(hasattr(result, "progress_slot"))
         self.assertEqual(
-            [(row["label"], row["complete"], row["current"]) for row in rows],
-            [
-                ("Daily Workbook", False, True),
-                ("Card Settlement", False, False),
-                ("Ready", False, False),
-            ],
+            len([event for event in ui.events if event[0] == "empty"]),
+            3,
         )
+
+    def test_zero_uploads_reports_zero_of_two(self):
+        from app.upload_intake_ui import upload_readiness
+
         self.assertEqual(
             upload_readiness(False, False),
             {
@@ -98,14 +94,9 @@ class UploadIntakeUITests(unittest.TestCase):
             },
         )
 
-    def test_one_upload_advances_current_state(self):
-        from app.upload_intake_ui import upload_readiness, upload_step_rows
+    def test_one_upload_reports_half_complete(self):
+        from app.upload_intake_ui import upload_readiness
 
-        rows = upload_step_rows(True, False)
-
-        self.assertTrue(rows[0]["complete"])
-        self.assertTrue(rows[1]["current"])
-        self.assertFalse(rows[2]["complete"])
         self.assertEqual(upload_readiness(True, False)["percent"], 50)
         self.assertEqual(
             upload_readiness(True, False)["label"],
@@ -113,21 +104,13 @@ class UploadIntakeUITests(unittest.TestCase):
         )
 
     def test_settlement_can_be_added_first_without_hiding_daily_workbook(self):
-        from app.upload_intake_ui import upload_readiness, upload_step_rows
+        from app.upload_intake_ui import upload_readiness
 
-        rows = upload_step_rows(False, True)
-
-        self.assertTrue(rows[0]["current"])
-        self.assertTrue(rows[1]["complete"])
-        self.assertFalse(rows[2]["complete"])
         self.assertEqual(upload_readiness(False, True)["count"], 1)
 
     def test_two_uploads_complete_ready_state(self):
-        from app.upload_intake_ui import upload_readiness, upload_step_rows
+        from app.upload_intake_ui import upload_readiness
 
-        rows = upload_step_rows(True, True)
-
-        self.assertTrue(all(row["complete"] for row in rows))
         self.assertEqual(
             upload_readiness(True, True),
             {
@@ -138,21 +121,6 @@ class UploadIntakeUITests(unittest.TestCase):
                 "ready": True,
             },
         )
-
-    def test_stepper_exposes_three_labeled_bubbles_and_completion_text(self):
-        from app.upload_intake_ui import upload_step_rows, upload_stepper_html
-
-        markup = upload_stepper_html(upload_step_rows(True, False))
-
-        self.assertIn('aria-label="Upload deposit reports progress"', markup)
-        self.assertEqual(
-            markup.count('class="hwfc-upload-stepper-bubble"'),
-            3,
-        )
-        self.assertIn('aria-label="Daily Workbook completed"', markup)
-        self.assertIn('aria-label="Card Settlement current"', markup)
-        self.assertIn('aria-label="Ready pending"', markup)
-        self.assertIn("✓", markup)
 
     def test_role_badges_show_detected_names_and_missing_roles_safely(self):
         from app.upload_intake_ui import workbook_role_badges_html

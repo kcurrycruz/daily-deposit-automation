@@ -115,8 +115,6 @@ from app.upload_intake_ui import (
     render_upload_inputs,
     upload_readiness,
     upload_readiness_html,
-    upload_step_rows,
-    upload_stepper_html,
     uploaded_file_summary_html,
     workbook_role_badges_html,
 )
@@ -505,115 +503,12 @@ st.markdown(
         font-size: .94rem;
     }
 
-    .hwfc-upload-stepper {
-        display: flex;
-        align-items: flex-start;
-        margin: 4px 4px 24px;
-        overflow-x: auto;
-        padding-top: 4px;
-    }
-
-    .hwfc-upload-stepper-item {
-        flex: 1 0 120px;
-        min-width: 120px;
-        text-align: center;
-    }
-
-    .hwfc-upload-stepper-track {
-        align-items: center;
-        display: flex;
-        height: 36px;
-        justify-content: center;
-        position: relative;
-    }
-
-    .hwfc-upload-stepper-item:not(:last-child) .hwfc-upload-stepper-track::after {
-        background: #38414C;
-        content: "";
-        height: 3px;
-        left: calc(50% + 16px);
-        position: absolute;
-        right: calc(-50% + 16px);
-        top: calc(50% - 1px);
-    }
-
-    .hwfc-upload-stepper-item.is-complete .hwfc-upload-stepper-track::after {
-        background: var(--hwfc-leaf);
-    }
-
-    .hwfc-upload-stepper-bubble {
-        align-items: center;
-        background: #161B22;
-        border: 2px solid #56606C;
-        border-radius: 50%;
-        color: #C7D2C2;
-        display: inline-flex;
-        font-size: .86rem;
-        font-weight: 850;
-        height: 32px;
-        justify-content: center;
-        position: relative;
-        width: 32px;
-        z-index: 1;
-    }
-
-    .hwfc-upload-stepper-item.is-complete .hwfc-upload-stepper-bubble {
-        background: var(--hwfc-forest);
-        border-color: var(--hwfc-leaf);
-        color: #FFFDF8;
-    }
-
-    .hwfc-upload-stepper-item.is-current .hwfc-upload-stepper-bubble {
-        background: var(--hwfc-leaf);
-        border-color: #A9D18E;
-        box-shadow: 0 0 0 5px rgba(120,168,91,.18);
-        color: #0F1410;
-    }
-
-    .hwfc-upload-stepper-label {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        margin-top: 5px;
-    }
-
-    .hwfc-upload-stepper-label span {
-        color: var(--hwfc-brown);
-        font-size: .64rem;
-        font-weight: 850;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-    }
-
-    .hwfc-upload-stepper-label strong {
-        color: #FFFDF8;
-        font-size: .82rem;
-    }
-
-    .hwfc-upload-stepper-item.is-pending .hwfc-upload-stepper-label strong {
-        color: #87919D;
-    }
-
     .hwfc-upload-card-copy {
         align-items: flex-start;
         display: flex;
         gap: 13px;
         min-height: 90px;
         padding: 8px 2px;
-    }
-
-    .hwfc-upload-card-number {
-        align-items: center;
-        background: rgba(120,168,91,.16);
-        border: 1px solid var(--hwfc-leaf);
-        border-radius: 50%;
-        color: #EAF2E4;
-        display: inline-flex;
-        flex: 0 0 36px;
-        font-size: .92rem;
-        font-weight: 850;
-        height: 36px;
-        justify-content: center;
     }
 
     .hwfc-upload-card-copy > div {
@@ -748,15 +643,6 @@ st.markdown(
     }
 
     @media (max-width: 700px) {
-        .hwfc-upload-stepper-item {
-            flex-basis: 96px;
-            min-width: 96px;
-        }
-
-        .hwfc-upload-stepper-label strong {
-            font-size: .72rem;
-        }
-
         .hwfc-upload-card-copy,
         .hwfc-upload-file-name {
             overflow-wrap: anywhere;
@@ -2256,12 +2142,6 @@ upload_render = render_upload_inputs(
 uploaded = upload_render.daily_workbook
 settlement_file = upload_render.card_settlement
 
-upload_render.progress_slot.markdown(
-    upload_stepper_html(
-        upload_step_rows(uploaded is not None, settlement_file is not None)
-    ),
-    unsafe_allow_html=True,
-)
 upload_render.readiness_slot.markdown(
     upload_readiness_html(
         upload_readiness(uploaded is not None, settlement_file is not None)

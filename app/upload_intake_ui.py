@@ -12,7 +12,6 @@ class UploadIntakeRender:
 
     daily_workbook: object
     card_settlement: object
-    progress_slot: object
     daily_details_slot: object
     settlement_details_slot: object
     readiness_slot: object
@@ -29,13 +28,10 @@ def render_upload_inputs(ui, *, uploader_key: int) -> UploadIntakeRender:
         unsafe_allow_html=True,
     )
     with ui.container(border=True):
-        progress_slot = ui.empty()
-
         daily_copy, daily_input = ui.columns([0.46, 0.54], gap="large")
         with daily_copy:
             ui.markdown(
                 '<div class="hwfc-upload-card-copy">'
-                '<span class="hwfc-upload-card-number">1</span>'
                 '<div><strong>Daily Workbook</strong>'
                 '<span>Expected workbook contents</span>'
                 '<div class="hwfc-upload-expected">'
@@ -63,7 +59,6 @@ def render_upload_inputs(ui, *, uploader_key: int) -> UploadIntakeRender:
         with settlement_copy:
             ui.markdown(
                 '<div class="hwfc-upload-card-copy">'
-                '<span class="hwfc-upload-card-number">2</span>'
                 '<div><strong>Card Settlement</strong>'
                 '<span>Processed Net Amount report for the same deposit date.</span>'
                 "</div></div>",
@@ -87,38 +82,9 @@ def render_upload_inputs(ui, *, uploader_key: int) -> UploadIntakeRender:
     return UploadIntakeRender(
         daily_workbook=daily_workbook,
         card_settlement=card_settlement,
-        progress_slot=progress_slot,
         daily_details_slot=daily_details_slot,
         settlement_details_slot=settlement_details_slot,
         readiness_slot=readiness_slot,
-    )
-
-
-def upload_step_rows(
-    daily_workbook_ready: bool,
-    settlement_ready: bool,
-) -> tuple[dict, ...]:
-    """Return the visible three-step upload progress state."""
-    both_ready = bool(daily_workbook_ready and settlement_ready)
-    return (
-        {
-            "number": 1,
-            "label": "Daily Workbook",
-            "complete": bool(daily_workbook_ready),
-            "current": not daily_workbook_ready,
-        },
-        {
-            "number": 2,
-            "label": "Card Settlement",
-            "complete": bool(settlement_ready),
-            "current": bool(daily_workbook_ready and not settlement_ready),
-        },
-        {
-            "number": 3,
-            "label": "Ready",
-            "complete": both_ready,
-            "current": False,
-        },
     )
 
 
@@ -140,44 +106,6 @@ def upload_readiness(
         ),
         "ready": ready,
     }
-
-
-def upload_stepper_html(rows: Iterable[dict]) -> str:
-    """Render a safe, accessible three-bubble upload progress indicator."""
-    items = []
-    for row in rows:
-        label = str(row["label"])
-        if row["complete"]:
-            state = "is-complete"
-            state_label = "completed"
-            bubble = "✓"
-        elif row["current"]:
-            state = "is-current"
-            state_label = "current"
-            bubble = str(int(row["number"]))
-        else:
-            state = "is-pending"
-            state_label = "pending"
-            bubble = str(int(row["number"]))
-        safe_label = html.escape(label)
-        items.append(
-            f'<div class="hwfc-upload-stepper-item {state}" role="listitem">'
-            '<div class="hwfc-upload-stepper-track">'
-            '<span class="hwfc-upload-stepper-bubble" '
-            f'aria-label="{safe_label} {state_label}">{bubble}</span>'
-            "</div>"
-            '<div class="hwfc-upload-stepper-label">'
-            f'<span>Step {int(row["number"])}</span>'
-            f"<strong>{safe_label}</strong>"
-            "</div>"
-            "</div>"
-        )
-    return (
-        '<div class="hwfc-upload-stepper" role="list" '
-        'aria-label="Upload deposit reports progress">'
-        + "".join(items)
-        + "</div>"
-    )
 
 
 def workbook_role_badges_html(

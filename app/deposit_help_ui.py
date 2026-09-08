@@ -1,16 +1,9 @@
 from pathlib import Path
 
 
-def render_need_help_control(ui) -> bool:
-    """Render the main-page help button and return whether help is open."""
-    state_key = "show_deposit_help"
-    if ui.button(
-        "❔ Need Help",
-        key="need_help_control",
-        help="Open or close the Daily Workbook SOP and deposit tips.",
-    ):
-        ui.session_state[state_key] = not bool(ui.session_state.get(state_key, False))
-    return bool(ui.session_state.get(state_key, False))
+def render_need_help_label(ui) -> None:
+    """Render the static main-page help label."""
+    ui.markdown("### ❔ Need Help")
 
 
 def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:

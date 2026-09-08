@@ -64,7 +64,7 @@ from app.deposit_workflow import (
 from app.deposit_help_ui import (
     render_daily_workbook_sop,
     render_known_exceptions,
-    render_need_help_control,
+    render_need_help_label,
 )
 from app.run_history_ui import render_run_history
 from app.closeout_reconciliation import (
@@ -1814,15 +1814,14 @@ if "file_uploader_key" not in st.session_state:
 
 action_left, action_right = st.columns([0.80, 0.20])
 with action_left:
-    show_deposit_help = render_need_help_control(st)
+    render_need_help_label(st)
 with action_right:
     if st.button("↻ Start Over", use_container_width=True, help="Clear the current upload and results. Run History is preserved."):
         reset_current_work()
         st.rerun()
 
-if show_deposit_help:
-    render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-    render_known_exceptions(st)
+render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+render_known_exceptions(st)
 
 has_results = "run_result" in st.session_state
 

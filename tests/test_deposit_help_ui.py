@@ -3,10 +3,8 @@ from pathlib import Path
 
 
 class RecordingUI:
-    def __init__(self, *, button_clicked=False):
+    def __init__(self):
         self.events = []
-        self.button_clicked = button_clicked
-        self.session_state = {}
 
     def __enter__(self):
         return self
@@ -18,10 +16,6 @@ class RecordingUI:
         self.events.append(("expander", label, kwargs))
         return self
 
-    def button(self, label, **kwargs):
-        self.events.append(("button", label, kwargs))
-        return self.button_clicked
-
     def __getattr__(self, name):
         def record(*args, **kwargs):
             self.events.append((name, args, kwargs))
@@ -31,17 +25,19 @@ class RecordingUI:
 
 
 class DepositHelpUITests(unittest.TestCase):
-    def test_need_help_control_toggles_the_full_help_panel(self):
-        from app.deposit_help_ui import render_need_help_control
+    def test_need_help_is_a_static_label(self):
+        from app.deposit_help_ui import render_need_help_label
 
-        ui = RecordingUI(button_clicked=True)
+        ui = RecordingUI()
+        render_need_help_label(ui)
 
-        self.assertTrue(render_need_help_control(ui))
-        self.assertTrue(ui.session_state["show_deposit_help"])
-        self.assertEqual(
-            [event[1] for event in ui.events if event[0] == "button"],
-            ["❔ Need Help"],
+        self.assertFalse(any(event[0] == "button" for event in ui.events))
+        rendered_text = " ".join(
+            str(event[1][0])
+            for event in ui.events
+            if event[0] == "markdown" and event[1]
         )
+        self.assertIn("Need Help", rendered_text)
 
     def test_sop_renderer_keeps_original_steps_and_pictures(self):
         from app.deposit_help_ui import render_daily_workbook_sop

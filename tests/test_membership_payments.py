@@ -2012,6 +2012,59 @@ class MembershipPaymentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "multiple of \\$30"):
             engine.star_pass_memo(45.00)
 
+    def test_non_star_pass_department_22_amount_posts_to_tba(self):
+        from datetime import date
+        from pathlib import Path
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        fixture_root = Path(__file__).parent / f"_sales_mapping_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "daily.xlsx"
+        workbook = openpyxl.Workbook()
+        sales_sheet = workbook.active
+        sales_sheet.title = "SubDept Sales Report"
+        for _ in range(3):
+            sales_sheet.append([None] * 16)
+        sales_sheet.append(
+            [22, "Coop Scoop Ad payment", None, None, None, None, -20.00]
+        )
+        workbook.save(workbook_path)
+        workbook.close()
+
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            parsed = engine.parse_excel_report(workbook_path)
+            self.assertEqual(parsed[1], [("Coop Scoop Ad payment", -20.00)])
+            iif_path = engine.generate_iif(
+                parsed[0],
+                {},
+                {},
+                date(2026, 9, 4),
+                misc_tba_lines=parsed[1],
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertIn(
+            "4444 · TBA Purchases\t\t20.00\tCoop Scoop Ad payment",
+            iif_text,
+        )
+        self.assertNotIn("CDTA Star Pass", iif_text)
+
     def test_hash_parser_totals_repeated_target_codes(self):
         from datetime import date
         from pathlib import Path

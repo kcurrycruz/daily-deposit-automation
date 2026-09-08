@@ -516,6 +516,21 @@ def parse_excel_report(filepath: Path) -> tuple:
         except (ValueError, TypeError):
             amount = 0.0
 
+        if dept_num == 22 and amount != 0.0:
+            normalized_amount = Decimal(str(amount)).quantize(Decimal("0.01"))
+            if amount < 0 or normalized_amount % Decimal("30.00") != 0:
+                memo = (
+                    str(row[1]).strip()
+                    if len(row) > 1 and row[1]
+                    else "Dept 22"
+                )
+                misc_lines.append((memo, round(amount, 2)))
+                log.info(
+                    f"    Dept {dept_num:>5}  ${amount:>10,.2f}  "
+                    f"→ TBA Purchases ({memo}; not an exact CDTA Star Pass sale)"
+                )
+                continue
+
         qb = SUBDEPT_TO_QB.get(dept_num)
         if qb is None:
             if dept_num in MISC_SUBDEPTS:

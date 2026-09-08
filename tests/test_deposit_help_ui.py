@@ -25,6 +25,21 @@ class RecordingUI:
 
 
 class DepositHelpUITests(unittest.TestCase):
+    def test_help_and_start_over_are_at_the_bottom_before_the_footer(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+
+        workflow_end = app_source.index('"Run another deposit"')
+        help_position = app_source.index("render_need_help_label(st)")
+        start_over_position = app_source.index('"↻ Start Over"')
+        footer_position = app_source.index('<div class="hwfc-footer">')
+
+        self.assertLess(workflow_end, help_position)
+        self.assertLess(workflow_end, start_over_position)
+        self.assertLess(help_position, footer_position)
+        self.assertLess(start_over_position, footer_position)
+
     def test_need_help_is_a_static_label(self):
         from app.deposit_help_ui import render_need_help_label
 

@@ -61,6 +61,10 @@ from app.deposit_workflow import (
     normalize_step_completions,
     required_deposit_steps,
 )
+from app.deposit_help_ui import (
+    render_daily_workbook_sop,
+    render_known_exceptions,
+)
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
@@ -106,6 +110,15 @@ from app.guided_step_ui import (
     render_deposit_step_panels,
     render_prepare_iif_action,
     update_upload_pair_readiness,
+)
+from app.upload_intake_ui import (
+    render_upload_inputs,
+    upload_readiness,
+    upload_readiness_html,
+    upload_step_rows,
+    upload_stepper_html,
+    uploaded_file_summary_html,
+    workbook_role_badges_html,
 )
 from app.ui_helpers import (
     deposit_download_details,
@@ -470,6 +483,300 @@ st.markdown(
         letter-spacing: .12em;
         text-transform: uppercase;
         margin: 8px 0 6px;
+    }
+
+    .hwfc-upload-heading {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin: 22px 0 14px;
+    }
+
+    .hwfc-upload-title {
+        color: #FFFDF8;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 1.75rem;
+        font-weight: 800;
+        letter-spacing: -.02em;
+    }
+
+    .hwfc-upload-subtitle {
+        color: var(--hwfc-muted);
+        font-size: .94rem;
+    }
+
+    .hwfc-upload-stepper {
+        display: flex;
+        align-items: flex-start;
+        margin: 4px 4px 24px;
+        overflow-x: auto;
+        padding-top: 4px;
+    }
+
+    .hwfc-upload-stepper-item {
+        flex: 1 0 120px;
+        min-width: 120px;
+        text-align: center;
+    }
+
+    .hwfc-upload-stepper-track {
+        align-items: center;
+        display: flex;
+        height: 36px;
+        justify-content: center;
+        position: relative;
+    }
+
+    .hwfc-upload-stepper-item:not(:last-child) .hwfc-upload-stepper-track::after {
+        background: #38414C;
+        content: "";
+        height: 3px;
+        left: calc(50% + 16px);
+        position: absolute;
+        right: calc(-50% + 16px);
+        top: calc(50% - 1px);
+    }
+
+    .hwfc-upload-stepper-item.is-complete .hwfc-upload-stepper-track::after {
+        background: var(--hwfc-leaf);
+    }
+
+    .hwfc-upload-stepper-bubble {
+        align-items: center;
+        background: #161B22;
+        border: 2px solid #56606C;
+        border-radius: 50%;
+        color: #C7D2C2;
+        display: inline-flex;
+        font-size: .86rem;
+        font-weight: 850;
+        height: 32px;
+        justify-content: center;
+        position: relative;
+        width: 32px;
+        z-index: 1;
+    }
+
+    .hwfc-upload-stepper-item.is-complete .hwfc-upload-stepper-bubble {
+        background: var(--hwfc-forest);
+        border-color: var(--hwfc-leaf);
+        color: #FFFDF8;
+    }
+
+    .hwfc-upload-stepper-item.is-current .hwfc-upload-stepper-bubble {
+        background: var(--hwfc-leaf);
+        border-color: #A9D18E;
+        box-shadow: 0 0 0 5px rgba(120,168,91,.18);
+        color: #0F1410;
+    }
+
+    .hwfc-upload-stepper-label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 5px;
+    }
+
+    .hwfc-upload-stepper-label span {
+        color: var(--hwfc-brown);
+        font-size: .64rem;
+        font-weight: 850;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .hwfc-upload-stepper-label strong {
+        color: #FFFDF8;
+        font-size: .82rem;
+    }
+
+    .hwfc-upload-stepper-item.is-pending .hwfc-upload-stepper-label strong {
+        color: #87919D;
+    }
+
+    .hwfc-upload-card-copy {
+        align-items: flex-start;
+        display: flex;
+        gap: 13px;
+        min-height: 90px;
+        padding: 8px 2px;
+    }
+
+    .hwfc-upload-card-number {
+        align-items: center;
+        background: rgba(120,168,91,.16);
+        border: 1px solid var(--hwfc-leaf);
+        border-radius: 50%;
+        color: #EAF2E4;
+        display: inline-flex;
+        flex: 0 0 36px;
+        font-size: .92rem;
+        font-weight: 850;
+        height: 36px;
+        justify-content: center;
+    }
+
+    .hwfc-upload-card-copy > div {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .hwfc-upload-card-copy strong {
+        color: #FFFDF8;
+        font-size: 1.03rem;
+    }
+
+    .hwfc-upload-card-copy > div > span {
+        color: var(--hwfc-muted);
+        font-size: .82rem;
+    }
+
+    .hwfc-upload-expected,
+    .hwfc-upload-role-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 4px;
+    }
+
+    .hwfc-upload-expected span,
+    .hwfc-upload-role {
+        background: #202A23;
+        border: 1px solid #405744;
+        border-radius: 999px;
+        color: #D9E5D4;
+        font-size: .67rem;
+        padding: 3px 8px;
+    }
+
+    .hwfc-upload-role.is-missing {
+        background: var(--hwfc-yellow-soft);
+        border-color: #78682D;
+        color: #E4D6A6;
+    }
+
+    .hwfc-upload-divider {
+        border-top: 1px solid var(--hwfc-border);
+        margin: 10px 0 14px;
+    }
+
+    .hwfc-upload-file-summary {
+        background: var(--hwfc-yellow-soft);
+        border: 1px solid #78682D;
+        border-radius: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px 12px;
+        margin: 8px 0;
+        padding: 9px 11px;
+    }
+
+    .hwfc-upload-file-summary.is-valid {
+        background: var(--hwfc-green-soft);
+        border-color: var(--hwfc-forest);
+    }
+
+    .hwfc-upload-file-name {
+        color: #FFFDF8;
+        flex-basis: 100%;
+        font-size: .78rem;
+        font-weight: 800;
+        overflow-wrap: anywhere;
+    }
+
+    .hwfc-upload-file-date,
+    .hwfc-upload-file-status {
+        color: #BFC9BC;
+        font-size: .7rem;
+    }
+
+    .hwfc-upload-readiness {
+        align-items: center;
+        background: #10151A;
+        border: 1px solid var(--hwfc-border);
+        border-radius: 11px;
+        display: flex;
+        justify-content: space-between;
+        margin-top: 15px;
+        padding: 12px 14px;
+    }
+
+    .hwfc-upload-readiness-progress {
+        color: #AEB8BF;
+        font-size: .74rem;
+        min-width: 190px;
+    }
+
+    .hwfc-upload-progress {
+        background: #2E373E;
+        border-radius: 999px;
+        height: 6px;
+        margin-top: 6px;
+        overflow: hidden;
+        width: 190px;
+    }
+
+    .hwfc-upload-progress-fill {
+        background: var(--hwfc-leaf);
+        border-radius: 999px;
+        height: 100%;
+        transition: width .25s ease;
+    }
+
+    .hwfc-upload-ready-action {
+        background: #283139;
+        border-radius: 8px;
+        color: #87919D;
+        font-size: .75rem;
+        font-weight: 800;
+        padding: 8px 12px;
+    }
+
+    .hwfc-upload-readiness.is-ready .hwfc-upload-ready-action {
+        background: var(--hwfc-forest);
+        color: #FFFDF8;
+    }
+
+    .hwfc-upload-help-label {
+        color: var(--hwfc-muted);
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .08em;
+        margin: 16px 2px 7px;
+        text-transform: uppercase;
+    }
+
+    @media (max-width: 700px) {
+        .hwfc-upload-stepper-item {
+            flex-basis: 96px;
+            min-width: 96px;
+        }
+
+        .hwfc-upload-stepper-label strong {
+            font-size: .72rem;
+        }
+
+        .hwfc-upload-card-copy,
+        .hwfc-upload-file-name {
+            overflow-wrap: anywhere;
+        }
+
+        .hwfc-upload-readiness {
+            align-items: stretch;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .hwfc-upload-readiness-progress,
+        .hwfc-upload-progress {
+            min-width: 0;
+            width: 100%;
+        }
+
+        .hwfc-upload-ready-action {
+            text-align: center;
+        }
     }
 
     .hwfc-workflow-heading {
@@ -1825,330 +2132,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.expander("📘 Daily Workbook SOP", expanded=False):
-    st.markdown(
-        """
-        ### How to Build the Daily Workbook
-        Follow these steps in order for each deposit date. The Daily Deposit template is the master workbook; SMS reports supply the source data that is copied or moved into it.
-
-        **Important:** keep every report on the same deposit date, and do not continue past the Sales check if the totals do not match exactly.
-        """
-    )
-
-    for index, step in enumerate(SOP_STEPS):
-        expanded = index == 0
-        with st.expander(step["title"], expanded=expanded):
-            st.markdown(step["body"])
-
-            if step["title"].startswith("Step 1 ·"):
-                step1_folder_image = ROOT / "assets" / "step1_daily_deposit_folder.png"
-                if step1_folder_image.exists():
-                    st.image(
-                        str(step1_folder_image),
-                        caption="Step 1 · Daily Deposit folder — open TEMPLATE - SubDept Single Total Report.",
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 1 Daily Deposit folder image is not installed. "
-                        "Add assets/step1_daily_deposit_folder.png to show it here."
-                    )
-
-            if step["title"].startswith("Step 2 ·"):
-                step2a_export_image = ROOT / "assets" / "step2a_sms_sales_export.png"
-                step2a_paste_image = ROOT / "assets" / "step2a_subdept_single_paste.png"
-
-                if step2a_export_image.exists():
-                    st.image(
-                        str(step2a_export_image),
-                        caption=(
-                            "Step 2 · SMS export: after launching the Sub-department Single Total report, "
-                            "export it to Excel and copy the report data from the first sub-department through the final department."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 2 SMS export example is not installed. "
-                        "Add assets/step2a_sms_sales_export.png to show it here."
-                    )
-
-                if step2a_paste_image.exists():
-                    st.image(
-                        str(step2a_paste_image),
-                        caption=(
-                            "Step 2 · Daily Deposit template: paste the exported sales data starting in cell A1 "
-                            "of the SubDept Single tab."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 2 paste example is not installed. "
-                        "Add assets/step2a_subdept_single_paste.png to show it here."
-                    )
-
-                st.warning(
-                    "**⚠️ Unexpected / Unique Item**\n\n"
-                    "The example report contains **23 · Refunded Discounts**. This is not a normal Sales item and "
-                    "would ordinarily be expected in the **HASH** process. If an unexpected item appears in the "
-                    "Sub-department Single Total report, do not assume it should simply be kept or deleted. "
-                    "Drill into the activity in SMS to determine why it appeared, confirm whether it is also represented "
-                    "in the HASH report, and ask the Finance team for help if the source is unclear before completing the deposit.",
-                    icon="⚠️",
-                )
-
-            if step["title"].startswith("Step 2a"):
-                sales_check_images = [
-                    ROOT / "assets" / "sub_department_sales_report.png",
-                    ROOT / "assets" / "department_sales_summary_report.png",
-                ]
-
-                available_sales_check_images = [
-                    image_path for image_path in sales_check_images if image_path.exists()
-                ]
-
-                if available_sales_check_images:
-                    st.caption(
-                        "Sales-check example from SMS. "
-                        "The source report is shown in multiple images because the report is longer than one screen. "
-                        "The highlighted total at the bottom must match the green Sales Total in the Daily Deposit workbook exactly."
-                    )
-
-                    image_captions = {
-                        "sub_department_sales_report.png":
-                            "SMS Sub-department Single Total Report · Part 1",
-                        "department_sales_summary_report.png":
-                            "SMS Sub-department Single Total Report · Part 2 · Verify the highlighted Total",
-                    }
-
-                    for image_path in available_sales_check_images:
-                        st.image(
-                            str(image_path),
-                            caption=image_captions.get(image_path.name, "SMS Sales-check example"),
-                            use_container_width=True,
-                        )
-
-                    missing_images = [
-                        image_path.name for image_path in sales_check_images if not image_path.exists()
-                    ]
-
-                    if missing_images:
-                        st.warning(
-                            "One Sales Check example image is missing from the assets folder:\n\n"
-                            + "\n".join(f"• {name}" for name in missing_images),
-                            icon="⚠️",
-                        )
-                else:
-                    st.error(
-                        "Sales Check example images could not be found.\n\n"
-                        "The app expects these files inside the assets folder:\n\n"
-                        "• sub_department_sales_report.png\n\n"
-                        "• department_sales_summary_report.png",
-                        icon="🚫",
-                    )
-
-            if step["title"].startswith("Step 3"):
-                milk_bottle_returns_example = ROOT / "assets" / "milk_bottle_returns_example.png"
-                if milk_bottle_returns_example.exists():
-                    st.caption(
-                        "Milk Bottle Returns example from SMS. Add together the highlighted return amounts for all "
-                        "Milk Bottle Return items, then enter the combined total into cell M1 on SubDept Sales Report."
-                    )
-                    st.image(
-                        str(milk_bottle_returns_example),
-                        caption=(
-                            "Step 3 · Add all highlighted Milk Bottle Return amounts before entering the total in M1."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Milk Bottle Returns example image is not installed. "
-                        "Add assets/milk_bottle_returns_example.png to show it here."
-                    )
-
-            if step["title"].startswith("Step 4"):
-                step4_discounts_image = ROOT / "assets" / "step4_discounts_move_copy.png"
-                if step4_discounts_image.exists():
-                    st.image(
-                        str(step4_discounts_image),
-                        caption=(
-                            "Step 4 · Move or copy the exported Discounts worksheet into the XXXXXX Discounts "
-                            "location, then rename it to the current deposit date."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 4 Discounts Move or Copy example is not installed. "
-                        "Add assets/step4_discounts_move_copy.png to show it here."
-                    )
-
-            if step["title"].startswith("Step 5"):
-                step5_hash_image = ROOT / "assets" / "step5_hash_move_copy.png"
-                if step5_hash_image.exists():
-                    st.image(
-                        str(step5_hash_image),
-                        caption=(
-                            "Step 5 · Move or copy the exported HASH worksheet into the XXXXXX HASH "
-                            "location, then rename it to the current deposit date."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 5 HASH Move or Copy example is not installed. "
-                        "Add assets/step5_hash_move_copy.png to show it here."
-                    )
-
-            if step["title"].startswith("Step 6"):
-                step6_bs_image = ROOT / "assets" / "step6_bs_move_copy.png"
-                if step6_bs_image.exists():
-                    st.image(
-                        str(step6_bs_image),
-                        caption=(
-                            "Step 6 · Move or copy the exported Balance Sheet worksheet into the XXXXXX BS "
-                            "location, then rename it to the current deposit date."
-                        ),
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "Step 6 Balance Sheet Move or Copy example is not installed. "
-                        "Add assets/step6_bs_move_copy.png to show it here."
-                    )
-
-            if step["title"].startswith("Step 7"):
-                daily_workbook_example = ROOT / "assets" / "daily_workbook_example.png"
-                daily_workbook_example_pdf = ROOT / "assets" / "daily_workbook_example.pdf"
-                if daily_workbook_example.exists():
-                    st.image(
-                        str(daily_workbook_example),
-                        caption="Approved Daily Workbook example",
-                        use_container_width=True,
-                    )
-                elif daily_workbook_example_pdf.exists():
-                    st.caption("Use the approved PDF in the assets folder for the final visual comparison.")
-                    st.download_button(
-                        "Open approved workbook example PDF",
-                        data=daily_workbook_example_pdf.read_bytes(),
-                        file_name=daily_workbook_example_pdf.name,
-                        mime="application/pdf",
-                        key="daily_workbook_example_pdf",
-                        use_container_width=True,
-                    )
-                else:
-                    st.info(
-                        "The Daily Workbook example is not installed in the repo assets folder. "
-                        "Add assets/daily_workbook_example.png or assets/daily_workbook_example.pdf to show it here."
-                    )
-
-    st.markdown("### Daily Card Settlement Report")
-    st.markdown(
-        """
-        After the Daily Workbook is complete, prepare the separate **Daily Card Settlement Report** for the same date. The automation uses only the **Processed Net Amount** column for **VISA/MC, Discover, AMEX, Debit Card, and EBT Cash/Food Stamp**.
-        """
-    )
-
-    with st.expander("View Daily Card Settlement Example", expanded=False):
-        st.caption(
-            "Your Daily Card Settlement Report should look like this. "
-            "The automation uses the Processed Net Amount column."
-        )
-        daily_card_settlement_example = ROOT / "assets" / "daily_card_settlement_example.png"
-        if daily_card_settlement_example.exists():
-            st.image(str(daily_card_settlement_example), use_container_width=True)
-        else:
-            st.info("Daily Card Settlement example image is not installed in the repo assets folder.")
-
-    st.markdown(
-        """
-        ### Before You Run
-        Confirm that the Daily Workbook and Daily Card Settlement Report are for the same date, all five required workbook roles are detected, and the settlement report shows as verified. Then select **Validate & Build Deposit**.
-
-        The app compares each card settlement amount with the matching BS tender total. Review any red **✕** before importing the IIF into QuickBooks.
-        """
-    )
 
 
 # ---------------------------------------------------------------------
 # Main-page tips and known exceptions
 # ---------------------------------------------------------------------
 
-with st.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
-    st.caption(
-        "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
-    )
-
-    st.markdown(
-        """
-        <div class="hwfc-tip-card attention">
-          <div class="hwfc-tip-title">⚠️ Unique / unrecognized items → TBA</div>
-          <div class="hwfc-tip-body">
-            Any unique item the automation does not recognize is coded as <strong>TBA</strong> at the bottom of the generated IIF.
-            Review those lines and change them to the correct QuickBooks account before final posting. If the correct coding is unclear,
-            research the SMS/source reports and ask Finance before posting.
-          </div>
-        </div>
-
-        <div class="hwfc-tip-card info">
-          <div class="hwfc-tip-title">🔎 Unexpected SMS items</div>
-          <div class="hwfc-tip-body">
-            If an item appears in a report where it normally does not belong, investigate the source activity in SMS before manually
-            changing the workbook. For example, if Refunded Discounts appears in the Step 2 Sales report, confirm whether it is also
-            represented in HASH and involve Finance if the reason is unclear.
-          </div>
-        </div>
-
-        <div class="hwfc-tip-card info">
-          <div class="hwfc-tip-title">💵 Paid Out</div>
-          <div class="hwfc-tip-body">
-            Paid Out does not appear every day. When it is detected on the <strong>Balance Sheet</strong>, the automation carries that
-            amount into the generated IIF, similar to <strong>Paid-Ins</strong> and <strong>Pass Through Donations</strong>.
-            Paid Out is treated as a <strong>negative amount</strong>, so it reduces the QuickBooks deposit total.
-            <div class="hwfc-tip-example">Example: $47.06 Paid Out → -$47.06 deposit effect</div>
-          </div>
-        </div>
-
-        <div class="hwfc-tip-card attention">
-          <div class="hwfc-tip-title">⚠️ Important Disclosures &amp; Automation Limitations</div>
-          <div class="hwfc-tip-body">
-            <strong>1. SMS-Based Automation</strong><br>
-            The automated IIF is built from <strong>SMS data</strong>. It does not automatically include every actual daily adjustment
-            documented on the <strong>Store Closeout</strong> sheet provided by the Front End Manager.<br><br>
-            <strong>2. Store Closeout Review Is Required</strong><br>
-            Import the generated IIF into <strong>QuickBooks first</strong>, then compare the deposit to the Store Closeout and manually
-            adjust the deposit in QuickBooks for Cash Over / Short, additional cash differences, Plants / Dept. Market Purchases,
-            Payroll cash activity, Comments / Notes / Issues from Front End, safe overage or shortage, and any other documented amount
-            that changes the actual daily deposit.<br><br>
-            <strong>3. Automation Does Not Replace Final Review</strong><br>
-            A successfully generated and balanced IIF does not necessarily mean the final QuickBooks deposit matches the actual Store
-            Closeout. The deposit is not complete until required Store Closeout adjustments are made in QuickBooks and the final deposit
-            has been reviewed for accuracy.
-          </div>
-        </div>
-
-        <div class="hwfc-tip-card success">
-          <div class="hwfc-tip-title">✅ QuickBooks final review</div>
-          <div class="hwfc-tip-body">
-            Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, apply the
-            Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        **Future tips to document**
-        - Date mismatch handling
-        - When to stop and ask Finance
-        - Common TBA mappings once approved
-        - QuickBooks pre-post review reminders
-        """
-    )
 
 
 # ---------------------------------------------------------------------
@@ -2250,35 +2239,35 @@ with st.sidebar:
 # Input area
 # ---------------------------------------------------------------------
 
-setup_col, workbook_col, settlement_col = st.columns([0.22, 0.39, 0.39], gap="medium")
-
 roles = {}
-date_info = {"detected_date": None, "dates_by_sheet": {}, "has_mismatch": False, "unique_dates": [], "source_sheet": None}
+date_info = {
+    "detected_date": None,
+    "dates_by_sheet": {},
+    "has_mismatch": False,
+    "unique_dates": [],
+    "source_sheet": None,
+}
 deposit_date = None
 
-with setup_col:
-    st.markdown('<div class="hwfc-section-label">Report date</div>', unsafe_allow_html=True)
-    date_placeholder = st.empty()
+upload_render = render_upload_inputs(
+    st,
+    uploader_key=st.session_state["file_uploader_key"],
+)
+uploaded = upload_render.daily_workbook
+settlement_file = upload_render.card_settlement
 
-with workbook_col:
-    st.markdown('<div class="hwfc-section-label">Daily workbook</div>', unsafe_allow_html=True)
-    uploaded = st.file_uploader(
-        "Upload completed SubDept workbook",
-        type=["xlsx", "xlsm"],
-        label_visibility="collapsed",
-        help="Workbook should contain Sales, Coupons, Discounts, BS, and HASH data.",
-        key=f"daily_workbook_{st.session_state['file_uploader_key']}",
-    )
-
-with settlement_col:
-    st.markdown('<div class="hwfc-section-label">Card settlement</div>', unsafe_allow_html=True)
-    settlement_file = st.file_uploader(
-        "Upload Daily Card Settlement Report",
-        type=["xlsx", "xlsm"],
-        label_visibility="collapsed",
-        help="Uses ONLY Processed Net Amount for VISA/MC, Discover, AMEX, Debit Card, and EBT.",
-        key=f"card_settlement_{st.session_state['file_uploader_key']}",
-    )
+upload_render.progress_slot.markdown(
+    upload_stepper_html(
+        upload_step_rows(uploaded is not None, settlement_file is not None)
+    ),
+    unsafe_allow_html=True,
+)
+upload_render.readiness_slot.markdown(
+    upload_readiness_html(
+        upload_readiness(uploaded is not None, settlement_file is not None)
+    ),
+    unsafe_allow_html=True,
+)
 
 upload_pair_readiness_key = (
     f"upload_pair_ready_{st.session_state['file_uploader_key']}"
@@ -2298,107 +2287,149 @@ settlement_date_info = None
 settlement_date_mismatch = False
 settlement_source_ok = False
 settlement_source_sheet = None
+upload_bytes = None
+missing_roles = []
 
-if uploaded:
+if uploaded is not None:
     upload_bytes = uploaded.getvalue()
     date_info = detect_workbook_dates(upload_bytes)
     deposit_date = date_info["detected_date"]
     roles = detect_sheet_roles(upload_bytes, preferred_date=deposit_date)
+    workbook_role_labels = [
+        ("Sales", roles.get("sales")),
+        ("Coupons", roles.get("coupons")),
+        ("Discounts", roles.get("discounts")),
+        ("Balance Sheet", roles.get("bs")),
+        ("HASH", roles.get("hash")),
+    ]
+    missing_roles = [
+        key
+        for key in ("sales", "coupons", "discounts", "bs", "hash")
+        if not roles.get(key)
+    ]
+    workbook_summary_valid = deposit_date is not None and not missing_roles
 
-    with setup_col:
-        if deposit_date is not None:
-            date_placeholder.markdown(
-                f'<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div></div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            date_placeholder.error("Report date not detected", icon="⚠️")
-
-    if date_info["has_mismatch"]:
-        detail_lines = [f"**{sheet}:** {dt.strftime('%m/%d/%Y')}" for sheet, dt in date_info["dates_by_sheet"].items()]
-        source = date_info.get("source_sheet") or "workbook"
-        st.warning(
-            "**DATE MISMATCH WARNING**\n\n"
-            + "The workbook contains more than one report date. "
-            + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** from **{source}**. "
-            + "You can still run the deposit, but review the dates first.\n\n"
-            + "  \n".join(detail_lines),
-            icon="⚠️",
+    with upload_render.daily_details_slot.container():
+        st.markdown(
+            uploaded_file_summary_html(
+                uploaded.name,
+                deposit_date,
+                valid=workbook_summary_valid,
+                status_text=(
+                    "Workbook verified"
+                    if workbook_summary_valid
+                    else "Review workbook details"
+                ),
+            ),
+            unsafe_allow_html=True,
         )
-
-    with st.expander("Workbook validation", expanded=True):
-        cols = st.columns(5)
-        labels = [
-            ("Sales", roles.get("sales")),
-            ("Coupons", roles.get("coupons")),
-            ("Discounts", roles.get("discounts")),
-            ("Balance Sheet", roles.get("bs")),
-            ("HASH", roles.get("hash")),
-        ]
-        for col, (label, sheet_name) in zip(cols, labels):
-            with col:
-                if sheet_name:
-                    st.markdown(
-                        f'<div class="hwfc-check-card"><div class="hwfc-check-title">✓ {html.escape(label)}</div><div class="hwfc-check-sheet">{html.escape(sheet_name)}</div></div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.warning(f"{label}\n\nNot detected", icon="⚠️")
-
-    if settlement_file is not None:
-        settlement_source_ok, settlement_source_sheet = validate_settlement_processed_net_header(
-            settlement_file.getvalue()
+        st.markdown(
+            workbook_role_badges_html(workbook_role_labels),
+            unsafe_allow_html=True,
         )
-        try:
-            from io import BytesIO
-            import openpyxl
-
-            swb = openpyxl.load_workbook(
-                BytesIO(settlement_file.getvalue()),
-                read_only=True,
-                data_only=True,
-            )
-            sws = swb[swb.sheetnames[0]]
-            raw_settlement_date = None
-            for row in sws.iter_rows(
-                min_row=1,
-                max_row=min(sws.max_row, 12),
-                values_only=True,
-            ):
-                for idx, value in enumerate(row):
-                    if (
-                        str(value or "").strip().lower() == "date"
-                        and idx + 1 < len(row)
-                    ):
-                        raw_settlement_date = row[idx + 1]
-                        break
-                if raw_settlement_date is not None:
-                    break
-            if isinstance(raw_settlement_date, datetime):
-                settlement_date_info = raw_settlement_date.date()
-            elif isinstance(raw_settlement_date, date):
-                settlement_date_info = raw_settlement_date
-        except Exception as exc:
+        if deposit_date is None:
+            st.error("Report date not detected", icon="⚠️")
+        if date_info["has_mismatch"]:
+            detail_lines = [
+                f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
+                for sheet, dt in date_info["dates_by_sheet"].items()
+            ]
+            source = date_info.get("source_sheet") or "workbook"
             st.warning(
-                f"Could not read the Daily Card Settlement Report date: {exc}",
+                "**DATE MISMATCH WARNING**\n\n"
+                + "The workbook contains more than one report date. "
+                + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
+                + f"from **{source}**. You can still run the deposit, but review "
+                + "the dates first.\n\n"
+                + "  \n".join(detail_lines),
+                icon="⚠️",
+            )
+        if missing_roles:
+            missing_role_labels = {
+                "sales": "Sales",
+                "coupons": "Coupons",
+                "discounts": "Discounts",
+                "bs": "Balance Sheet",
+                "hash": "HASH",
+            }
+            st.warning(
+                "Not detected: "
+                + ", ".join(missing_role_labels[key] for key in missing_roles),
                 icon="⚠️",
             )
 
+if settlement_file is not None:
+    settlement_source_ok, settlement_source_sheet = (
+        validate_settlement_processed_net_header(settlement_file.getvalue())
+    )
+    settlement_date_error = None
+    try:
+        from io import BytesIO
+        import openpyxl
+
+        swb = openpyxl.load_workbook(
+            BytesIO(settlement_file.getvalue()),
+            read_only=True,
+            data_only=True,
+        )
+        sws = swb[swb.sheetnames[0]]
+        raw_settlement_date = None
+        for row in sws.iter_rows(
+            min_row=1,
+            max_row=min(sws.max_row, 12),
+            values_only=True,
+        ):
+            for idx, value in enumerate(row):
+                if (
+                    str(value or "").strip().lower() == "date"
+                    and idx + 1 < len(row)
+                ):
+                    raw_settlement_date = row[idx + 1]
+                    break
+            if raw_settlement_date is not None:
+                break
+        if isinstance(raw_settlement_date, datetime):
+            settlement_date_info = raw_settlement_date.date()
+        elif isinstance(raw_settlement_date, date):
+            settlement_date_info = raw_settlement_date
+    except Exception as exc:
+        settlement_date_error = exc
+
+    with upload_render.settlement_details_slot.container():
+        st.markdown(
+            uploaded_file_summary_html(
+                settlement_file.name,
+                settlement_date_info,
+                valid=settlement_source_ok,
+                status_text=(
+                    "Settlement verified"
+                    if settlement_source_ok
+                    else "Review settlement details"
+                ),
+            ),
+            unsafe_allow_html=True,
+        )
+        if settlement_date_error is not None:
+            st.warning(
+                "Could not read the Daily Card Settlement Report date: "
+                f"{settlement_date_error}",
+                icon="⚠️",
+            )
         settlement_date_mismatch = render_card_settlement_verification(
             st,
             source_ok=settlement_source_ok,
             settlement_date=settlement_date_info,
             deposit_date=deposit_date,
+            show_verified_strip=False,
         )
 
-    missing_roles = [k for k, v in roles.items() if not v]
-else:
-    with setup_col:
-        date_placeholder.markdown(
-            '<div class="hwfc-mini-card"><div class="hwfc-mini-label">Detected</div><div class="hwfc-mini-value">Upload workbook</div></div>',
-            unsafe_allow_html=True,
-        )
-    missing_roles = []
+st.markdown(
+    '<div class="hwfc-upload-help-label">Need help?</div>',
+    unsafe_allow_html=True,
+)
+render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+render_known_exceptions(st)
+
 
 subscription_total = 0.0
 membership_payments: list[dict] = []

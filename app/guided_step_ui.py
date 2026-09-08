@@ -136,6 +136,7 @@ def render_card_settlement_verification(
     source_ok: bool,
     settlement_date,
     deposit_date,
+    show_verified_strip: bool = True,
 ) -> bool:
     """Render settlement verification near workbook validation."""
     if not source_ok:
@@ -145,7 +146,7 @@ def render_card_settlement_verification(
             "amount columns will not be substituted.",
             icon="🚫",
         )
-    else:
+    elif show_verified_strip:
         status = (
             f"💳 Card Settlement · {settlement_date.strftime('%m/%d/%Y')} · ✓ Verified"
             if settlement_date

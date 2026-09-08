@@ -314,6 +314,34 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual([event[0] for event in ui.events], ["markdown"])
         self.assertIn("Card Settlement · 08/31/2026 · ✓ Verified", ui.events[0][1])
 
+    def test_card_settlement_summary_can_replace_duplicate_verified_strip(self):
+        from app.guided_step_ui import render_card_settlement_verification
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
+
+            def error(self, body, **kwargs):
+                self.events.append(("error", body, kwargs))
+
+            def warning(self, body, **kwargs):
+                self.events.append(("warning", body, kwargs))
+
+        ui = RecordingUI()
+        mismatch = render_card_settlement_verification(
+            ui,
+            source_ok=True,
+            settlement_date=date(2026, 8, 31),
+            deposit_date=date(2026, 8, 31),
+            show_verified_strip=False,
+        )
+
+        self.assertFalse(mismatch)
+        self.assertEqual(ui.events, [])
+
 
     def test_guided_step_renderer_places_active_content_before_next_step(self):
         from app.guided_step_ui import render_deposit_step_panels

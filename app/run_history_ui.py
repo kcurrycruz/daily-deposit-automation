@@ -18,14 +18,27 @@ def render_sidebar_collapse_request(component_html, state) -> bool:
         """
         <script>
         const doc = window.parent.document;
-        const collapseControl = doc.querySelector(
-          '[data-testid="stSidebarCollapseButton"]'
-        );
-        if (collapseControl) {
+        const collapseSidebar = () => {
+          const collapseControl = doc.querySelector(
+            '[data-testid="stSidebarCollapseButton"]'
+          );
+          if (!collapseControl) return false;
+
           const button = collapseControl.matches('button')
             ? collapseControl
             : collapseControl.querySelector('button');
-          if (button) window.setTimeout(() => button.click(), 0);
+          if (!button) return false;
+
+          button.click();
+          return true;
+        };
+
+        if (!collapseSidebar()) {
+          const observer = new MutationObserver(() => {
+            if (collapseSidebar()) observer.disconnect();
+          });
+          observer.observe(doc.body, { childList: true, subtree: true });
+          window.setTimeout(() => observer.disconnect(), 3000);
         }
         </script>
         """,

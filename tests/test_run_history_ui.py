@@ -54,6 +54,8 @@ class RunHistoryUITests(unittest.TestCase):
         self.assertEqual(len(scripts), 1)
         self.assertIn("stSidebarCollapseButton", scripts[0][0])
         self.assertIn("click()", scripts[0][0])
+        self.assertIn("MutationObserver", scripts[0][0])
+        self.assertIn("observer.disconnect()", scripts[0][0])
         self.assertEqual(scripts[0][1], {"height": 0, "width": 0})
 
         self.assertFalse(render_sidebar_collapse_request(component_html, state))

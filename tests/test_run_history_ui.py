@@ -3,8 +3,9 @@ from importlib.util import find_spec
 
 
 class RecordingUI:
-    def __init__(self):
+    def __init__(self, clicked_keys=()):
         self.events = []
+        self.clicked_keys = set(clicked_keys)
 
     def __enter__(self):
         return self
@@ -32,8 +33,37 @@ class RecordingUI:
         self.events.append(("expander", label, kwargs))
         return self
 
+    def button(self, label, **kwargs):
+        self.events.append(("button", label, kwargs))
+        return kwargs.get("key") in self.clicked_keys
+
 
 class RunHistoryUITests(unittest.TestCase):
+    def test_daily_sidebar_places_all_programs_before_collapsed_run_history(self):
+        import app.run_history_ui as run_history_ui
+
+        renderer = getattr(run_history_ui, "render_daily_sidebar", None)
+        self.assertTrue(callable(renderer), "Daily sidebar renderer is missing")
+
+        ui = RecordingUI({"return_to_program_hub"})
+        clicked = renderer(
+            ui,
+            records=[],
+            option_labeler=lambda record: "unused",
+            run_time_formatter=lambda value, include_date=False: "unused",
+        )
+
+        controls = [
+            (event[0], event[1])
+            for event in ui.events
+            if event[0] in {"button", "expander"}
+        ]
+        self.assertEqual(
+            controls,
+            [("button", "← All Programs"), ("expander", "Run History")],
+        )
+        self.assertTrue(clicked)
+
     def test_run_history_is_collapsed_by_default(self):
         self.assertIsNotNone(find_spec("app.run_history_ui"))
         import app.run_history_ui as run_history_ui

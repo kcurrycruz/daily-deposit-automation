@@ -4,6 +4,27 @@ import html
 from datetime import datetime
 from pathlib import Path
 
+from app.program_hub_ui import render_all_programs_action
+
+
+def render_daily_sidebar(
+    ui,
+    *,
+    records: list[dict],
+    option_labeler,
+    run_time_formatter,
+) -> bool:
+    """Render Daily Deposit navigation followed by collapsed Run History."""
+    ui.markdown("## 🌿 HWFC Daily Deposit")
+    return_to_hub = render_all_programs_action(ui)
+    render_run_history(
+        ui,
+        records=records,
+        option_labeler=option_labeler,
+        run_time_formatter=run_time_formatter,
+    )
+    return return_to_hub
+
 
 def render_run_history(
     ui,

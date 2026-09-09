@@ -312,17 +312,20 @@ class ProgramHubEntryPointTests(unittest.TestCase):
 
     def test_all_programs_returns_to_hub_without_resetting_deposit_work(self):
         app_source = self.app_source()
-        action_marker = "if render_all_programs_action(st):"
+        action_marker = "if render_daily_sidebar("
         self.assertIn(action_marker, app_source)
         action_position = app_source.index(action_marker)
-        header_position = app_source.index("# Header")
-        action_block = app_source[action_position:header_position]
-        route_block = app_source[self.route_position(app_source):header_position]
+        input_position = app_source.index("# Input area")
+        action_block = app_source[action_position:input_position]
+        route_block = app_source[
+            self.route_position(app_source):app_source.index("# Header")
+        ]
         upload_source = (
             Path(__file__).resolve().parents[1] / "app" / "upload_intake_ui.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("restore_daily_program_state(st.session_state)", route_block)
+        self.assertLess(app_source.index("with st.sidebar:"), action_position)
         self.assertIn("preserve_daily_program_state(st.session_state)", action_block)
         self.assertIn("preserved_daily_upload", upload_source)
         self.assertIn("sync_daily_upload", upload_source)

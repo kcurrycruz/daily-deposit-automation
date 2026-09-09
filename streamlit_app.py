@@ -71,7 +71,7 @@ from app.operations_status_ui import (
     deposit_run_context,
     render_operations_status,
 )
-from app.run_history_ui import render_run_history
+from app.run_history_ui import render_daily_sidebar
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
@@ -129,7 +129,6 @@ from app.program_hub_ui import (
     activate_program,
     normalize_program_selection,
     preserve_daily_program_state,
-    render_all_programs_action,
     render_program_hub,
     restore_daily_program_state,
     return_to_program_hub,
@@ -1950,11 +1949,6 @@ if selected_program != DAILY_DEPOSITS:
 
 restore_daily_program_state(st.session_state)
 
-if render_all_programs_action(st):
-    preserve_daily_program_state(st.session_state)
-    return_to_program_hub(st.session_state)
-    st.rerun()
-
 # ---------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------
@@ -2018,13 +2012,15 @@ st.markdown(
 # ---------------------------------------------------------------------
 
 with st.sidebar:
-    st.markdown("## 🌿 HWFC Daily Deposit")
-    render_run_history(
+    if render_daily_sidebar(
         st,
         records=load_run_history(),
         option_labeler=build_history_option_label,
         run_time_formatter=format_history_run_time,
-    )
+    ):
+        preserve_daily_program_state(st.session_state)
+        return_to_program_hub(st.session_state)
+        st.rerun()
 
 # ---------------------------------------------------------------------
 # Input area

@@ -3,6 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def missing_settlement_date_warning(
+    *,
+    settlement_file: object | None,
+    settlement_source_ok: bool,
+    settlement_date: object | None,
+    settlement_date_error: Exception | None,
+) -> str | None:
+    """Return the upload warning for an otherwise valid report with no date."""
+    if (
+        settlement_file is not None
+        and settlement_source_ok
+        and settlement_date is None
+        and settlement_date_error is None
+    ):
+        return "Card Settlement report date not detected—upload a report with its date."
+    return None
+
+
 def retained_upload_pair(
     state, *, uploader_key: int
 ) -> tuple[object | None, object | None]:

@@ -127,7 +127,11 @@ from app.guided_step_ui import (
     render_prepare_iif_action,
     render_upload_continue_action,
 )
-from app.upload_intake_ui import render_upload_inputs, retained_upload_pair
+from app.upload_intake_ui import (
+    missing_settlement_date_warning,
+    render_upload_inputs,
+    retained_upload_pair,
+)
 from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
@@ -2175,6 +2179,14 @@ if settlement_file is not None:
             f"{settlement_date_error}",
             icon="⚠️",
         )
+    settlement_date_warning = missing_settlement_date_warning(
+        settlement_file=settlement_file,
+        settlement_source_ok=settlement_source_ok,
+        settlement_date=settlement_date_info,
+        settlement_date_error=settlement_date_error,
+    )
+    if settlement_date_warning is not None and requested_page_stage == UPLOAD_STAGE:
+        st.warning(settlement_date_warning, icon="⚠️")
     settlement_date_mismatch = bool(
         deposit_date
         and settlement_date_info

@@ -2,6 +2,36 @@ import unittest
 
 
 class UploadIntakeUITests(unittest.TestCase):
+    def test_missing_settlement_date_warning_requires_an_otherwise_valid_report(self):
+        from app.upload_intake_ui import missing_settlement_date_warning
+
+        warning = missing_settlement_date_warning(
+            settlement_file=object(),
+            settlement_source_ok=True,
+            settlement_date=None,
+            settlement_date_error=None,
+        )
+
+        self.assertEqual(
+            warning,
+            "Card Settlement report date not detected—upload a report with its date.",
+        )
+        for changes in (
+            {"settlement_file": None},
+            {"settlement_source_ok": False},
+            {"settlement_date_error": ValueError("unreadable")},
+            {"settlement_date": object()},
+        ):
+            with self.subTest(changes=changes):
+                self.assertIsNone(
+                    missing_settlement_date_warning(
+                        settlement_file=changes.get("settlement_file", object()),
+                        settlement_source_ok=changes.get("settlement_source_ok", True),
+                        settlement_date=changes.get("settlement_date"),
+                        settlement_date_error=changes.get("settlement_date_error"),
+                    )
+                )
+
     def test_upload_renderer_uses_compact_horizontal_layout_with_date_detector(self):
         from app.upload_intake_ui import render_upload_inputs
 

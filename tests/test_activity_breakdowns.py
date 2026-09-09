@@ -217,9 +217,9 @@ class ActivityBreakdownTests(unittest.TestCase):
         api = self.activity_api()
         cases = (
             ("paid_in", "education", "8504000 · Education", 42.50),
-            ("paid_in", "plants", "7210420 · Plants", 42.50),
+            ("paid_in", "plants", "7210420 · Gardening/Plants", 42.50),
             ("paid_out", "education", "8504000 · Education", -42.50),
-            ("paid_out", "plants", "7210420 · Plants", -42.50),
+            ("paid_out", "plants", "7210420 · Gardening/Plants", -42.50),
         )
 
         for category, row_type, account, qb_effect in cases:

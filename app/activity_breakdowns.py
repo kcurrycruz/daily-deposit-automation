@@ -23,7 +23,7 @@ PAID_ACCOUNT_BY_TYPE = {
     "esp": "1230000 · Miscellaneous Receivable",
     "outreach": "8505000 · Outreach",
     "education": "8504000 · Education",
-    "plants": "7210420 · Plants",
+    "plants": "7210420 · Gardening/Plants",
     "other": "4444 · TBA Purchases",
 }
 

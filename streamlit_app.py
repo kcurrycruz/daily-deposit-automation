@@ -123,6 +123,15 @@ from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
 )
+from app.program_hub_ui import (
+    ACTIVE_PROGRAM_KEY,
+    DAILY_DEPOSITS,
+    activate_program,
+    normalize_program_selection,
+    render_all_programs_action,
+    render_program_hub,
+    return_to_program_hub,
+)
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -1848,6 +1857,27 @@ def status_word(value: Optional[bool]) -> str:
     if value is False:
         return '<span class="hwfc-mismatch">✕</span>'
     return '<span style="color:#777">—</span>'
+
+selected_program = normalize_program_selection(
+    st.session_state.get(ACTIVE_PROGRAM_KEY)
+)
+
+if selected_program is None:
+    st.session_state.pop(ACTIVE_PROGRAM_KEY, None)
+    requested_program = render_program_hub(st)
+    if requested_program and activate_program(
+        st.session_state, requested_program
+    ):
+        st.rerun()
+    st.stop()
+
+if selected_program != DAILY_DEPOSITS:
+    return_to_program_hub(st.session_state)
+    st.rerun()
+
+if render_all_programs_action(st):
+    return_to_program_hub(st.session_state)
+    st.rerun()
 
 # ---------------------------------------------------------------------
 # Header

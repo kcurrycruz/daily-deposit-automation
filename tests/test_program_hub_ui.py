@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 
 class RecordingColumn:
@@ -191,6 +192,65 @@ class ProgramHubRendererTests(unittest.TestCase):
         self.assertEqual(ui.clicked_keys, state_before["clicked_keys"])
         self.assertEqual(ui.button_calls[0][1], "← All Programs")
         self.assertEqual(ui.button_calls[0][2]["key"], "return_to_program_hub")
+
+
+class ProgramHubEntryPointTests(unittest.TestCase):
+    @staticmethod
+    def app_source():
+        return (
+            Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+
+    def route_position(self, app_source):
+        marker = "selected_program = normalize_program_selection("
+        self.assertIn(marker, app_source)
+        return app_source.index(marker)
+
+    def test_hub_route_precedes_the_daily_deposit_hero_markup(self):
+        app_source = self.app_source()
+
+        route_position = self.route_position(app_source)
+        hero_position = app_source.index(
+            '<div class="hwfc-title">Daily Deposit Reconciliation</div>'
+        )
+
+        self.assertLess(route_position, hero_position)
+
+    def test_hub_stops_before_the_daily_deposit_hero_renders(self):
+        app_source = self.app_source()
+        route_position = self.route_position(app_source)
+        hero_position = app_source.index(
+            '<div class="hwfc-title">Daily Deposit Reconciliation</div>'
+        )
+        hub_route = app_source[route_position:hero_position]
+
+        self.assertLess(
+            hub_route.index("render_program_hub(st)"),
+            hub_route.index("st.stop()"),
+        )
+
+    def test_all_programs_returns_to_hub_without_resetting_deposit_work(self):
+        app_source = self.app_source()
+        action_marker = "if render_all_programs_action(st):"
+        self.assertIn(action_marker, app_source)
+        action_position = app_source.index(action_marker)
+        header_position = app_source.index("# Header")
+        action_block = app_source[action_position:header_position]
+
+        self.assertIn("return_to_program_hub(st.session_state)", action_block)
+        self.assertIn("st.rerun()", action_block)
+        self.assertNotIn("reset_current_work()", action_block)
+
+    def test_existing_sidebar_stays_after_the_hub_stop_boundary(self):
+        app_source = self.app_source()
+        route_position = self.route_position(app_source)
+        hero_position = app_source.index(
+            '<div class="hwfc-title">Daily Deposit Reconciliation</div>'
+        )
+        hub_route = app_source[route_position:hero_position]
+        sidebar_position = app_source.index("with st.sidebar:")
+
+        self.assertLess(route_position + hub_route.index("st.stop()"), sidebar_position)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,24 @@ class RecordingUI:
 
 
 class DepositHelpUITests(unittest.TestCase):
+    def test_hub_stop_boundary_precedes_help_and_start_over(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+
+        route_marker = "selected_program = normalize_program_selection("
+        self.assertIn(route_marker, app_source)
+        route_position = app_source.index(route_marker)
+        hero_position = app_source.index(
+            '<div class="hwfc-title">Daily Deposit Reconciliation</div>'
+        )
+        hub_stop_position = route_position + app_source[
+            route_position:hero_position
+        ].index("st.stop()")
+
+        self.assertLess(hub_stop_position, app_source.index("render_need_help_label(st)"))
+        self.assertLess(hub_stop_position, app_source.index('"↻ Start Over"'))
+
     def test_operations_status_slot_sits_between_help_and_upload_inputs(self):
         app_source = (
             Path(__file__).resolve().parents[1] / "streamlit_app.py"

@@ -146,6 +146,25 @@ class ProgramHubStateTests(unittest.TestCase):
             uploaded_workbook,
         )
 
+    def test_portal_round_trip_preserves_daily_deposit_page_stage(self):
+        from app.deposit_page_flow import DEPOSIT_PAGE_STAGE_KEY, DEPOSIT_STEPS_STAGE
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            activate_program,
+            preserve_daily_program_state,
+            restore_daily_program_state,
+            return_to_program_hub,
+        )
+
+        state = {DEPOSIT_PAGE_STAGE_KEY: DEPOSIT_STEPS_STAGE}
+        activate_program(state, DAILY_DEPOSITS)
+        preserve_daily_program_state(state)
+        return_to_program_hub(state)
+        activate_program(state, DAILY_DEPOSITS)
+        restore_daily_program_state(state)
+
+        self.assertEqual(state[DEPOSIT_PAGE_STAGE_KEY], DEPOSIT_STEPS_STAGE)
+
     def test_daily_widget_restore_is_consumed_and_never_overwrites_newer_work(self):
         from app.program_hub_ui import (
             DAILY_PROGRAM_SNAPSHOT_KEY,

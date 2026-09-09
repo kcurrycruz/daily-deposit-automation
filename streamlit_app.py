@@ -66,6 +66,15 @@ from app.deposit_help_ui import (
     render_known_exceptions,
     render_need_help_label,
 )
+from app.deposit_page_flow import (
+    DEPOSIT_STEPS_STAGE,
+    UPLOAD_STAGE,
+    advance_to_deposit_steps,
+    enforce_ready_stage,
+    reports_ready_for_steps,
+    reset_deposit_page,
+    selected_deposit_stage,
+)
 from app.operations_status_ui import (
     build_operations_status,
     deposit_run_context,
@@ -116,9 +125,9 @@ from app.guided_step_ui import (
     render_breakdown_scroll_target,
     render_deposit_step_panels,
     render_prepare_iif_action,
-    update_upload_pair_readiness,
+    render_upload_continue_action,
 )
-from app.upload_intake_ui import render_upload_inputs
+from app.upload_intake_ui import render_upload_inputs, retained_upload_pair
 from app.ui_helpers import (
     deposit_download_details,
     plan_guide_html,
@@ -1448,6 +1457,7 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
 def reset_current_work() -> None:
     for key in ("run_result", "run_context", "run_date", "run_filename", "run_date_mismatch", "run_settlement_filename", "last_history_id"):
         st.session_state.pop(key, None)
+    reset_deposit_page(st.session_state)
     st.session_state["file_uploader_key"] = st.session_state.get("file_uploader_key", 0) + 1
 
 @dataclass
@@ -1953,59 +1963,8 @@ restore_daily_program_state(st.session_state)
 # Header
 # ---------------------------------------------------------------------
 
-st.markdown(
-    """
-    <div class="hwfc-hero">
-      <div class="hwfc-kicker">Honest Weight Food Co-op · Finance</div>
-      <div class="hwfc-title">Daily Deposit Reconciliation</div>
-      <div class="hwfc-subtitle">
-        Upload the completed daily workbook, validate the full deposit, then review the QuickBooks entry before import.
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 if "file_uploader_key" not in st.session_state:
     st.session_state["file_uploader_key"] = 0
-
-action_left, action_right = st.columns([0.80, 0.20])
-with action_left:
-    render_need_help_label(st)
-with action_right:
-    if st.button(
-        "↻ Start Over",
-        use_container_width=True,
-        help="Clear the current upload and results. Run History is preserved.",
-    ):
-        reset_current_work()
-        st.rerun()
-
-render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
-render_known_exceptions(st)
-operations_status_slot = st.empty()
-
-has_results = "run_result" in st.session_state
-
-st.markdown(
-    f"""
-    <div class="hwfc-stepbar">
-      <div class="hwfc-step {'active' if not has_results else ''}">1 · Upload</div>
-      <div class="hwfc-step {'active' if not has_results else ''}">2 · Validate</div>
-      <div class="hwfc-step {'active' if has_results else ''}">3 · Review</div>
-      <div class="hwfc-step {'active' if has_results else ''}">4 · Download</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-
-# ---------------------------------------------------------------------
-# Main-page tips and known exceptions
-# ---------------------------------------------------------------------
-
-
 
 # ---------------------------------------------------------------------
 # Sidebar: optional guidance and run history
@@ -2026,6 +1985,54 @@ with st.sidebar:
 # Input area
 # ---------------------------------------------------------------------
 
+requested_page_stage = selected_deposit_stage(st.session_state)
+
+if requested_page_stage == UPLOAD_STAGE:
+    # -----------------------------------------------------------------
+    # Upload & Verify
+    # -----------------------------------------------------------------
+    st.markdown(
+        """
+        <div class="hwfc-hero">
+          <div class="hwfc-kicker">Honest Weight Food Co-op · Finance</div>
+          <div class="hwfc-title">Daily Deposit Reconciliation</div>
+          <div class="hwfc-subtitle">
+            Upload the completed daily workbook, validate the full deposit, then review the QuickBooks entry before import.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    action_left, action_right = st.columns([0.80, 0.20])
+    with action_left:
+        render_need_help_label(st)
+    with action_right:
+        if st.button(
+            "↻ Start Over",
+            use_container_width=True,
+            help="Clear the current upload and results. Run History is preserved.",
+        ):
+            reset_current_work()
+            st.rerun()
+
+    render_daily_workbook_sop(st, root=ROOT, sop_steps=SOP_STEPS)
+    render_known_exceptions(st)
+    operations_status_slot = st.empty()
+
+    has_results = "run_result" in st.session_state
+    st.markdown(
+        f"""
+        <div class="hwfc-stepbar">
+          <div class="hwfc-step {'active' if not has_results else ''}">1 · Upload</div>
+          <div class="hwfc-step {'active' if not has_results else ''}">2 · Validate</div>
+          <div class="hwfc-step {'active' if has_results else ''}">3 · Review</div>
+          <div class="hwfc-step {'active' if has_results else ''}">4 · Download</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 roles = {}
 date_info = {
     "detected_date": None,
@@ -2036,19 +2043,18 @@ date_info = {
 }
 deposit_date = None
 
-upload_render = render_upload_inputs(
-    st,
-    uploader_key=st.session_state["file_uploader_key"],
-)
-uploaded = upload_render.daily_workbook
-settlement_file = upload_render.card_settlement
-
-upload_pair_readiness_key = (
-    f"upload_pair_ready_{st.session_state['file_uploader_key']}"
-)
-deposit_steps_scroll_key = (
-    f"deposit_steps_scroll_{st.session_state['file_uploader_key']}"
-)
+if requested_page_stage == UPLOAD_STAGE:
+    upload_render = render_upload_inputs(
+        st,
+        uploader_key=st.session_state["file_uploader_key"],
+    )
+    uploaded = upload_render.daily_workbook
+    settlement_file = upload_render.card_settlement
+else:
+    uploaded, settlement_file = retained_upload_pair(
+        st.session_state,
+        uploader_key=st.session_state["file_uploader_key"],
+    )
 
 settlement_date_info = None
 settlement_date_mismatch = False
@@ -2068,55 +2074,56 @@ if uploaded is not None:
         if not roles.get(key)
     ]
 
-    if deposit_date is not None:
-        upload_render.date_slot.markdown(
-            '<div class="hwfc-mini-card">'
-            '<div class="hwfc-mini-label">Detected</div>'
-            f'<div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div>'
-            "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        upload_render.date_slot.error("Report date not detected", icon="⚠️")
+    if requested_page_stage == UPLOAD_STAGE:
+        if deposit_date is not None:
+            upload_render.date_slot.markdown(
+                '<div class="hwfc-mini-card">'
+                '<div class="hwfc-mini-label">Detected</div>'
+                f'<div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            upload_render.date_slot.error("Report date not detected", icon="⚠️")
 
-    if date_info["has_mismatch"]:
-        detail_lines = [
-            f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
-            for sheet, dt in date_info["dates_by_sheet"].items()
-        ]
-        source = date_info.get("source_sheet") or "workbook"
-        st.warning(
-            "**DATE MISMATCH WARNING**\n\n"
-            + "The workbook contains more than one report date. "
-            + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
-            + f"from **{source}**. You can still run the deposit, but review "
-            + "the dates first.\n\n"
-            + "  \n".join(detail_lines),
-            icon="⚠️",
-        )
+        if date_info["has_mismatch"]:
+            detail_lines = [
+                f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
+                for sheet, dt in date_info["dates_by_sheet"].items()
+            ]
+            source = date_info.get("source_sheet") or "workbook"
+            st.warning(
+                "**DATE MISMATCH WARNING**\n\n"
+                + "The workbook contains more than one report date. "
+                + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
+                + f"from **{source}**. You can still run the deposit, but review "
+                + "the dates first.\n\n"
+                + "  \n".join(detail_lines),
+                icon="⚠️",
+            )
 
-    with st.expander("Workbook validation", expanded=True):
-        columns = st.columns(5)
-        labels = [
-            ("Sales", roles.get("sales")),
-            ("Coupons", roles.get("coupons")),
-            ("Discounts", roles.get("discounts")),
-            ("Balance Sheet", roles.get("bs")),
-            ("HASH", roles.get("hash")),
-        ]
-        for column, (label, sheet_name) in zip(columns, labels):
-            with column:
-                if sheet_name:
-                    st.markdown(
-                        '<div class="hwfc-check-card">'
-                        f'<div class="hwfc-check-title">✓ {html.escape(label)}</div>'
-                        f'<div class="hwfc-check-sheet">{html.escape(sheet_name)}</div>'
-                        "</div>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.warning(f"{label}\n\nNot detected", icon="⚠️")
-else:
+        with st.expander("Workbook validation", expanded=True):
+            columns = st.columns(5)
+            labels = [
+                ("Sales", roles.get("sales")),
+                ("Coupons", roles.get("coupons")),
+                ("Discounts", roles.get("discounts")),
+                ("Balance Sheet", roles.get("bs")),
+                ("HASH", roles.get("hash")),
+            ]
+            for column, (label, sheet_name) in zip(columns, labels):
+                with column:
+                    if sheet_name:
+                        st.markdown(
+                            '<div class="hwfc-check-card">'
+                            f'<div class="hwfc-check-title">✓ {html.escape(label)}</div>'
+                            f'<div class="hwfc-check-sheet">{html.escape(sheet_name)}</div>'
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.warning(f"{label}\n\nNot detected", icon="⚠️")
+elif requested_page_stage == UPLOAD_STAGE:
     upload_render.date_slot.markdown(
         '<div class="hwfc-mini-card">'
         '<div class="hwfc-mini-label">Detected</div>'
@@ -2162,30 +2169,93 @@ if settlement_file is not None:
     except Exception as exc:
         settlement_date_error = exc
 
-    if settlement_date_error is not None:
+    if settlement_date_error is not None and requested_page_stage == UPLOAD_STAGE:
         st.warning(
             "Could not read the Daily Card Settlement Report date: "
             f"{settlement_date_error}",
             icon="⚠️",
         )
-    settlement_date_mismatch = render_card_settlement_verification(
-        st,
-        source_ok=settlement_source_ok,
-        settlement_date=settlement_date_info,
-        deposit_date=deposit_date,
+    settlement_date_mismatch = bool(
+        deposit_date
+        and settlement_date_info
+        and settlement_date_info != deposit_date
     )
+    if requested_page_stage == UPLOAD_STAGE:
+        if not settlement_source_ok:
+            st.error(
+                "CARD SETTLEMENT COLUMN MISMATCH — exact headers 'Network' and "
+                "'Processed Net Amount' were not found. Gross, Submitted, or other "
+                "amount columns will not be substituted.",
+                icon="🚫",
+            )
+        if settlement_date_mismatch:
+            st.warning(
+                "**CARD SETTLEMENT DATE MISMATCH**\n\n"
+                f"Daily workbook: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
+                f"Card settlement: **{settlement_date_info.strftime('%m/%d/%Y')}**  \n\n"
+                "Upload the matching Daily Card Settlement Report before continuing.",
+                icon="⚠️",
+            )
 
 workbook_status_valid = bool(
     uploaded is not None and deposit_date is not None and not missing_roles
 )
 settlement_status_valid = bool(settlement_file is not None and settlement_source_ok)
-uploads_ready = update_upload_pair_readiness(
-    st.session_state,
-    daily_workbook_ready=workbook_status_valid,
-    settlement_ready=settlement_status_valid,
-    readiness_key=upload_pair_readiness_key,
-    request_key=deposit_steps_scroll_key,
+reports_ready = reports_ready_for_steps(
+    workbook_valid=workbook_status_valid,
+    settlement_valid=settlement_status_valid,
+    workbook_date=deposit_date,
+    settlement_date=settlement_date_info,
 )
+deposit_page_stage = enforce_ready_stage(
+    st.session_state,
+    reports_ready=reports_ready,
+)
+
+if requested_page_stage == DEPOSIT_STEPS_STAGE and deposit_page_stage == UPLOAD_STAGE:
+    st.rerun()
+
+if deposit_page_stage == UPLOAD_STAGE:
+    render_operations_status(
+        operations_status_slot,
+        build_operations_status(
+            deposit_date=deposit_date,
+            daily_uploaded=uploaded is not None,
+            settlement_uploaded=settlement_file is not None,
+            workbook_valid=workbook_status_valid,
+            settlement_valid=settlement_status_valid,
+            workflow_complete=False,
+            iif_generated=False,
+        ),
+    )
+    if render_upload_continue_action(st, ready=reports_ready):
+        if advance_to_deposit_steps(
+            st.session_state,
+            reports_ready=reports_ready,
+        ):
+            st.rerun()
+    st.stop()
+
+if requested_page_stage == DEPOSIT_STEPS_STAGE:
+    _, deposit_restart_col = st.columns([0.84, 0.16])
+    with deposit_restart_col:
+        if st.button(
+            "↻ Start Over",
+            use_container_width=True,
+            help="Clear the current upload and results. Run History is preserved.",
+        ):
+            reset_current_work()
+            st.rerun()
+
+if deposit_page_stage == DEPOSIT_STEPS_STAGE:
+    settlement_date_mismatch = render_card_settlement_verification(
+        st,
+        source_ok=settlement_source_ok,
+        settlement_date=settlement_date_info,
+        deposit_date=deposit_date,
+        show_verified_strip=True,
+    )
+    st.markdown("## Today’s Deposit Steps")
 
 subscription_total = 0.0
 membership_payments: list[dict] = []
@@ -2268,7 +2338,7 @@ workflow_requirements_key = None
 workflow_blocked = False
 guided_workflow_ready = False
 active_step_content = None
-if uploads_ready:
+if deposit_page_stage == DEPOSIT_STEPS_STAGE:
     detected_required_steps = None
     if activity_detection_valid:
         detected_required_steps = required_deposit_steps(
@@ -2295,15 +2365,7 @@ if uploads_ready:
     elif not workflow_blocked:
         st.session_state[workflow_completion_key] = step_completions
 
-    render_breakdown_scroll_target(
-        st,
-        components.html,
-        st.session_state,
-        target_id="todays-deposit-steps",
-        request_key=deposit_steps_scroll_key,
-    )
     if workflow_blocked:
-        st.markdown("## Today’s Deposit Steps")
         st.error(
             "Today’s Deposit Steps are blocked until Donations, Paid Out, and Paid In "
             "totals can be read successfully. Reload the workbook and try again.",
@@ -2312,7 +2374,6 @@ if uploads_ready:
     else:
         active_step = active_deposit_step(required_steps, step_completions)
 
-        st.markdown("## Today’s Deposit Steps")
         active_step_content, edited_step = render_deposit_step_panels(
             st,
             deposit_step_rows(required_steps, step_completions),
@@ -3777,7 +3838,6 @@ operations_status = build_operations_status(
     workflow_complete=guided_workflow_ready,
     iif_generated=download_details is not None,
 )
-render_operations_status(operations_status_slot, operations_status)
 run_clicked = render_prepare_iif_action(
     st,
     visible=bool(uploaded is not None and guided_workflow_ready),

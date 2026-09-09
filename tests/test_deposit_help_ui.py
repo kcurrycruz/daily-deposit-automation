@@ -43,17 +43,23 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertLess(hub_stop_position, app_source.index("render_need_help_label(st)"))
         self.assertLess(hub_stop_position, app_source.index('"↻ Start Over"'))
 
-    def test_operations_status_slot_sits_between_help_and_upload_inputs(self):
-        app_source = (
+    def test_upload_help_status_and_inputs_are_owned_by_upload_stage(self):
+        source = self.app_source()
+        upload_stage_marker = "if requested_page_stage == UPLOAD_STAGE:"
+        continue_marker = "render_upload_continue_action("
+        guide_marker = "if deposit_page_stage == DEPOSIT_STEPS_STAGE:"
+
+        self.assertIn(upload_stage_marker, source)
+        self.assertIn(continue_marker, source)
+        self.assertIn(guide_marker, source)
+        self.assertLess(source.index(upload_stage_marker), source.index(continue_marker))
+        self.assertLess(source.index(continue_marker), source.index(guide_marker))
+
+    @staticmethod
+    def app_source():
+        return (
             Path(__file__).resolve().parents[1] / "streamlit_app.py"
         ).read_text(encoding="utf-8")
-
-        tips_position = app_source.find("render_known_exceptions(st)")
-        status_position = app_source.find("operations_status_slot = st.empty()")
-        upload_position = app_source.find("upload_render = render_upload_inputs(")
-
-        self.assertLess(tips_position, status_position)
-        self.assertLess(status_position, upload_position)
 
     def test_help_and_start_over_are_at_the_top_before_the_step_bar(self):
         app_source = (

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 from app import operations_status_ui
-from app.guided_step_ui import update_upload_pair_readiness
+from app.deposit_page_flow import reset_deposit_page
 from app.ui_helpers import deposit_download_details
 
 SOURCE = Path(__file__).resolve().parents[1].joinpath("streamlit_app.py")
@@ -33,6 +33,7 @@ class CurrentDepositTests(unittest.TestCase):
         self.ns = {
             **vars(operations_status_ui),
             "deposit_download_details": deposit_download_details,
+            "reset_deposit_page": reset_deposit_page,
             "st": SimpleNamespace(session_state={}),
             "uploaded": daily, "upload_bytes": daily.getvalue(),
             "settlement_file": settlement, "deposit_date": date(2026, 9, 8),
@@ -182,17 +183,50 @@ class CurrentDepositTests(unittest.TestCase):
         self.assertNotIn("run_context", self.ns["st"].session_state)
         self.assertNotIn("run_result", self.ns["st"].session_state)
 
+    def test_start_over_resets_the_page_stage(self):
+        from app.deposit_page_flow import (
+            DEPOSIT_PAGE_STAGE_KEY,
+            DEPOSIT_STEPS_STAGE,
+            reset_deposit_page,
+        )
+
+        self.ns["st"].session_state[DEPOSIT_PAGE_STAGE_KEY] = DEPOSIT_STEPS_STAGE
+        reset = next(
+            node for node in ast.parse(SOURCE.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef) and node.name == "reset_current_work"
+        )
+        self.ns["reset_deposit_page"] = reset_deposit_page
+        execute([reset], self.ns)
+        self.ns["reset_current_work"]()
+        self.assertNotIn(DEPOSIT_PAGE_STAGE_KEY, self.ns["st"].session_state)
+
+    def test_page_stage_is_enforced_after_report_validation(self):
+        tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+        assignments_by_name = {
+            target.id: node.lineno
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        self.assertLess(
+            assignments_by_name["reports_ready"],
+            assignments_by_name["deposit_page_stage"],
+        )
+
 
 class ValidatedUploadWiringTests(unittest.TestCase):
     def readiness(self, state, **changes):
+        from app.deposit_page_flow import reports_ready_for_steps
+
         ns = dict(st=SimpleNamespace(session_state=state), uploaded=object(),
                   settlement_file=object(), workbook_status_valid=True,
-                  settlement_status_valid=True, upload_pair_readiness_key="ready",
-                  deposit_steps_scroll_key="scroll", settlement_date_mismatch=True,
-                  update_upload_pair_readiness=update_upload_pair_readiness)
+                  settlement_status_valid=True, deposit_date=date(2026, 9, 8),
+                  settlement_date_info=date(2026, 9, 8),
+                  reports_ready_for_steps=reports_ready_for_steps)
         ns.update(changes)
-        execute(assignments("uploads_ready"), ns)
-        return ns["uploads_ready"]
+        execute(assignments("reports_ready"), ns)
+        return ns["reports_ready"]
 
     def test_invalid_workbook_or_settlement_never_unlocks_or_queues_scroll(self):
         for field in ("workbook_status_valid", "settlement_status_valid"):
@@ -201,23 +235,26 @@ class ValidatedUploadWiringTests(unittest.TestCase):
                 self.assertFalse(self.readiness(state, **{field: False}))
                 self.assertNotIn("scroll", state)
 
-    def test_invalid_to_valid_queues_once_and_date_mismatch_does_not_block(self):
+    def test_valid_reports_do_not_queue_a_scroll_and_date_mismatch_blocks(self):
         state = {}
         self.assertFalse(self.readiness(state, workbook_status_valid=False))
         self.assertTrue(self.readiness(state))
-        self.assertTrue(state.pop("scroll"))
-        self.assertTrue(self.readiness(state))
+        self.assertNotIn("scroll", state)
+        self.assertFalse(
+            self.readiness(state, settlement_date_info=date(2026, 9, 9))
+        )
         self.assertNotIn("scroll", state)
 
     def test_upload_gate_runs_after_both_validation_phases_before_guide(self):
-        nodes = assignments("uploads_ready", "workbook_status_valid", "settlement_status_valid")
+        nodes = assignments("reports_ready", "workbook_status_valid", "settlement_status_valid")
         positions = {node.targets[0].id: node.lineno for node in nodes}
-        self.assertGreater(positions["uploads_ready"], positions["workbook_status_valid"])
-        self.assertGreater(positions["uploads_ready"], positions["settlement_status_valid"])
+        self.assertGreater(positions["reports_ready"], positions["workbook_status_valid"])
+        self.assertGreater(positions["reports_ready"], positions["settlement_status_valid"])
         guide = next(node for node in ast.parse(SOURCE.read_text(encoding="utf-8")).body
-                     if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
-                     and node.test.id == "uploads_ready")
-        self.assertLess(positions["uploads_ready"], guide.lineno)
+                     if isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                     and isinstance(node.test.left, ast.Name)
+                     and node.test.left.id == "deposit_page_stage")
+        self.assertLess(positions["reports_ready"], guide.lineno)
 
     def test_missing_workbook_date_or_roles_and_bad_settlement_header_block_guide(self):
         for changes in ({"deposit_date": None}, {"missing_roles": ["hash"]},
@@ -225,13 +262,15 @@ class ValidatedUploadWiringTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 ns = dict(st=SimpleNamespace(session_state={}), uploaded=object(),
                           settlement_file=object(), deposit_date=date(2026, 9, 8),
+                          settlement_date_info=date(2026, 9, 8),
                           missing_roles=[], settlement_source_ok=True,
-                          upload_pair_readiness_key="ready", deposit_steps_scroll_key="scroll",
-                          update_upload_pair_readiness=update_upload_pair_readiness)
+                          reports_ready_for_steps=__import__(
+                              "app.deposit_page_flow", fromlist=["reports_ready_for_steps"]
+                          ).reports_ready_for_steps)
                 ns.update(changes)
                 execute(assignments("workbook_status_valid", "settlement_status_valid",
-                                    "uploads_ready"), ns)
-                self.assertFalse(ns["uploads_ready"])
+                                    "reports_ready"), ns)
+                self.assertFalse(ns["reports_ready"])
                 self.assertNotIn("scroll", ns["st"].session_state)
 
 

@@ -128,9 +128,13 @@ from app.program_hub_ui import (
     DAILY_DEPOSITS,
     activate_program,
     normalize_program_selection,
+    preserved_daily_upload,
+    preserve_daily_program_state,
     render_all_programs_action,
     render_program_hub,
+    restore_daily_program_state,
     return_to_program_hub,
+    sync_daily_upload,
 )
 
 # ---------------------------------------------------------------------
@@ -1946,7 +1950,10 @@ if selected_program != DAILY_DEPOSITS:
     return_to_program_hub(st.session_state)
     st.rerun()
 
+restore_daily_program_state(st.session_state)
+
 if render_all_programs_action(st):
+    preserve_daily_program_state(st.session_state)
     return_to_program_hub(st.session_state)
     st.rerun()
 
@@ -2038,6 +2045,16 @@ deposit_date = None
 upload_render = render_upload_inputs(
     st,
     uploader_key=st.session_state["file_uploader_key"],
+    preserved_daily_workbook=preserved_daily_upload(
+        st.session_state,
+        f"daily_workbook_{st.session_state['file_uploader_key']}",
+    ),
+    preserved_card_settlement=preserved_daily_upload(
+        st.session_state,
+        f"card_settlement_{st.session_state['file_uploader_key']}",
+    ),
+    upload_change_callback=sync_daily_upload,
+    upload_change_state=st.session_state,
 )
 uploaded = upload_render.daily_workbook
 settlement_file = upload_render.card_settlement

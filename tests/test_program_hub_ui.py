@@ -101,6 +101,95 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertEqual(state["membership_payments"], {"status": "ready"})
         self.assertEqual(state["run_result"], {"rows": 3})
 
+    def test_daily_widget_values_survive_hub_run_and_reopen(self):
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            activate_program,
+            preserved_daily_upload,
+            preserve_daily_program_state,
+            restore_daily_program_state,
+            return_to_program_hub,
+        )
+
+        uploaded_workbook = object()
+        state = {
+            "active_finance_program": DAILY_DEPOSITS,
+            "daily_workbook_0": uploaded_workbook,
+            "membership_entry_workbook-123_0_amount": 8.45,
+            "membership_entry_workbook-123_0_add": True,
+        }
+
+        preserve_daily_program_state(state)
+        return_to_program_hub(state)
+        # Model Streamlit removing widget keys that the Hub run does not render.
+        state.pop("daily_workbook_0")
+        state.pop("membership_entry_workbook-123_0_amount")
+        state.pop("membership_entry_workbook-123_0_add")
+
+        self.assertTrue(activate_program(state, DAILY_DEPOSITS))
+        restore_daily_program_state(state)
+
+        self.assertNotIn("daily_workbook_0", state)
+        self.assertIs(
+            preserved_daily_upload(state, "daily_workbook_0"),
+            uploaded_workbook,
+        )
+        self.assertEqual(state["membership_entry_workbook-123_0_amount"], 8.45)
+        self.assertNotIn("membership_entry_workbook-123_0_add", state)
+
+        # An empty uploader rendered after reopening must not erase the fallback.
+        state["daily_workbook_0"] = None
+        preserve_daily_program_state(state)
+        state.pop("daily_workbook_0")
+        self.assertIs(
+            preserved_daily_upload(state, "daily_workbook_0"),
+            uploaded_workbook,
+        )
+
+    def test_daily_widget_restore_is_consumed_and_never_overwrites_newer_work(self):
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_SNAPSHOT_KEY,
+            preserve_daily_program_state,
+            restore_daily_program_state,
+        )
+
+        amount_key = "membership_entry_workbook-123_0_amount"
+        state = {amount_key: 8.45}
+        preserve_daily_program_state(state)
+        state.pop(amount_key)
+
+        restore_daily_program_state(state)
+        self.assertEqual(state[amount_key], 8.45)
+        self.assertNotIn(DAILY_PROGRAM_SNAPSHOT_KEY, state)
+
+        state[amount_key] = 20.00
+        restore_daily_program_state(state)
+        self.assertEqual(state[amount_key], 20.00)
+
+    def test_explicit_upload_replacement_and_clear_sync_the_preserved_fallback(self):
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_UPLOADS_KEY,
+            preserved_daily_upload,
+            sync_daily_upload,
+        )
+
+        for widget_key in ("daily_workbook_0", "card_settlement_0"):
+            with self.subTest(widget_key=widget_key):
+                upload_a = object()
+                upload_b = object()
+                state = {
+                    DAILY_PROGRAM_UPLOADS_KEY: {widget_key: upload_a},
+                    widget_key: upload_b,
+                }
+
+                sync_daily_upload(state, widget_key)
+                self.assertIs(preserved_daily_upload(state, widget_key), upload_b)
+
+                state[widget_key] = None
+                sync_daily_upload(state, widget_key)
+                self.assertIsNone(preserved_daily_upload(state, widget_key))
+                self.assertIsNone(state[widget_key])
+
 
 class ProgramHubRendererTests(unittest.TestCase):
     def test_renders_header_prompt_titles_and_program_action_states(self):
@@ -237,7 +326,11 @@ class ProgramHubEntryPointTests(unittest.TestCase):
         action_position = app_source.index(action_marker)
         header_position = app_source.index("# Header")
         action_block = app_source[action_position:header_position]
+        route_block = app_source[self.route_position(app_source):header_position]
 
+        self.assertIn("restore_daily_program_state(st.session_state)", route_block)
+        self.assertIn("preserve_daily_program_state(st.session_state)", action_block)
+        self.assertIn("preserved_daily_upload", app_source)
         self.assertIn("return_to_program_hub(st.session_state)", action_block)
         self.assertIn("st.rerun()", action_block)
         self.assertNotIn("reset_current_work()", action_block)

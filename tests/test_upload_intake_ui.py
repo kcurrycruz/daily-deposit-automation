@@ -75,6 +75,87 @@ class UploadIntakeUITests(unittest.TestCase):
             "selected:Upload Daily Card Settlement Report",
         )
 
+    def test_preserved_uploads_are_used_without_assigning_uploader_widget_keys(self):
+        from app.upload_intake_ui import render_upload_inputs
+
+        class EmptyUploaderUI:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def columns(self, widths, **kwargs):
+                return [self for _ in widths]
+
+            def empty(self):
+                return object()
+
+            def markdown(self, body, **kwargs):
+                return None
+
+            def file_uploader(self, label, **kwargs):
+                return None
+
+        daily_workbook = object()
+        card_settlement = object()
+
+        result = render_upload_inputs(
+            EmptyUploaderUI(),
+            uploader_key=3,
+            preserved_daily_workbook=daily_workbook,
+            preserved_card_settlement=card_settlement,
+        )
+
+        self.assertIs(result.daily_workbook, daily_workbook)
+        self.assertIs(result.card_settlement, card_settlement)
+
+    def test_uploaders_wire_change_callback_with_their_own_widget_keys(self):
+        from app.upload_intake_ui import render_upload_inputs
+
+        class CallbackRecordingUI:
+            def __init__(self):
+                self.uploader_calls = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def columns(self, widths, **kwargs):
+                return [self for _ in widths]
+
+            def empty(self):
+                return object()
+
+            def markdown(self, body, **kwargs):
+                return None
+
+            def file_uploader(self, label, **kwargs):
+                self.uploader_calls.append((label, kwargs))
+                return None
+
+        def callback(state, widget_key):
+            return None
+
+        state = {}
+        ui = CallbackRecordingUI()
+        render_upload_inputs(
+            ui,
+            uploader_key=4,
+            upload_change_callback=callback,
+            upload_change_state=state,
+        )
+
+        self.assertEqual(len(ui.uploader_calls), 2)
+        for (_, kwargs), expected_key in zip(
+            ui.uploader_calls,
+            ("daily_workbook_4", "card_settlement_4"),
+        ):
+            self.assertIs(kwargs["on_change"], callback)
+            self.assertEqual(kwargs["args"], (state, expected_key))
+
 
 if __name__ == "__main__":
     unittest.main()

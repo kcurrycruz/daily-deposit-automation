@@ -7,6 +7,7 @@ from typing import MutableMapping
 
 ACTIVE_PROGRAM_KEY = "active_finance_program"
 DAILY_DEPOSITS = "daily_deposits"
+SIDEBAR_COLLAPSE_REQUEST_KEY = "_collapse_navigation_sidebar"
 DAILY_PROGRAM_SNAPSHOT_KEY = "_daily_program_widget_snapshot"
 DAILY_PROGRAM_UPLOADS_KEY = "_daily_program_preserved_uploads"
 
@@ -133,6 +134,7 @@ def activate_program(
     if normalized_key is None:
         return False
     state[ACTIVE_PROGRAM_KEY] = normalized_key
+    state[SIDEBAR_COLLAPSE_REQUEST_KEY] = True
     return True
 
 

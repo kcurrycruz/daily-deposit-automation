@@ -80,7 +80,10 @@ from app.operations_status_ui import (
     deposit_run_context,
     render_operations_status,
 )
-from app.run_history_ui import render_daily_sidebar
+from app.run_history_ui import (
+    render_daily_sidebar,
+    render_sidebar_collapse_request,
+)
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
@@ -954,18 +957,18 @@ st.markdown(
     ~ div[data-testid="stElementContainer"]
     button[data-testid="stBaseButton-primary"],
     .st-key-upload_continue_action button {
-        background: #A8D18D !important;
+        background: #315F3A !important;
         border-color: #78A85B !important;
-        color: #102216 !important;
+        color: #FFFDF8 !important;
     }
 
     div[data-testid="stElementContainer"]:has(#upload-continue-action)
     ~ div[data-testid="stElementContainer"]
     button[data-testid="stBaseButton-primary"]:hover,
     .st-key-upload_continue_action button:hover {
-        background: #B9DDA5 !important;
+        background: #3F7548 !important;
         border-color: #8DBB70 !important;
-        color: #102216 !important;
+        color: #FFFDF8 !important;
     }
 
     div[data-testid="stMainBlockContainer"]:has(.hwfc-deposit-workspace-marker) {
@@ -2039,6 +2042,8 @@ with st.sidebar:
         preserve_daily_program_state(st.session_state)
         return_to_program_hub(st.session_state)
         st.rerun()
+
+render_sidebar_collapse_request(components.html, st.session_state)
 
 # ---------------------------------------------------------------------
 # Input area

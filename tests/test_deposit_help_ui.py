@@ -61,8 +61,8 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertIn(":has(#upload-continue-action)", source)
         self.assertIn('~ div[data-testid="stElementContainer"]', source)
         self.assertIn('button[data-testid="stBaseButton-primary"]', source)
-        self.assertIn("background: #A8D18D !important", source)
-        self.assertIn("color: #102216 !important", source)
+        self.assertIn("background: #315F3A !important", source)
+        self.assertIn("color: #FFFDF8 !important", source)
 
     def test_deposit_steps_use_a_contained_header_workspace(self):
         source = self.app_source()

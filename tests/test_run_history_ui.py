@@ -39,6 +39,26 @@ class RecordingUI:
 
 
 class RunHistoryUITests(unittest.TestCase):
+    def test_sidebar_collapse_request_is_consumed_once_on_program_entry(self):
+        from app.program_hub_ui import SIDEBAR_COLLAPSE_REQUEST_KEY
+        from app.run_history_ui import render_sidebar_collapse_request
+
+        state = {SIDEBAR_COLLAPSE_REQUEST_KEY: True}
+        scripts = []
+
+        def component_html(body, **kwargs):
+            scripts.append((body, kwargs))
+
+        self.assertTrue(render_sidebar_collapse_request(component_html, state))
+        self.assertNotIn(SIDEBAR_COLLAPSE_REQUEST_KEY, state)
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("stSidebarCollapseButton", scripts[0][0])
+        self.assertIn("click()", scripts[0][0])
+        self.assertEqual(scripts[0][1], {"height": 0, "width": 0})
+
+        self.assertFalse(render_sidebar_collapse_request(component_html, state))
+        self.assertEqual(len(scripts), 1)
+
     def test_daily_sidebar_places_all_programs_before_collapsed_run_history(self):
         import app.run_history_ui as run_history_ui
 

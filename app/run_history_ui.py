@@ -4,7 +4,35 @@ import html
 from datetime import datetime
 from pathlib import Path
 
-from app.program_hub_ui import render_all_programs_action
+from app.program_hub_ui import (
+    SIDEBAR_COLLAPSE_REQUEST_KEY,
+    render_all_programs_action,
+)
+
+
+def render_sidebar_collapse_request(component_html, state) -> bool:
+    """Consume one program-entry request and collapse an expanded sidebar."""
+    if not state.pop(SIDEBAR_COLLAPSE_REQUEST_KEY, False):
+        return False
+    component_html(
+        """
+        <script>
+        const doc = window.parent.document;
+        const collapseControl = doc.querySelector(
+          '[data-testid="stSidebarCollapseButton"]'
+        );
+        if (collapseControl) {
+          const button = collapseControl.matches('button')
+            ? collapseControl
+            : collapseControl.querySelector('button');
+          if (button) window.setTimeout(() => button.click(), 0);
+        }
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+    return True
 
 
 def render_daily_sidebar(

@@ -66,12 +66,18 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertIsNone(normalize_program_selection("unknown_program"))
 
     def test_activate_daily_deposits_sets_active_key_and_preserves_state(self):
-        from app.program_hub_ui import ACTIVE_PROGRAM_KEY, DAILY_DEPOSITS, activate_program
+        from app.program_hub_ui import (
+            ACTIVE_PROGRAM_KEY,
+            DAILY_DEPOSITS,
+            SIDEBAR_COLLAPSE_REQUEST_KEY,
+            activate_program,
+        )
 
         state = {"membership_payments": {"status": "ready"}}
 
         self.assertTrue(activate_program(state, DAILY_DEPOSITS))
         self.assertEqual(state[ACTIVE_PROGRAM_KEY], DAILY_DEPOSITS)
+        self.assertTrue(state[SIDEBAR_COLLAPSE_REQUEST_KEY])
         self.assertEqual(state["membership_payments"], {"status": "ready"})
 
     def test_activate_disabled_program_does_not_mutate_existing_active_state(self):

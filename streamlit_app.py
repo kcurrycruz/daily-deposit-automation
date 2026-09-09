@@ -493,8 +493,7 @@ st.markdown(
 
     .hwfc-ops-status-item {
         min-width: 0;
-        padding: 5px 10px 10px;
-        border-bottom: 2px solid var(--hwfc-border);
+        padding: 5px 10px 8px;
     }
 
     .hwfc-ops-status-label {
@@ -511,12 +510,24 @@ st.markdown(
         overflow-wrap: anywhere;
     }
 
-    .hwfc-ops-status.is-ready .hwfc-ops-status-item:last-child {
-        border-bottom-color: #78A85B;
+    .hwfc-ops-progress {
+        background: #303841;
+        border-radius: 999px;
+        height: 3px;
+        margin-top: 10px;
+        overflow: hidden;
     }
 
-    .hwfc-ops-status.is-attention .hwfc-ops-status-item:last-child {
-        border-bottom-color: #D7A84B;
+    .hwfc-ops-progress > span {
+        background: #78A85B;
+        border-radius: inherit;
+        display: block;
+        height: 100%;
+        transition: width .28s ease;
+    }
+
+    .hwfc-ops-status.is-attention .hwfc-ops-progress > span {
+        background: #D7A84B;
     }
 
     @media (max-width: 720px) {

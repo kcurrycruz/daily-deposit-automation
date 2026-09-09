@@ -11,6 +11,9 @@ class OperationsStatusModelTests(unittest.TestCase):
         self.assertEqual(status.files, "0 of 2 uploaded")
         self.assertEqual(status.iif, "Not ready")
         self.assertEqual(status.state, "waiting")
+        self.assertEqual(status.deposit_progress, 0)
+        self.assertEqual(status.files_progress, 0)
+        self.assertEqual(status.iif_progress, 0)
 
     def test_no_uploads_ignores_non_none_deposit_date(self):
         from app.operations_status_ui import build_operations_status
@@ -34,6 +37,9 @@ class OperationsStatusModelTests(unittest.TestCase):
         self.assertEqual(status.files, "1 of 2 uploaded · Card Settlement needed")
         self.assertEqual(status.iif, "Not ready")
         self.assertEqual(status.state, "waiting")
+        self.assertEqual(status.deposit_progress, 100)
+        self.assertEqual(status.files_progress, 50)
+        self.assertEqual(status.iif_progress, 0)
 
     def test_settlement_only_identifies_daily_workbook_as_needed(self):
         from app.operations_status_ui import build_operations_status
@@ -49,18 +55,22 @@ class OperationsStatusModelTests(unittest.TestCase):
         self.assertEqual(status.files, "2 of 2 verified")
         self.assertEqual(status.iif, "Complete guided steps")
         self.assertEqual(status.state, "active")
+        self.assertEqual(status.files_progress, 100)
+        self.assertEqual(status.iif_progress, 50)
 
     def test_complete_workflow_is_ready(self):
         from app.operations_status_ui import build_operations_status
         status = build_operations_status(deposit_date=date(2026, 9, 8), daily_uploaded=True, settlement_uploaded=True, workbook_valid=True, settlement_valid=True, workflow_complete=True, iif_generated=False)
         self.assertEqual(status.iif, "Ready to prepare IIF")
         self.assertEqual(status.state, "ready")
+        self.assertEqual(status.iif_progress, 75)
 
     def test_generated_iif_is_ready_to_download(self):
         from app.operations_status_ui import build_operations_status
         status = build_operations_status(deposit_date=date(2026, 9, 8), daily_uploaded=True, settlement_uploaded=True, workbook_valid=True, settlement_valid=True, workflow_complete=True, iif_generated=True)
         self.assertEqual(status.iif, "Ready to download")
         self.assertEqual(status.state, "ready")
+        self.assertEqual(status.iif_progress, 100)
 
     def test_invalid_uploaded_pair_needs_attention(self):
         from app.operations_status_ui import build_operations_status
@@ -73,11 +83,24 @@ class OperationsStatusModelTests(unittest.TestCase):
 class OperationsStatusRendererTests(unittest.TestCase):
     def test_html_has_three_escaped_status_items_and_state_wrapper(self):
         from app.operations_status_ui import OperationsStatus, operations_status_html
-        status = OperationsStatus("<script>alert('x')</script>", "2 of 2 & verified", "Ready to prepare IIF", "ready&safe")
+        status = OperationsStatus(
+            "<script>alert('x')</script>",
+            "2 of 2 & verified",
+            "Ready to prepare IIF",
+            "ready&safe",
+            deposit_progress=100,
+            files_progress=50,
+            iif_progress=75,
+        )
         rendered = operations_status_html(status)
         self.assertIn('class="hwfc-ops-status is-ready&amp;safe"', rendered)
         self.assertIn('aria-label="Deposit status"', rendered)
         self.assertEqual(rendered.count("hwfc-ops-status-item"), 3)
+        self.assertEqual(rendered.count('role="progressbar"'), 3)
+        self.assertIn('aria-label="Deposit date progress"', rendered)
+        self.assertIn('aria-valuenow="100"', rendered)
+        self.assertIn('style="width: 50%"', rendered)
+        self.assertIn('style="width: 75%"', rendered)
         self.assertIn("Deposit date", rendered)
         self.assertIn("Files", rendered)
         self.assertIn("IIF status", rendered)

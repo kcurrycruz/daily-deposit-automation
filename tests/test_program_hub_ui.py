@@ -356,6 +356,11 @@ class ProgramHubEntryPointTests(unittest.TestCase):
 
         self.assertLess(route_position + hub_route.index("st.stop()"), sidebar_position)
 
+    def test_sidebar_starts_collapsed(self):
+        app_source = self.app_source()
+
+        self.assertIn('initial_sidebar_state="collapsed"', app_source)
+
 
 class ProgramHubStyleContractTests(unittest.TestCase):
     @staticmethod

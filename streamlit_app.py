@@ -539,9 +539,80 @@ st.markdown(
         background: #D7A84B;
     }
 
+    .hwfc-hub-hero {
+        background: linear-gradient(100deg, var(--hwfc-forest), #3D6739);
+        border: 1px solid var(--hwfc-border);
+        border-radius: 0 0 22px 22px;
+        color: #FFFDF8;
+        margin-bottom: 26px;
+        padding: 24px 30px;
+    }
+
+    .hwfc-hub-kicker {
+        font-size: .78rem;
+        font-weight: 800;
+        letter-spacing: .14em;
+        text-transform: uppercase;
+    }
+
+    .hwfc-hub-title {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: clamp(2rem, 4vw, 3.1rem);
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .hwfc-hub-prompt {
+        margin: 12px 0 22px;
+    }
+
+    .hwfc-hub-prompt h2 {
+        color: var(--hwfc-ink);
+        margin-bottom: 4px;
+    }
+
+    .hwfc-hub-prompt p {
+        color: var(--hwfc-muted);
+        margin: 0;
+    }
+
+    .hwfc-program-card {
+        background: var(--hwfc-paper);
+        border: 1px solid var(--hwfc-border);
+        border-radius: 14px;
+        min-height: 190px;
+        padding: 22px;
+    }
+
+    .hwfc-program-card.is-available {
+        border-color: var(--hwfc-leaf);
+        box-shadow: inset 0 3px 0 rgba(120, 168, 91, .65);
+    }
+
+    .hwfc-program-card.is-coming-soon {
+        opacity: .72;
+    }
+
+    .hwfc-program-card-title {
+        color: var(--hwfc-ink);
+        font-size: 1.15rem;
+        font-weight: 800;
+        margin: 0 0 8px;
+    }
+
+    .hwfc-program-card-copy {
+        color: var(--hwfc-muted);
+        min-height: 70px;
+        margin: 0;
+    }
+
     @media (max-width: 720px) {
         .hwfc-ops-status {
             grid-template-columns: 1fr;
+        }
+
+        .hwfc-program-card {
+            min-height: 0;
         }
     }
 

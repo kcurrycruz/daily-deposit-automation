@@ -41,11 +41,11 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
 
 def program_card_html(program: ProgramDefinition) -> str:
     """Return safe, state-aware card markup for a finance program."""
-    state_class = "program-card--available" if program.enabled else "program-card--disabled"
+    state_class = "is-available" if program.enabled else "is-coming-soon"
     return (
-        f'<section class="program-card {state_class}">'
-        f"<h2>{escape(program.title)}</h2>"
-        f"<p>{escape(program.description)}</p>"
+        f'<section class="hwfc-program-card {state_class}">'
+        f'<h2 class="hwfc-program-card-title">{escape(program.title)}</h2>'
+        f'<p class="hwfc-program-card-copy">{escape(program.description)}</p>'
         "</section>"
     )
 
@@ -54,8 +54,15 @@ def render_program_hub(ui) -> str | None:
     """Render program choices and return an enabled selected program key."""
     title_column, help_column = ui.columns([3, 1])
     with title_column:
-        title_column.markdown("# Honest Weight Food Co-op")
-        title_column.markdown("## Finance Operations")
+        title_column.markdown(
+            """
+            <div class="hwfc-hub-hero">
+              <div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
+              <div class="hwfc-hub-title">Finance Operations</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with help_column:
         help_popover = help_column.popover("❔ Need Help")
         with help_popover:
@@ -63,8 +70,15 @@ def render_program_hub(ui) -> str | None:
                 "Visit Daily Deposits for the SOP, tips, and run history."
             )
 
-    ui.markdown("## What are you working on?")
-    ui.markdown("Choose a program to begin.")
+    ui.markdown(
+        """
+        <section class="hwfc-hub-prompt">
+          <h2>What are you working on?</h2>
+          <p>Choose a program to begin.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
     selected_key = None
     for column, program in zip(ui.columns(len(PROGRAMS)), PROGRAMS):

@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import re
 
 
 class RecordingColumn:
@@ -251,6 +252,84 @@ class ProgramHubEntryPointTests(unittest.TestCase):
         sidebar_position = app_source.index("with st.sidebar:")
 
         self.assertLess(route_position + hub_route.index("st.stop()"), sidebar_position)
+
+
+class ProgramHubStyleContractTests(unittest.TestCase):
+    @staticmethod
+    def app_source():
+        return (
+            Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        ).read_text(encoding="utf-8")
+
+    def test_hub_css_defines_scoped_hero_prompt_and_card_states(self):
+        app_source = self.app_source()
+
+        for selector in (
+            ".hwfc-hub-hero",
+            ".hwfc-hub-prompt",
+            ".hwfc-program-card",
+            ".hwfc-program-card.is-available",
+            ".hwfc-program-card.is-coming-soon",
+        ):
+            self.assertIn(selector, app_source)
+
+    def test_mobile_hub_cards_remove_fixed_minimum_height(self):
+        app_source = self.app_source()
+        mobile_block = re.search(
+            r"@media \(max-width: 720px\) \{(?P<body>.*?)\n    \}",
+            app_source,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(mobile_block)
+        self.assertRegex(
+            mobile_block.group("body"),
+            r"\.hwfc-program-card\s*\{\s*min-height:\s*0;",
+        )
+
+    def test_hub_css_uses_established_theme_variables(self):
+        app_source = self.app_source()
+        hub_css_start = app_source.index(".hwfc-hub-hero")
+        hub_css = app_source[hub_css_start:app_source.index("</style>", hub_css_start)]
+
+        for theme_value in (
+            "var(--hwfc-paper)",
+            "var(--hwfc-border)",
+            "var(--hwfc-muted)",
+            "var(--hwfc-leaf)",
+            "var(--hwfc-forest)",
+        ):
+            self.assertIn(theme_value, hub_css)
+
+    def test_program_actions_are_full_width_with_only_daily_deposits_enabled(self):
+        from app.program_hub_ui import DAILY_DEPOSITS, render_program_hub
+
+        ui = RecordingProgramHubUi()
+        render_program_hub(ui)
+
+        self.assertTrue(all(call[2]["use_container_width"] for call in ui.button_calls))
+        self.assertEqual(
+            [call[2]["disabled"] for call in ui.button_calls],
+            [False, True, True],
+        )
+        self.assertEqual(ui.button_calls[0][2]["key"], f"open_program_{DAILY_DEPOSITS}")
+
+    def test_program_card_markup_has_safe_distinct_state_classes(self):
+        from app.program_hub_ui import ProgramDefinition, program_card_html
+
+        available_markup = program_card_html(
+            ProgramDefinition("daily", "Daily", "Ready", True)
+        )
+        coming_soon_markup = program_card_html(
+            ProgramDefinition("unsafe", "<script>", "Salt & <pepper>", False)
+        )
+
+        self.assertIn("hwfc-program-card is-available", available_markup)
+        self.assertIn("hwfc-program-card is-coming-soon", coming_soon_markup)
+        self.assertIn("&lt;script&gt;", coming_soon_markup)
+        self.assertIn("Salt &amp; &lt;pepper&gt;", coming_soon_markup)
+        self.assertNotIn("<script>", coming_soon_markup)
+        self.assertNotIn("Salt & <pepper>", coming_soon_markup)
 
 
 if __name__ == "__main__":

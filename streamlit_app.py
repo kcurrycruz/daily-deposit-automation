@@ -133,6 +133,7 @@ from app.guided_step_ui import (
 from app.upload_intake_ui import (
     missing_settlement_date_warning,
     render_upload_inputs,
+    render_workbook_validation,
     retained_upload_pair,
 )
 from app.ui_helpers import (
@@ -1059,6 +1060,60 @@ st.markdown(
         border-radius: 11px;
         padding: 10px 11px;
         min-height: 74px;
+    }
+
+    .hwfc-workbook-validation-card {
+        background: #102519;
+        border: 1px solid #315F3A;
+        border-radius: 12px;
+        color: #FFFDF8;
+        margin: 14px 0 16px;
+        padding: 14px 16px 16px;
+    }
+
+    .hwfc-workbook-validation-title {
+        font-size: .95rem;
+        font-weight: 850;
+        margin-bottom: 12px;
+    }
+
+    .hwfc-workbook-checks {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .hwfc-workbook-check {
+        background: rgba(49, 95, 58, .30);
+        border: 1px solid rgba(120, 168, 91, .52);
+        border-radius: 10px;
+        min-width: 0;
+        padding: 10px 11px;
+    }
+
+    .hwfc-workbook-check-label {
+        font-size: .86rem;
+        font-weight: 850;
+    }
+
+    .hwfc-workbook-check-sheet {
+        color: #D6E3D1;
+        font-size: .76rem;
+        line-height: 1.25;
+        margin-top: 4px;
+        overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 920px) {
+        .hwfc-workbook-checks {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 560px) {
+        .hwfc-workbook-checks {
+            grid-template-columns: 1fr;
+        }
     }
     .hwfc-check-title {
         color: #EAF4E7;
@@ -2166,27 +2221,11 @@ if uploaded is not None:
                 icon="⚠️",
             )
 
-        with st.expander("Workbook validation", expanded=True):
-            columns = st.columns(5)
-            labels = [
-                ("Sales", roles.get("sales")),
-                ("Coupons", roles.get("coupons")),
-                ("Discounts", roles.get("discounts")),
-                ("Balance Sheet", roles.get("bs")),
-                ("HASH", roles.get("hash")),
-            ]
-            for column, (label, sheet_name) in zip(columns, labels):
-                with column:
-                    if sheet_name:
-                        st.markdown(
-                            '<div class="hwfc-check-card">'
-                            f'<div class="hwfc-check-title">✓ {html.escape(label)}</div>'
-                            f'<div class="hwfc-check-sheet">{html.escape(sheet_name)}</div>'
-                            "</div>",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.warning(f"{label}\n\nNot detected", icon="⚠️")
+        render_workbook_validation(
+            st,
+            roles=roles,
+            report_date=deposit_date,
+        )
 elif requested_page_stage == UPLOAD_STAGE:
     upload_render.date_slot.markdown(
         '<div class="hwfc-mini-card">'

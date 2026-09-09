@@ -2,6 +2,81 @@ import unittest
 
 
 class UploadIntakeUITests(unittest.TestCase):
+    def test_workbook_validation_renders_all_detected_sheets_in_one_verified_box(self):
+        from datetime import date
+        from app.upload_intake_ui import render_workbook_validation
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
+
+            def warning(self, body, **kwargs):
+                self.events.append(("warning", body, kwargs))
+
+        ui = RecordingUI()
+        verified = render_workbook_validation(
+            ui,
+            roles={
+                "sales": "SubDept Sales Report",
+                "coupons": "SubDept Coupon (Local Discount)",
+                "discounts": "090826 Discount",
+                "bs": "090826 BS",
+                "hash": "090826 Hash",
+            },
+            report_date=date(2026, 9, 8),
+        )
+
+        self.assertTrue(verified)
+        self.assertEqual(len(ui.events), 1)
+        self.assertEqual(ui.events[0][0], "markdown")
+        markup = ui.events[0][1]
+        self.assertIn("hwfc-workbook-validation-card", markup)
+        self.assertIn("Daily Workbook · 09/08/2026 · ✓ Verified", markup)
+        for label, sheet_name in (
+            ("Sales", "SubDept Sales Report"),
+            ("Coupons", "SubDept Coupon (Local Discount)"),
+            ("Discounts", "090826 Discount"),
+            ("Balance Sheet", "090826 BS"),
+            ("HASH", "090826 Hash"),
+        ):
+            self.assertIn(label, markup)
+            self.assertIn(sheet_name, markup)
+
+    def test_workbook_validation_names_missing_sheets_without_verified_state(self):
+        from app.upload_intake_ui import render_workbook_validation
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
+
+            def warning(self, body, **kwargs):
+                self.events.append(("warning", body, kwargs))
+
+        ui = RecordingUI()
+        verified = render_workbook_validation(
+            ui,
+            roles={
+                "sales": "Sales",
+                "coupons": "Coupons",
+                "discounts": None,
+                "bs": "BS",
+                "hash": None,
+            },
+            report_date=None,
+        )
+
+        self.assertFalse(verified)
+        self.assertEqual(ui.events[0][0], "warning")
+        self.assertIn("Discounts", ui.events[0][1])
+        self.assertIn("HASH", ui.events[0][1])
+        self.assertNotIn("✓ Verified", ui.events[0][1])
+
     def test_missing_settlement_date_warning_requires_an_otherwise_valid_report(self):
         from app.upload_intake_ui import missing_settlement_date_warning
 

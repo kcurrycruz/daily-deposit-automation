@@ -1,6 +1,53 @@
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
+
+
+WORKBOOK_ROLE_LABELS = (
+    ("sales", "Sales"),
+    ("coupons", "Coupons"),
+    ("discounts", "Discounts"),
+    ("bs", "Balance Sheet"),
+    ("hash", "HASH"),
+)
+
+
+def render_workbook_validation(ui, *, roles: dict, report_date) -> bool:
+    """Render one compact workbook box after checking every required role."""
+    missing_labels = [
+        label for role, label in WORKBOOK_ROLE_LABELS if not roles.get(role)
+    ]
+    if missing_labels:
+        ui.warning(
+            "Workbook validation needs attention. Missing required worksheet "
+            f"categories: **{', '.join(missing_labels)}**.",
+            icon="⚠️",
+        )
+        return False
+
+    date_label = (
+        report_date.strftime("%m/%d/%Y")
+        if report_date is not None
+        else "Date not detected"
+    )
+    checks = "".join(
+        '<div class="hwfc-workbook-check">'
+        f'<div class="hwfc-workbook-check-label">✓ {html.escape(label)}</div>'
+        f'<div class="hwfc-workbook-check-sheet">{html.escape(str(roles[role]))}</div>'
+        "</div>"
+        for role, label in WORKBOOK_ROLE_LABELS
+    )
+    ui.markdown(
+        '<div class="hwfc-workbook-validation-card">'
+        '<div class="hwfc-workbook-validation-title">'
+        f'📗 Daily Workbook · {html.escape(date_label)} · ✓ Verified'
+        "</div>"
+        f'<div class="hwfc-workbook-checks">{checks}</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    return True
 
 
 def missing_settlement_date_warning(

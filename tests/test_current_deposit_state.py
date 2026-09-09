@@ -278,7 +278,20 @@ class ValidatedUploadWiringTests(unittest.TestCase):
         ns = dict(
             settlement_file=object(),
             settlement_source_ok=True,
+            settlement_date_info=date(2026, 9, 8),
             settlement_date_mismatch=True,
+        )
+
+        execute(assignments("settlement_status_valid"), ns)
+
+        self.assertFalse(ns["settlement_status_valid"])
+
+    def test_settlement_without_detected_date_is_not_marked_valid(self):
+        ns = dict(
+            settlement_file=object(),
+            settlement_source_ok=True,
+            settlement_date_info=None,
+            settlement_date_mismatch=False,
         )
 
         execute(assignments("settlement_status_valid"), ns)

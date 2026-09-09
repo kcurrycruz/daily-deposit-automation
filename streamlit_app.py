@@ -2203,6 +2203,7 @@ workbook_status_valid = bool(
 settlement_status_valid = bool(
     settlement_file is not None
     and settlement_source_ok
+    and settlement_date_info is not None
     and not settlement_date_mismatch
 )
 reports_ready = reports_ready_for_steps(

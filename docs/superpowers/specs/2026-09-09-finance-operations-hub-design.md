@@ -1,6 +1,6 @@
 # Finance Operations Hub Design
 
-**Date:** September 9, 2026  
+**Date:** September 9, 2026
 **Status:** Approved for implementation
 
 ## Purpose

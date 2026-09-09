@@ -16,12 +16,11 @@ def render_upload_inputs(
     ui,
     *,
     uploader_key: int,
-    preserved_daily_workbook=None,
-    preserved_card_settlement=None,
-    upload_change_callback=None,
-    upload_change_state=None,
 ) -> UploadIntakeRender:
     """Render the original date/workbook/settlement row with native uploaders."""
+    from app.program_hub_ui import preserved_daily_upload, sync_daily_upload
+
+    upload_change_state = getattr(ui, "session_state", None)
     date_col, workbook_col, settlement_col = ui.columns(
         [0.22, 0.39, 0.39],
         gap="medium",
@@ -40,12 +39,17 @@ def render_upload_inputs(
             unsafe_allow_html=True,
         )
         daily_workbook_key = f"daily_workbook_{uploader_key}"
+        preserved_daily_workbook = (
+            preserved_daily_upload(upload_change_state, daily_workbook_key)
+            if upload_change_state is not None
+            else None
+        )
         daily_change_kwargs = (
             {
-                "on_change": upload_change_callback,
+                "on_change": sync_daily_upload,
                 "args": (upload_change_state, daily_workbook_key),
             }
-            if upload_change_callback is not None
+            if upload_change_state is not None
             else {}
         )
         selected_daily_workbook = ui.file_uploader(
@@ -71,12 +75,17 @@ def render_upload_inputs(
             unsafe_allow_html=True,
         )
         card_settlement_key = f"card_settlement_{uploader_key}"
+        preserved_card_settlement = (
+            preserved_daily_upload(upload_change_state, card_settlement_key)
+            if upload_change_state is not None
+            else None
+        )
         settlement_change_kwargs = (
             {
-                "on_change": upload_change_callback,
+                "on_change": sync_daily_upload,
                 "args": (upload_change_state, card_settlement_key),
             }
-            if upload_change_callback is not None
+            if upload_change_state is not None
             else {}
         )
         selected_card_settlement = ui.file_uploader(

@@ -239,24 +239,15 @@ class ProgramHubRendererTests(unittest.TestCase):
         self.assertIn("Salt &amp; &lt;pepper&gt;", markup)
         self.assertNotIn("<script>", markup)
 
-    def test_need_help_is_in_right_hand_header_popover(self):
+    def test_program_portal_omits_need_help_control(self):
         from app.program_hub_ui import render_program_hub
 
         ui = RecordingProgramHubUi()
         render_program_hub(ui)
 
-        self.assertEqual(ui.columns_calls[0][0], (3, 1))
-        location, label, _ = ui.popover_calls[0]
-        self.assertEqual(location, "columns-1-1")
-        self.assertEqual(label, "❔ Need Help")
-        self.assertIn(
-            "Daily Deposits for the SOP, tips, and run history.",
-            next(
-                body
-                for markdown_location, body, _ in ui.markdown_calls
-                if markdown_location == "columns-1-1:popover"
-            ),
-        )
+        rendered_copy = "\n".join(body for _, body, _ in ui.markdown_calls)
+        self.assertEqual(ui.popover_calls, [])
+        self.assertNotIn("Need Help", rendered_copy)
 
     def test_disabled_cards_show_coming_soon_only_in_the_action(self):
         from app.program_hub_ui import PROGRAMS, program_card_html, render_program_hub
@@ -327,13 +318,29 @@ class ProgramHubEntryPointTests(unittest.TestCase):
         header_position = app_source.index("# Header")
         action_block = app_source[action_position:header_position]
         route_block = app_source[self.route_position(app_source):header_position]
+        upload_source = (
+            Path(__file__).resolve().parents[1] / "app" / "upload_intake_ui.py"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("restore_daily_program_state(st.session_state)", route_block)
         self.assertIn("preserve_daily_program_state(st.session_state)", action_block)
-        self.assertIn("preserved_daily_upload", app_source)
+        self.assertIn("preserved_daily_upload", upload_source)
+        self.assertIn("sync_daily_upload", upload_source)
         self.assertIn("return_to_program_hub(st.session_state)", action_block)
         self.assertIn("st.rerun()", action_block)
         self.assertNotIn("reset_current_work()", action_block)
+
+    def test_upload_entrypoint_uses_the_stable_renderer_signature(self):
+        app_source = self.app_source()
+        call_start = app_source.index("upload_render = render_upload_inputs(")
+        call_end = app_source.index("uploaded = upload_render.daily_workbook")
+        upload_call = app_source[call_start:call_end]
+
+        self.assertIn("uploader_key=", upload_call)
+        self.assertNotIn("preserved_daily_workbook=", upload_call)
+        self.assertNotIn("preserved_card_settlement=", upload_call)
+        self.assertNotIn("upload_change_callback=", upload_call)
+        self.assertNotIn("upload_change_state=", upload_call)
 
     def test_existing_sidebar_stays_after_the_hub_stop_boundary(self):
         app_source = self.app_source()

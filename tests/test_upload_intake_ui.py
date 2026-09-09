@@ -77,8 +77,12 @@ class UploadIntakeUITests(unittest.TestCase):
 
     def test_preserved_uploads_are_used_without_assigning_uploader_widget_keys(self):
         from app.upload_intake_ui import render_upload_inputs
+        from app.program_hub_ui import DAILY_PROGRAM_UPLOADS_KEY
 
         class EmptyUploaderUI:
+            def __init__(self, state):
+                self.session_state = state
+
             def __enter__(self):
                 return self
 
@@ -99,12 +103,16 @@ class UploadIntakeUITests(unittest.TestCase):
 
         daily_workbook = object()
         card_settlement = object()
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                "daily_workbook_3": daily_workbook,
+                "card_settlement_3": card_settlement,
+            }
+        }
 
         result = render_upload_inputs(
-            EmptyUploaderUI(),
+            EmptyUploaderUI(state),
             uploader_key=3,
-            preserved_daily_workbook=daily_workbook,
-            preserved_card_settlement=card_settlement,
         )
 
         self.assertIs(result.daily_workbook, daily_workbook)
@@ -112,10 +120,12 @@ class UploadIntakeUITests(unittest.TestCase):
 
     def test_uploaders_wire_change_callback_with_their_own_widget_keys(self):
         from app.upload_intake_ui import render_upload_inputs
+        from app.program_hub_ui import sync_daily_upload
 
         class CallbackRecordingUI:
             def __init__(self):
                 self.uploader_calls = []
+                self.session_state = {}
 
             def __enter__(self):
                 return self
@@ -136,16 +146,10 @@ class UploadIntakeUITests(unittest.TestCase):
                 self.uploader_calls.append((label, kwargs))
                 return None
 
-        def callback(state, widget_key):
-            return None
-
-        state = {}
         ui = CallbackRecordingUI()
         render_upload_inputs(
             ui,
             uploader_key=4,
-            upload_change_callback=callback,
-            upload_change_state=state,
         )
 
         self.assertEqual(len(ui.uploader_calls), 2)
@@ -153,8 +157,8 @@ class UploadIntakeUITests(unittest.TestCase):
             ui.uploader_calls,
             ("daily_workbook_4", "card_settlement_4"),
         ):
-            self.assertIs(kwargs["on_change"], callback)
-            self.assertEqual(kwargs["args"], (state, expected_key))
+            self.assertIs(kwargs["on_change"], sync_daily_upload)
+            self.assertEqual(kwargs["args"], (ui.session_state, expected_key))
 
 
 if __name__ == "__main__":

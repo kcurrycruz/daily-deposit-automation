@@ -72,23 +72,15 @@ def program_card_html(program: ProgramDefinition) -> str:
 
 def render_program_hub(ui) -> str | None:
     """Render program choices and return an enabled selected program key."""
-    title_column, help_column = ui.columns([3, 1])
-    with title_column:
-        title_column.markdown(
-            """
-            <div class="hwfc-hub-hero">
-              <div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
-              <div class="hwfc-hub-title">Finance Operations</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with help_column:
-        help_popover = help_column.popover("❔ Need Help")
-        with help_popover:
-            help_popover.markdown(
-                "Visit Daily Deposits for the SOP, tips, and run history."
-            )
+    ui.markdown(
+        """
+        <div class="hwfc-hub-hero">
+          <div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
+          <div class="hwfc-hub-title">Finance Operations</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     ui.markdown(
         """

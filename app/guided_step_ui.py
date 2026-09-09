@@ -43,8 +43,36 @@ def update_upload_pair_readiness(
     return is_ready
 
 
-def render_upload_continue_action(ui, *, ready: bool) -> bool:
+def render_upload_continue_action(
+    ui,
+    *,
+    ready: bool,
+    session_state=None,
+    component_html=None,
+) -> bool:
     """Render the explicit handoff from verified reports to guided steps."""
+    readiness_key = "upload_pair_ready"
+    request_key = "upload_continue_scroll_requested"
+    if session_state is not None and component_html is not None:
+        update_upload_pair_readiness(
+            session_state,
+            daily_workbook_ready=ready,
+            settlement_ready=ready,
+            readiness_key=readiness_key,
+            request_key=request_key,
+        )
+        render_breakdown_scroll_target(
+            ui,
+            component_html,
+            session_state,
+            target_id="upload-continue-action",
+            request_key=request_key,
+        )
+    else:
+        ui.markdown(
+            '<div id="upload-continue-action"></div>',
+            unsafe_allow_html=True,
+        )
     clicked = ui.button(
         "Continue to Deposit Steps",
         key="upload_continue_action",

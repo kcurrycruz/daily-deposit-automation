@@ -58,9 +58,19 @@ class DepositHelpUITests(unittest.TestCase):
     def test_continue_action_has_a_dedicated_coop_green_style(self):
         source = self.app_source()
 
-        self.assertIn(".st-key-upload_continue_action button", source)
+        self.assertIn(":has(#upload-continue-action)", source)
+        self.assertIn('~ div[data-testid="stElementContainer"]', source)
+        self.assertIn('button[data-testid="stBaseButton-primary"]', source)
         self.assertIn("background: #A8D18D !important", source)
         self.assertIn("color: #102216 !important", source)
+
+    def test_deposit_steps_use_a_contained_header_workspace(self):
+        source = self.app_source()
+
+        self.assertIn("hwfc-deposit-workspace-marker", source)
+        self.assertIn("hwfc-deposit-workspace-header", source)
+        self.assertIn("border: 1px solid rgba(120, 168, 91", source)
+        self.assertIn("Today’s Deposit Steps", source)
 
     @staticmethod
     def app_source():

@@ -950,16 +950,59 @@ st.markdown(
         color: white !important;
     }
 
+    div[data-testid="stElementContainer"]:has(#upload-continue-action)
+    ~ div[data-testid="stElementContainer"]
+    button[data-testid="stBaseButton-primary"],
     .st-key-upload_continue_action button {
         background: #A8D18D !important;
         border-color: #78A85B !important;
         color: #102216 !important;
     }
 
+    div[data-testid="stElementContainer"]:has(#upload-continue-action)
+    ~ div[data-testid="stElementContainer"]
+    button[data-testid="stBaseButton-primary"]:hover,
     .st-key-upload_continue_action button:hover {
         background: #B9DDA5 !important;
         border-color: #8DBB70 !important;
         color: #102216 !important;
+    }
+
+    div[data-testid="stMainBlockContainer"]:has(.hwfc-deposit-workspace-marker) {
+        border: 1px solid rgba(120, 168, 91, .42);
+        border-radius: 20px;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, .18), inset 0 3px 0 rgba(120, 168, 91, .22);
+        margin-top: 1.25rem;
+        padding-top: 1.35rem;
+        padding-bottom: 2rem;
+    }
+
+    .hwfc-deposit-workspace-marker {
+        height: 0;
+        margin: 0;
+        overflow: hidden;
+    }
+
+    .hwfc-deposit-workspace-header {
+        color: #FFFDF8;
+        font-size: 2rem;
+        font-weight: 850;
+        line-height: 1.2;
+        margin: 0;
+        padding: .15rem 0 .35rem;
+    }
+
+    @media (max-width: 720px) {
+        div[data-testid="stMainBlockContainer"]:has(.hwfc-deposit-workspace-marker) {
+            border-radius: 14px;
+            margin-top: .75rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .hwfc-deposit-workspace-header {
+            font-size: 1.55rem;
+        }
     }
 
     .stDownloadButton > button {
@@ -2265,7 +2308,12 @@ if deposit_page_stage == UPLOAD_STAGE:
             deposit_date=deposit_date,
             show_verified_strip=True,
         )
-    if render_upload_continue_action(st, ready=reports_ready):
+    if render_upload_continue_action(
+        st,
+        ready=reports_ready,
+        session_state=st.session_state,
+        component_html=components.html,
+    ):
         if advance_to_deposit_steps(
             st.session_state,
             reports_ready=reports_ready,
@@ -2274,7 +2322,19 @@ if deposit_page_stage == UPLOAD_STAGE:
     st.stop()
 
 if requested_page_stage == DEPOSIT_STEPS_STAGE:
-    _, deposit_restart_col = st.columns([0.84, 0.16])
+    st.markdown(
+        '<div class="hwfc-deposit-workspace-marker"></div>',
+        unsafe_allow_html=True,
+    )
+    deposit_title_col, deposit_restart_col = st.columns(
+        [0.80, 0.20],
+        vertical_alignment="center",
+    )
+    with deposit_title_col:
+        st.markdown(
+            '<div class="hwfc-deposit-workspace-header">Today’s Deposit Steps</div>',
+            unsafe_allow_html=True,
+        )
     with deposit_restart_col:
         if st.button(
             "↻ Start Over",
@@ -2283,9 +2343,6 @@ if requested_page_stage == DEPOSIT_STEPS_STAGE:
         ):
             reset_current_work()
             st.rerun()
-
-if deposit_page_stage == DEPOSIT_STEPS_STAGE:
-    st.markdown("## Today’s Deposit Steps")
 
 subscription_total = 0.0
 membership_payments: list[dict] = []

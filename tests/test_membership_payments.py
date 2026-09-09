@@ -14,22 +14,67 @@ class MembershipPaymentTests(unittest.TestCase):
 
         class RecordingUI:
             def __init__(self):
-                self.calls = []
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
 
             def button(self, label, **kwargs):
-                self.calls.append((label, kwargs))
+                self.events.append(("button", label, kwargs))
                 return True
 
         ui = RecordingUI()
         self.assertFalse(render_upload_continue_action(ui, ready=False))
-        self.assertEqual(ui.calls[0][0], "Continue to Deposit Steps")
-        self.assertTrue(ui.calls[0][1]["disabled"])
-        self.assertEqual(ui.calls[0][1]["type"], "primary")
-        self.assertEqual(ui.calls[0][1]["key"], "upload_continue_action")
+        self.assertEqual(ui.events[0][0], "markdown")
+        self.assertIn('id="upload-continue-action"', ui.events[0][1])
+        self.assertEqual(ui.events[1][1], "Continue to Deposit Steps")
+        self.assertTrue(ui.events[1][2]["disabled"])
+        self.assertEqual(ui.events[1][2]["type"], "primary")
+        self.assertEqual(ui.events[1][2]["key"], "upload_continue_action")
 
         ready_ui = RecordingUI()
         self.assertTrue(render_upload_continue_action(ready_ui, ready=True))
-        self.assertFalse(ready_ui.calls[0][1]["disabled"])
+        self.assertFalse(ready_ui.events[1][2]["disabled"])
+
+    def test_upload_continue_action_scrolls_once_when_reports_become_ready(self):
+        from app.guided_step_ui import render_upload_continue_action
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, body, **kwargs):
+                self.events.append(("markdown", body, kwargs))
+
+            def button(self, label, **kwargs):
+                self.events.append(("button", label, kwargs))
+                return False
+
+        state = {}
+        scripts = []
+
+        def component_html(body, **kwargs):
+            scripts.append((body, kwargs))
+
+        first_ui = RecordingUI()
+        render_upload_continue_action(
+            first_ui,
+            ready=True,
+            session_state=state,
+            component_html=component_html,
+        )
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("scrollIntoView", scripts[0][0])
+        self.assertIn("upload-continue-action", scripts[0][0])
+
+        second_ui = RecordingUI()
+        render_upload_continue_action(
+            second_ui,
+            ready=True,
+            session_state=state,
+            component_html=component_html,
+        )
+        self.assertEqual(len(scripts), 1)
 
     def test_donation_items_default_to_editable_normal_amount(self):
         import app.guided_step_ui as guided_step_ui

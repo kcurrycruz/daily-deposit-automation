@@ -264,6 +264,7 @@ class ValidatedUploadWiringTests(unittest.TestCase):
                           settlement_file=object(), deposit_date=date(2026, 9, 8),
                           settlement_date_info=date(2026, 9, 8),
                           missing_roles=[], settlement_source_ok=True,
+                          settlement_date_mismatch=False,
                           reports_ready_for_steps=__import__(
                               "app.deposit_page_flow", fromlist=["reports_ready_for_steps"]
                           ).reports_ready_for_steps)
@@ -272,6 +273,17 @@ class ValidatedUploadWiringTests(unittest.TestCase):
                                     "reports_ready"), ns)
                 self.assertFalse(ns["reports_ready"])
                 self.assertNotIn("scroll", ns["st"].session_state)
+
+    def test_date_mismatched_settlement_is_not_marked_valid(self):
+        ns = dict(
+            settlement_file=object(),
+            settlement_source_ok=True,
+            settlement_date_mismatch=True,
+        )
+
+        execute(assignments("settlement_status_valid"), ns)
+
+        self.assertFalse(ns["settlement_status_valid"])
 
 
 if __name__ == "__main__":

@@ -2200,7 +2200,11 @@ if settlement_file is not None:
 workbook_status_valid = bool(
     uploaded is not None and deposit_date is not None and not missing_roles
 )
-settlement_status_valid = bool(settlement_file is not None and settlement_source_ok)
+settlement_status_valid = bool(
+    settlement_file is not None
+    and settlement_source_ok
+    and not settlement_date_mismatch
+)
 reports_ready = reports_ready_for_steps(
     workbook_valid=workbook_status_valid,
     settlement_valid=settlement_status_valid,

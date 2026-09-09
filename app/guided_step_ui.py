@@ -47,6 +47,7 @@ def render_upload_continue_action(ui, *, ready: bool) -> bool:
     """Render the explicit handoff from verified reports to guided steps."""
     clicked = ui.button(
         "Continue to Deposit Steps",
+        key="upload_continue_action",
         type="primary",
         use_container_width=True,
         disabled=not ready,

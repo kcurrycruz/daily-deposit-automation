@@ -950,6 +950,18 @@ st.markdown(
         color: white !important;
     }
 
+    .st-key-upload_continue_action button {
+        background: #A8D18D !important;
+        border-color: #78A85B !important;
+        color: #102216 !important;
+    }
+
+    .st-key-upload_continue_action button:hover {
+        background: #B9DDA5 !important;
+        border-color: #8DBB70 !important;
+        color: #102216 !important;
+    }
+
     .stDownloadButton > button {
         background: var(--hwfc-forest) !important;
         border-color: var(--hwfc-forest) !important;
@@ -2245,6 +2257,14 @@ if deposit_page_stage == UPLOAD_STAGE:
             iif_generated=False,
         ),
     )
+    if reports_ready:
+        render_card_settlement_verification(
+            st,
+            source_ok=settlement_source_ok,
+            settlement_date=settlement_date_info,
+            deposit_date=deposit_date,
+            show_verified_strip=True,
+        )
     if render_upload_continue_action(st, ready=reports_ready):
         if advance_to_deposit_steps(
             st.session_state,
@@ -2265,13 +2285,6 @@ if requested_page_stage == DEPOSIT_STEPS_STAGE:
             st.rerun()
 
 if deposit_page_stage == DEPOSIT_STEPS_STAGE:
-    settlement_date_mismatch = render_card_settlement_verification(
-        st,
-        source_ok=settlement_source_ok,
-        settlement_date=settlement_date_info,
-        deposit_date=deposit_date,
-        show_verified_strip=True,
-    )
     st.markdown("## Today’s Deposit Steps")
 
 subscription_total = 0.0

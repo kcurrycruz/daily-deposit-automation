@@ -25,6 +25,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual(ui.calls[0][0], "Continue to Deposit Steps")
         self.assertTrue(ui.calls[0][1]["disabled"])
         self.assertEqual(ui.calls[0][1]["type"], "primary")
+        self.assertEqual(ui.calls[0][1]["key"], "upload_continue_action")
 
         ready_ui = RecordingUI()
         self.assertTrue(render_upload_continue_action(ready_ui, ready=True))
@@ -282,30 +283,30 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual(ui.events[0][0], "button")
         self.assertEqual(ui.events[0][1][0], "🌿  Validate & Prepare IIF")
 
-    def test_card_settlement_verification_is_rendered_before_guided_steps(self):
-        tree = ast.parse(
-            (Path(__file__).parents[1] / "streamlit_app.py").read_text(
-                encoding="utf-8"
-            )
+    def test_verified_card_settlement_is_shown_on_upload_page_before_continue(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
         )
-        settlement_render_lines = []
-        guided_heading_lines = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                function_name = (
-                    node.func.id if isinstance(node.func, ast.Name) else None
-                )
-                if function_name == "render_card_settlement_verification":
-                    settlement_render_lines.append(node.lineno)
-            if (
-                isinstance(node, ast.Constant)
-                and node.value == "## Today’s Deposit Steps"
-            ):
-                guided_heading_lines.append(node.lineno)
+        upload_stage = source.index("if deposit_page_stage == UPLOAD_STAGE:")
+        deposit_stage = source.index(
+            "if requested_page_stage == DEPOSIT_STEPS_STAGE:",
+            upload_stage,
+        )
+        upload_block = source[upload_stage:deposit_stage]
 
-        self.assertEqual(len(settlement_render_lines), 1)
-        self.assertTrue(guided_heading_lines)
-        self.assertLess(settlement_render_lines[0], min(guided_heading_lines))
+        status_position = upload_block.index("render_operations_status(")
+        verified_position = upload_block.index(
+            "render_card_settlement_verification("
+        )
+        continue_position = upload_block.index("render_upload_continue_action(")
+
+        self.assertIn("if reports_ready:", upload_block)
+        self.assertLess(status_position, verified_position)
+        self.assertLess(verified_position, continue_position)
+        self.assertNotIn(
+            "render_card_settlement_verification(",
+            source[deposit_stage:],
+        )
 
     def test_operations_status_uses_existing_upload_validation_and_iif_state(self):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(

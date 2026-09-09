@@ -55,6 +55,13 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertLess(source.index(upload_stage_marker), source.index(continue_marker))
         self.assertLess(source.index(continue_marker), source.index(guide_marker))
 
+    def test_continue_action_has_a_dedicated_coop_green_style(self):
+        source = self.app_source()
+
+        self.assertIn(".st-key-upload_continue_action button", source)
+        self.assertIn("background: #A8D18D !important", source)
+        self.assertIn("color: #102216 !important", source)
+
     @staticmethod
     def app_source():
         return (

@@ -160,6 +160,24 @@ class UploadIntakeUITests(unittest.TestCase):
             self.assertIs(kwargs["on_change"], sync_daily_upload)
             self.assertEqual(kwargs["args"], (ui.session_state, expected_key))
 
+    def test_retained_upload_pair_reads_both_preserved_widget_values(self):
+        from app.program_hub_ui import DAILY_PROGRAM_UPLOADS_KEY
+        from app.upload_intake_ui import retained_upload_pair
+
+        daily = object()
+        settlement = object()
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                "daily_workbook_4": daily,
+                "card_settlement_4": settlement,
+            }
+        }
+
+        self.assertEqual(
+            retained_upload_pair(state, uploader_key=4),
+            (daily, settlement),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

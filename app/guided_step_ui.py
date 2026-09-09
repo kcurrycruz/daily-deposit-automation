@@ -43,6 +43,22 @@ def update_upload_pair_readiness(
     return is_ready
 
 
+def render_upload_continue_action(ui, *, ready: bool) -> bool:
+    """Render the explicit handoff from verified reports to guided steps."""
+    clicked = ui.button(
+        "Continue to Deposit Steps",
+        type="primary",
+        use_container_width=True,
+        disabled=not ready,
+        help=(
+            "Continue after both reports are verified and their dates match."
+            if not ready
+            else "Open Today’s Deposit Steps."
+        ),
+    )
+    return bool(clicked and ready)
+
+
 def closeout_review_blockers(
     *,
     form_error: str | None,

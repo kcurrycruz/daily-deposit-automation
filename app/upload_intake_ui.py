@@ -3,6 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def retained_upload_pair(
+    state, *, uploader_key: int
+) -> tuple[object | None, object | None]:
+    """Return the upload pair while its widgets are hidden on Deposit Steps."""
+    from app.program_hub_ui import preserved_daily_upload
+
+    return (
+        preserved_daily_upload(state, f"daily_workbook_{uploader_key}"),
+        preserved_daily_upload(state, f"card_settlement_{uploader_key}"),
+    )
+
+
 @dataclass(frozen=True)
 class UploadIntakeRender:
     """Values and date slot from the compact horizontal upload row."""

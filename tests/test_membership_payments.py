@@ -9,6 +9,27 @@ from uuid import uuid4
 
 
 class MembershipPaymentTests(unittest.TestCase):
+    def test_upload_continue_action_is_disabled_until_reports_are_ready(self):
+        from app.guided_step_ui import render_upload_continue_action
+
+        class RecordingUI:
+            def __init__(self):
+                self.calls = []
+
+            def button(self, label, **kwargs):
+                self.calls.append((label, kwargs))
+                return True
+
+        ui = RecordingUI()
+        self.assertFalse(render_upload_continue_action(ui, ready=False))
+        self.assertEqual(ui.calls[0][0], "Continue to Deposit Steps")
+        self.assertTrue(ui.calls[0][1]["disabled"])
+        self.assertEqual(ui.calls[0][1]["type"], "primary")
+
+        ready_ui = RecordingUI()
+        self.assertTrue(render_upload_continue_action(ready_ui, ready=True))
+        self.assertFalse(ready_ui.calls[0][1]["disabled"])
+
     def test_donation_items_default_to_editable_normal_amount(self):
         import app.guided_step_ui as guided_step_ui
 

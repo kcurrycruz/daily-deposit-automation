@@ -213,6 +213,48 @@ class ActivityBreakdownTests(unittest.TestCase):
             ],
         )
 
+    def test_education_and_plants_accounts_work_for_paid_in_and_paid_out(self):
+        api = self.activity_api()
+        cases = (
+            ("paid_in", "education", "8504000 · Education", 42.50),
+            ("paid_in", "plants", "7210420 · Plants", 42.50),
+            ("paid_out", "education", "8504000 · Education", -42.50),
+            ("paid_out", "plants", "7210420 · Plants", -42.50),
+        )
+
+        for category, row_type, account, qb_effect in cases:
+            with self.subTest(category=category, row_type=row_type):
+                payload = {
+                    key: {"mode": "quickbooks", "rows": []}
+                    for key in ("donation", "paid_out", "paid_in")
+                }
+                payload[category] = {
+                    "mode": "app",
+                    "rows": [{
+                        "type": row_type,
+                        "memo": "Department purchase",
+                        "amount": 42.50,
+                    }],
+                }
+
+                try:
+                    lines = api["build_lines"](payload)
+                except ValueError as exc:
+                    self.fail(f"{row_type} should be a valid {category} account: {exc}")
+
+                self.assertEqual(
+                    lines[category],
+                    [{
+                        "account": account,
+                        "memo": (
+                            f"{'PAID IN' if category == 'paid_in' else 'PAID OUT'}: "
+                            "Department purchase"
+                        ),
+                        "class_name": "",
+                        "qb_effect": qb_effect,
+                    }],
+                )
+
     def test_actuals_are_locked_to_the_sum_of_each_app_breakdown(self):
         api = self.activity_api()
 

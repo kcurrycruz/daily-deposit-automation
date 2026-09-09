@@ -36,6 +36,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.activity_breakdowns import (
+    PAID_ACCOUNT_BY_TYPE,
+    PAID_ITEM_LABEL_BY_TYPE,
+    PAID_ITEM_TYPE_BY_LABEL,
     activity_actuals,
     activity_closeout_ready,
     activity_workflow_keys,
@@ -3035,7 +3038,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         )
         item_type = entry_columns[0].selectbox(
             "Type",
-            options=["ESP Deposit", "Outreach", "Other"],
+            options=list(PAID_ITEM_TYPE_BY_LABEL),
             key=f"{entry_key}_type",
         )
         if item_type == "ESP Deposit":
@@ -3058,12 +3061,11 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 "Description / Memo",
                 key=f"{entry_key}_memo",
             )
-            if item_type == "Outreach":
-                entry_columns[2].caption("Posts to 8505000 · Outreach")
-                new_entry = {"type": "outreach", "memo": memo}
-            else:
-                entry_columns[2].caption("Posts to TBA Purchases")
-                new_entry = {"type": "other", "memo": memo}
+            raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
+            entry_columns[2].caption(
+                f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
+            )
+            new_entry = {"type": raw_type, "memo": memo}
         amount = entry_columns[3].number_input(
             "Amount",
             min_value=0.0,
@@ -3111,14 +3113,14 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                     f"{saved_row['original_date']} · {saved_row['initials']}"
                 )
                 saved_columns[2].write("Misc. Receivable")
-            elif saved_row["type"] == "outreach":
-                saved_columns[0].write("Outreach")
-                saved_columns[1].write(saved_row["memo"])
-                saved_columns[2].write("8505000 · Outreach")
             else:
-                saved_columns[0].write("Other")
+                saved_columns[0].write(
+                    PAID_ITEM_LABEL_BY_TYPE[saved_row["type"]]
+                )
                 saved_columns[1].write(saved_row["memo"])
-                saved_columns[2].write("TBA Purchases")
+                saved_columns[2].write(
+                    PAID_ACCOUNT_BY_TYPE[saved_row["type"]]
+                )
             saved_columns[3].write(f"${float(saved_row['amount']):,.2f}")
             if saved_columns[4].button(
                 "Remove",
@@ -3172,7 +3174,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 amount_key = f"activity_{activity_key}_{row_id}_amount"
                 item_type = row_columns[0].selectbox(
                     "Type",
-                    options=["ESP Deposit", "Outreach", "Other"],
+                    options=list(PAID_ITEM_TYPE_BY_LABEL),
                     key=type_key,
                 )
                 if item_type == "ESP Deposit":
@@ -3193,12 +3195,10 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 else:
                     memo_key = f"activity_{activity_key}_{row_id}_memo"
                     memo = row_columns[1].text_input("Description / Memo", key=memo_key)
-                    if item_type == "Outreach":
-                        row_columns[2].caption("Posts to 8505000 · Outreach")
-                        raw_type = "outreach"
-                    else:
-                        row_columns[2].caption("Posts to TBA Purchases")
-                        raw_type = "other"
+                    raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
+                    row_columns[2].caption(
+                        f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
+                    )
                     widget_keys = (type_key, memo_key, amount_key)
                     raw_row = {"type": raw_type, "memo": memo}
                 amount = row_columns[3].number_input(

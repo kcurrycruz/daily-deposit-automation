@@ -9,6 +9,23 @@ from uuid import uuid4
 ACTIVITY_ORDER = ("donation", "paid_in", "paid_out")
 _MODES = {"app", "quickbooks"}
 _CENTS = Decimal("0.01")
+PAID_ITEM_TYPE_BY_LABEL = {
+    "ESP Deposit": "esp",
+    "Outreach": "outreach",
+    "Education": "education",
+    "Plants": "plants",
+    "Other": "other",
+}
+PAID_ITEM_LABEL_BY_TYPE = {
+    row_type: label for label, row_type in PAID_ITEM_TYPE_BY_LABEL.items()
+}
+PAID_ACCOUNT_BY_TYPE = {
+    "esp": "1230000 · Miscellaneous Receivable",
+    "outreach": "8505000 · Outreach",
+    "education": "8504000 · Education",
+    "plants": "7210420 · Plants",
+    "other": "4444 · TBA Purchases",
+}
 
 
 def activity_workflow_keys(source_totals: dict) -> tuple[str, ...]:
@@ -199,9 +216,11 @@ def _normalize_paid_row(category: str, row: dict) -> dict:
     if not isinstance(row, dict):
         raise ValueError(f"{label} row must be an object")
     row_type = row.get("type")
-    allowed_types = {"esp", "outreach", "other"}
+    allowed_types = set(PAID_ACCOUNT_BY_TYPE)
     if row_type not in allowed_types:
-        raise ValueError(f"{label} type must be ESP Deposit, Outreach, or Other")
+        raise ValueError(
+            f"{label} type must be ESP Deposit, Outreach, Education, Plants, or Other"
+        )
     normalized = {
         "type": row_type,
         "amount": float(_money(row.get("amount"), f"{label} amount")),
@@ -283,7 +302,7 @@ def activity_actuals(payload: dict) -> dict[str, float | None]:
 
 def _paid_memo(category: str, row: dict) -> str:
     prefix = "PAID IN" if category == "paid_in" else "PAID OUT"
-    if row["type"] in {"other", "outreach"}:
+    if row["type"] != "esp":
         return f"{prefix}: {row['memo']}"
     original_date = date.fromisoformat(row["original_date"])
     short_date = f"{original_date.month}/{original_date.day}"
@@ -310,15 +329,7 @@ def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
         for row in normalized[category]["rows"]:
             lines[category].append(
                 {
-                    "account": (
-                        "1230000 · Miscellaneous Receivable"
-                        if row["type"] == "esp"
-                        else (
-                            "8505000 · Outreach"
-                            if row["type"] == "outreach"
-                            else "4444 · TBA Purchases"
-                        )
-                    ),
+                    "account": PAID_ACCOUNT_BY_TYPE[row["type"]],
                     "memo": _paid_memo(category, row),
                     "class_name": "",
                     "qb_effect": round(direction * row["amount"], 2),

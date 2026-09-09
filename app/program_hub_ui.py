@@ -1,6 +1,7 @@
 """Program registry and safe navigation state for the finance operations hub."""
 
 from dataclasses import dataclass
+from html import escape
 from typing import MutableMapping
 
 
@@ -36,6 +37,56 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
         False,
     ),
 )
+
+
+def program_card_html(program: ProgramDefinition) -> str:
+    """Return safe, state-aware card markup for a finance program."""
+    state_class = "program-card--available" if program.enabled else "program-card--disabled"
+    return (
+        f'<section class="program-card {state_class}">'
+        f"<h2>{escape(program.title)}</h2>"
+        f"<p>{escape(program.description)}</p>"
+        "</section>"
+    )
+
+
+def render_program_hub(ui) -> str | None:
+    """Render program choices and return an enabled selected program key."""
+    title_column, help_column = ui.columns([3, 1])
+    with title_column:
+        title_column.markdown("# Honest Weight Food Co-op")
+        title_column.markdown("## Finance Operations")
+    with help_column:
+        help_popover = help_column.popover("❔ Need Help")
+        with help_popover:
+            help_popover.markdown(
+                "Visit Daily Deposits for the SOP, tips, and run history."
+            )
+
+    ui.markdown("## What are you working on?")
+    ui.markdown("Choose a program to begin.")
+
+    selected_key = None
+    for column, program in zip(ui.columns(len(PROGRAMS)), PROGRAMS):
+        with column:
+            column.markdown(program_card_html(program), unsafe_allow_html=True)
+            if column.button(
+                "Open program →" if program.enabled else "Coming Soon",
+                key=f"open_program_{program.key}",
+                disabled=not program.enabled,
+                use_container_width=True,
+            ) and program.enabled:
+                selected_key = program.key
+    return selected_key
+
+
+def render_all_programs_action(ui) -> bool:
+    """Render the hub-return control without changing navigation state."""
+    return ui.button(
+        "← All Programs",
+        key="return_to_program_hub",
+        use_container_width=True,
+    )
 
 
 def normalize_program_selection(value: object) -> str | None:

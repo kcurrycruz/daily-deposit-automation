@@ -8,7 +8,11 @@ from app.deposit_workflow import (
     edit_deposit_step,
     normalize_step_completions,
 )
-from app.activity_breakdowns import normalize_activity_section
+from app.activity_breakdowns import (
+    PAID_ACCOUNT_BY_TYPE,
+    PAID_ITEM_LABEL_BY_TYPE,
+    normalize_activity_section,
+)
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     normalize_closeout_payload,
@@ -63,12 +67,9 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
                 session_state[f"{prefix}_purpose"] = row["purpose"]
                 session_state[f"{prefix}_manager"] = row["manager"]
             else:
-                type_labels = {
-                    "esp": "ESP Deposit",
-                    "outreach": "Outreach",
-                    "other": "Other",
-                }
-                session_state[f"{prefix}_type"] = type_labels[row["type"]]
+                session_state[f"{prefix}_type"] = PAID_ITEM_LABEL_BY_TYPE[
+                    row["type"]
+                ]
                 if row["type"] == "esp":
                     session_state[f"{prefix}_date"] = date.fromisoformat(
                         row["original_date"]
@@ -76,6 +77,10 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
                     session_state[f"{prefix}_initials"] = row["initials"]
                 else:
                     session_state[f"{prefix}_memo"] = row["memo"]
+                    if row["type"] == "other":
+                        session_state[f"{prefix}_account"] = row.get(
+                            "account", PAID_ACCOUNT_BY_TYPE["other"]
+                        )
         return True
 
     if step == "coupons":

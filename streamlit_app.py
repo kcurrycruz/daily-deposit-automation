@@ -87,6 +87,7 @@ from app.run_history_ui import (
     render_daily_sidebar,
     render_sidebar_collapse_request,
 )
+from app.chart_of_accounts import load_default_chart_of_accounts
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     STANDARD_METADATA,
@@ -3033,7 +3034,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
 
         st.markdown("**Add a Paid In item**")
         entry_columns = st.columns(
-            [1.2, 2.0, 1.2, 1.0, 1.0],
+            [1.1, 1.5, 2.0, 0.9, 1.0],
             vertical_alignment="bottom",
         )
         item_type = entry_columns[0].selectbox(
@@ -3062,10 +3063,20 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 key=f"{entry_key}_memo",
             )
             raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
-            entry_columns[2].caption(
-                f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
-            )
             new_entry = {"type": raw_type, "memo": memo}
+            if item_type == "Other":
+                selected_account = entry_columns[2].selectbox(
+                    "QuickBooks Account",
+                    options=load_default_chart_of_accounts(),
+                    index=None,
+                    placeholder="Search account",
+                    key=f"{entry_key}_account",
+                )
+                new_entry["account"] = selected_account
+            else:
+                entry_columns[2].caption(
+                    f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
+                )
         amount = entry_columns[3].number_input(
             "Amount",
             min_value=0.0,
@@ -3119,7 +3130,10 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 )
                 saved_columns[1].write(saved_row["memo"])
                 saved_columns[2].write(
-                    PAID_ACCOUNT_BY_TYPE[saved_row["type"]]
+                    saved_row.get(
+                        "account",
+                        PAID_ACCOUNT_BY_TYPE[saved_row["type"]],
+                    )
                 )
             saved_columns[3].write(f"${float(saved_row['amount']):,.2f}")
             if saved_columns[4].button(
@@ -3169,7 +3183,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                     }
                 )
             else:
-                row_columns = st.columns([1.15, 1.8, 1.0, 0.9, 0.35])
+                row_columns = st.columns([1.1, 1.5, 2.0, 0.8, 0.35])
                 type_key = f"activity_{activity_key}_{row_id}_type"
                 amount_key = f"activity_{activity_key}_{row_id}_amount"
                 item_type = row_columns[0].selectbox(
@@ -3196,11 +3210,28 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                     memo_key = f"activity_{activity_key}_{row_id}_memo"
                     memo = row_columns[1].text_input("Description / Memo", key=memo_key)
                     raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
-                    row_columns[2].caption(
-                        f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
-                    )
-                    widget_keys = (type_key, memo_key, amount_key)
                     raw_row = {"type": raw_type, "memo": memo}
+                    if item_type == "Other":
+                        account_key = f"activity_{activity_key}_{row_id}_account"
+                        selected_account = row_columns[2].selectbox(
+                            "QuickBooks Account",
+                            options=load_default_chart_of_accounts(),
+                            index=None,
+                            placeholder="Search account",
+                            key=account_key,
+                        )
+                        raw_row["account"] = selected_account
+                        widget_keys = (
+                            type_key,
+                            memo_key,
+                            account_key,
+                            amount_key,
+                        )
+                    else:
+                        row_columns[2].caption(
+                            f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
+                        )
+                        widget_keys = (type_key, memo_key, amount_key)
                 amount = row_columns[3].number_input(
                     "Amount",
                     min_value=0.0,

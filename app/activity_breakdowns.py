@@ -236,6 +236,8 @@ def _normalize_paid_row(category: str, row: dict) -> dict:
         )
     else:
         normalized["memo"] = _text(row.get("memo"), f"{label} memo")
+        if row_type == "other" and "account" in row:
+            normalized["account"] = _text(row.get("account"), "QuickBooks Account")
     return normalized
 
 
@@ -329,7 +331,11 @@ def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
         for row in normalized[category]["rows"]:
             lines[category].append(
                 {
-                    "account": PAID_ACCOUNT_BY_TYPE[row["type"]],
+                    "account": (
+                        row.get("account", PAID_ACCOUNT_BY_TYPE["other"])
+                        if row["type"] == "other"
+                        else PAID_ACCOUNT_BY_TYPE[row["type"]]
+                    ),
                     "memo": _paid_memo(category, row),
                     "class_name": "",
                     "qb_effect": round(direction * row["amount"], 2),

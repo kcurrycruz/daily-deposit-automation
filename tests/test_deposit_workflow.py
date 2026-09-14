@@ -161,6 +161,46 @@ class DepositWorkflowTests(unittest.TestCase):
             40.0,
         )
 
+    def test_reopening_other_paid_item_restores_selected_account(self):
+        from app.guided_deposit_state import reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"activity_saved_section_paid_out_{workbook_key}": {
+                "mode": "app",
+                "rows": [{
+                    "type": "other",
+                    "account": "8428000 · Admn - Office Supplies",
+                    "memo": "Printer paper",
+                    "amount": 40.0,
+                }],
+            },
+        }
+
+        reopen_step_for_edit(
+            session_state,
+            required_steps=("paid_out", "closeout"),
+            completions={"paid_out": "app", "closeout": "app"},
+            step="paid_out",
+            workbook_key=workbook_key,
+        )
+
+        paid_out_id = session_state[
+            f"activity_row_ids_paid_out_{workbook_key}"
+        ][0]
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_type"],
+            "Other",
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_account"],
+            "8428000 · Admn - Office Supplies",
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_amount"],
+            40.0,
+        )
+
     def test_reopening_coupons_restores_saved_totals_into_editable_fields(self):
         from app.guided_deposit_state import reopen_step_for_edit
 

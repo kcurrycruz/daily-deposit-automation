@@ -255,6 +255,34 @@ class ActivityBreakdownTests(unittest.TestCase):
                     }],
                 )
 
+    def test_other_paid_item_posts_to_the_selected_quickbooks_account(self):
+        api = self.activity_api()
+        payload = {
+            key: {"mode": "quickbooks", "rows": []}
+            for key in ("donation", "paid_out", "paid_in")
+        }
+        payload["paid_out"] = {
+            "mode": "app",
+            "rows": [{
+                "type": "other",
+                "account": "8428000 · Admn - Office Supplies",
+                "memo": "Printer paper",
+                "amount": 42.50,
+            }],
+        }
+
+        lines = api["build_lines"](payload)
+
+        self.assertEqual(
+            lines["paid_out"],
+            [{
+                "account": "8428000 · Admn - Office Supplies",
+                "memo": "PAID OUT: Printer paper",
+                "class_name": "",
+                "qb_effect": -42.50,
+            }],
+        )
+
     def test_actuals_are_locked_to_the_sum_of_each_app_breakdown(self):
         api = self.activity_api()
 

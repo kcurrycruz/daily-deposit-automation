@@ -26,6 +26,7 @@ PAID_ACCOUNT_BY_TYPE = {
     "plants": "7210420 · Gardening/Plants",
     "other": "4444 · TBA Purchases",
 }
+DONATION_DEFAULT_ACCOUNT = "8506000 · Outreach - Donations"
 
 
 def activity_workflow_keys(source_totals: dict) -> tuple[str, ...]:
@@ -203,12 +204,15 @@ def _date(value, label: str) -> str:
 def _normalize_donation_row(row: dict) -> dict:
     if not isinstance(row, dict):
         raise ValueError("Donation row must be an object")
-    return {
+    normalized = {
         "given_to": _text(row.get("given_to"), "Given To"),
         "purpose": _text(row.get("purpose"), "For"),
         "manager": _text(row.get("manager"), "Manager Approval"),
         "amount": float(_money(row.get("amount"), "Donation amount")),
     }
+    if "account" in row:
+        normalized["account"] = _text(row.get("account"), "QuickBooks Account")
+    return normalized
 
 
 def _normalize_paid_row(category: str, row: dict) -> dict:
@@ -216,6 +220,8 @@ def _normalize_paid_row(category: str, row: dict) -> dict:
     if not isinstance(row, dict):
         raise ValueError(f"{label} row must be an object")
     row_type = row.get("type")
+    if row_type is None and "account" in row:
+        row_type = "other"
     allowed_types = set(PAID_ACCOUNT_BY_TYPE)
     if row_type not in allowed_types:
         raise ValueError(
@@ -304,11 +310,19 @@ def activity_actuals(payload: dict) -> dict[str, float | None]:
 
 def _paid_memo(category: str, row: dict) -> str:
     prefix = "PAID IN" if category == "paid_in" else "PAID OUT"
+    return f"{prefix}: {paid_item_description(row)}"
+
+
+def paid_item_account(row: dict) -> str:
+    return row.get("account", PAID_ACCOUNT_BY_TYPE[row["type"]])
+
+
+def paid_item_description(row: dict) -> str:
     if row["type"] != "esp":
-        return f"{prefix}: {row['memo']}"
+        return row["memo"]
     original_date = date.fromisoformat(row["original_date"])
     short_date = f"{original_date.month}/{original_date.day}"
-    return f"{prefix}: {short_date}'s ESP Deposit - {row['initials']}"
+    return f"{short_date}'s ESP Deposit - {row['initials']}"
 
 
 def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
@@ -317,7 +331,7 @@ def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
     for row in normalized["donation"]["rows"]:
         lines["donation"].append(
             {
-                "account": "8506000 · Outreach - Donations",
+                "account": row.get("account", DONATION_DEFAULT_ACCOUNT),
                 "memo": (
                     f"Given to {row['given_to']} for {row['purpose']} - "
                     f"{row['manager']}"
@@ -331,11 +345,7 @@ def build_activity_lines(payload: dict) -> dict[str, list[dict]]:
         for row in normalized[category]["rows"]:
             lines[category].append(
                 {
-                    "account": (
-                        row.get("account", PAID_ACCOUNT_BY_TYPE["other"])
-                        if row["type"] == "other"
-                        else PAID_ACCOUNT_BY_TYPE[row["type"]]
-                    ),
+                    "account": paid_item_account(row),
                     "memo": _paid_memo(category, row),
                     "class_name": "",
                     "qb_effect": round(direction * row["amount"], 2),

@@ -104,6 +104,7 @@ class DepositWorkflowTests(unittest.TestCase):
             f"activity_saved_section_donation_{workbook_key}": {
                 "mode": "app",
                 "rows": [{
+                    "account": "8504000 · Education",
                     "given_to": "Food Pantry",
                     "purpose": "Groceries",
                     "manager": "KC",
@@ -142,6 +143,10 @@ class DepositWorkflowTests(unittest.TestCase):
             "Food Pantry",
         )
         self.assertEqual(
+            session_state[f"activity_donation_{donation_id}_account"],
+            "8504000 · Education",
+        )
+        self.assertEqual(
             session_state[f"activity_donation_{donation_id}_amount"],
             75.0,
         )
@@ -155,6 +160,14 @@ class DepositWorkflowTests(unittest.TestCase):
         self.assertEqual(
             session_state[f"activity_paid_out_{paid_out_id}_date"],
             date(2026, 8, 28),
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_account"],
+            "1230000 · Miscellaneous Receivable",
+        )
+        self.assertEqual(
+            session_state[f"activity_paid_out_{paid_out_id}_memo"],
+            "8/28's ESP Deposit - MR",
         )
         self.assertEqual(
             session_state[f"activity_paid_out_{paid_out_id}_amount"],

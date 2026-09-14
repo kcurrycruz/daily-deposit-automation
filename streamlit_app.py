@@ -36,15 +36,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.activity_breakdowns import (
-    PAID_ACCOUNT_BY_TYPE,
-    PAID_ITEM_LABEL_BY_TYPE,
-    PAID_ITEM_TYPE_BY_LABEL,
     activity_actuals,
     activity_closeout_ready,
     activity_workflow_keys,
     append_activity_entry,
     normalize_activity_payload,
     normalize_activity_section,
+    paid_item_account,
+    paid_item_description,
     read_activity_source_totals,
     write_activity_payload_file,
 )
@@ -3034,57 +3033,29 @@ for activity_key in activity_workflow_keys(activity_source_totals):
 
         st.markdown("**Add a Paid In item**")
         entry_columns = st.columns(
-            [1.1, 1.5, 2.0, 0.9, 1.0],
+            [2.2, 2.0, 0.8, 1.0],
             vertical_alignment="bottom",
         )
-        item_type = entry_columns[0].selectbox(
-            "Type",
-            options=list(PAID_ITEM_TYPE_BY_LABEL),
-            key=f"{entry_key}_type",
+        selected_account = entry_columns[0].selectbox(
+            "QuickBooks Account",
+            options=load_default_chart_of_accounts(),
+            index=None,
+            placeholder="Search account",
+            key=f"{entry_key}_account",
         )
-        if item_type == "ESP Deposit":
-            original_date = entry_columns[1].date_input(
-                "Original ESP Deposit Date",
-                value=deposit_date or date.today(),
-                key=f"{entry_key}_date",
-            )
-            initials = entry_columns[2].text_input(
-                "Initials",
-                key=f"{entry_key}_initials",
-            )
-            new_entry = {
-                "type": "esp",
-                "original_date": original_date,
-                "initials": initials,
-            }
-        else:
-            memo = entry_columns[1].text_input(
-                "Description / Memo",
-                key=f"{entry_key}_memo",
-            )
-            raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
-            new_entry = {"type": raw_type, "memo": memo}
-            if item_type == "Other":
-                selected_account = entry_columns[2].selectbox(
-                    "QuickBooks Account",
-                    options=load_default_chart_of_accounts(),
-                    index=None,
-                    placeholder="Search account",
-                    key=f"{entry_key}_account",
-                )
-                new_entry["account"] = selected_account
-            else:
-                entry_columns[2].caption(
-                    f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
-                )
-        amount = entry_columns[3].number_input(
+        memo = entry_columns[1].text_input(
+            "Description / Memo",
+            key=f"{entry_key}_memo",
+        )
+        new_entry = {"account": selected_account, "memo": memo}
+        amount = entry_columns[2].number_input(
             "Amount",
             min_value=0.0,
             step=0.01,
             format="%.2f",
             key=f"{entry_key}_amount",
         )
-        add_entry_clicked = entry_columns[4].button(
+        add_entry_clicked = entry_columns[3].button(
             "+ Add Paid In item",
             type="secondary",
             use_container_width=True,
@@ -3111,32 +3082,16 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         raw_rows = list(st.session_state[saved_rows_key])
         if raw_rows:
             st.markdown("**Added Paid In items**")
-            saved_headers = st.columns([1.2, 2.0, 1.2, 1.0, 1.0])
-            saved_headers[0].caption("Type")
+            saved_headers = st.columns([2.2, 2.0, 0.8, 1.0])
+            saved_headers[0].caption("QuickBooks Account")
             saved_headers[1].caption("Description / Memo")
-            saved_headers[2].caption("Account")
-            saved_headers[3].caption("Amount")
+            saved_headers[2].caption("Amount")
         for row_index, saved_row in enumerate(raw_rows):
-            saved_columns = st.columns([1.2, 2.0, 1.2, 1.0, 1.0])
-            if saved_row["type"] == "esp":
-                saved_columns[0].write("ESP Deposit")
-                saved_columns[1].write(
-                    f"{saved_row['original_date']} · {saved_row['initials']}"
-                )
-                saved_columns[2].write("Misc. Receivable")
-            else:
-                saved_columns[0].write(
-                    PAID_ITEM_LABEL_BY_TYPE[saved_row["type"]]
-                )
-                saved_columns[1].write(saved_row["memo"])
-                saved_columns[2].write(
-                    saved_row.get(
-                        "account",
-                        PAID_ACCOUNT_BY_TYPE[saved_row["type"]],
-                    )
-                )
-            saved_columns[3].write(f"${float(saved_row['amount']):,.2f}")
-            if saved_columns[4].button(
+            saved_columns = st.columns([2.2, 2.0, 0.8, 1.0])
+            saved_columns[0].write(paid_item_account(saved_row))
+            saved_columns[1].write(paid_item_description(saved_row))
+            saved_columns[2].write(f"${float(saved_row['amount']):,.2f}")
+            if saved_columns[3].button(
                 "Remove",
                 key=(
                     f"remove_activity_{activity_key}_{closeout_workbook_key}_"
@@ -3157,15 +3112,23 @@ for activity_key in activity_workflow_keys(activity_source_totals):
         for row_number, row_id in enumerate(st.session_state[row_ids_key], start=1):
             st.markdown(f"**{activity_title} item {row_number}**")
             if activity_key == "donation":
-                row_columns = st.columns([1.5, 1.8, 1.2, 0.9, 0.35])
+                row_columns = st.columns([2.0, 1.4, 1.6, 1.1, 0.8, 0.35])
+                account_key = f"activity_{activity_key}_{row_id}_account"
                 given_key = f"activity_{activity_key}_{row_id}_given_to"
                 purpose_key = f"activity_{activity_key}_{row_id}_purpose"
                 manager_key = f"activity_{activity_key}_{row_id}_manager"
                 amount_key = f"activity_{activity_key}_{row_id}_amount"
-                given_to = row_columns[0].text_input("Given To", key=given_key)
-                purpose = row_columns[1].text_input("For", key=purpose_key)
-                manager = row_columns[2].text_input("Manager Approval", key=manager_key)
-                amount = row_columns[3].number_input(
+                selected_account = row_columns[0].selectbox(
+                    "QuickBooks Account",
+                    options=load_default_chart_of_accounts(),
+                    index=None,
+                    placeholder="Search account",
+                    key=account_key,
+                )
+                given_to = row_columns[1].text_input("Given To", key=given_key)
+                purpose = row_columns[2].text_input("For", key=purpose_key)
+                manager = row_columns[3].text_input("Manager Approval", key=manager_key)
+                amount = row_columns[4].number_input(
                     "Amount",
                     value=activity_default_amount(activity_key),
                     min_value=0.0,
@@ -3173,9 +3136,16 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                     format="%.2f",
                     key=amount_key,
                 )
-                widget_keys = (given_key, purpose_key, manager_key, amount_key)
+                widget_keys = (
+                    account_key,
+                    given_key,
+                    purpose_key,
+                    manager_key,
+                    amount_key,
+                )
                 raw_rows.append(
                     {
+                        "account": selected_account,
                         "given_to": given_to,
                         "purpose": purpose,
                         "manager": manager,
@@ -3183,56 +3153,24 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                     }
                 )
             else:
-                row_columns = st.columns([1.1, 1.5, 2.0, 0.8, 0.35])
-                type_key = f"activity_{activity_key}_{row_id}_type"
+                row_columns = st.columns([2.2, 2.0, 0.8, 0.35])
+                account_key = f"activity_{activity_key}_{row_id}_account"
+                memo_key = f"activity_{activity_key}_{row_id}_memo"
                 amount_key = f"activity_{activity_key}_{row_id}_amount"
-                item_type = row_columns[0].selectbox(
-                    "Type",
-                    options=list(PAID_ITEM_TYPE_BY_LABEL),
-                    key=type_key,
+                selected_account = row_columns[0].selectbox(
+                    "QuickBooks Account",
+                    options=load_default_chart_of_accounts(),
+                    index=None,
+                    placeholder="Search account",
+                    key=account_key,
                 )
-                if item_type == "ESP Deposit":
-                    date_key = f"activity_{activity_key}_{row_id}_date"
-                    initials_key = f"activity_{activity_key}_{row_id}_initials"
-                    original_date = row_columns[1].date_input(
-                        "Original ESP Deposit Date",
-                        value=deposit_date or date.today(),
-                        key=date_key,
-                    )
-                    initials = row_columns[2].text_input("Initials", key=initials_key)
-                    widget_keys = (type_key, date_key, initials_key, amount_key)
-                    raw_row = {
-                        "type": "esp",
-                        "original_date": original_date,
-                        "initials": initials,
-                    }
-                else:
-                    memo_key = f"activity_{activity_key}_{row_id}_memo"
-                    memo = row_columns[1].text_input("Description / Memo", key=memo_key)
-                    raw_type = PAID_ITEM_TYPE_BY_LABEL[item_type]
-                    raw_row = {"type": raw_type, "memo": memo}
-                    if item_type == "Other":
-                        account_key = f"activity_{activity_key}_{row_id}_account"
-                        selected_account = row_columns[2].selectbox(
-                            "QuickBooks Account",
-                            options=load_default_chart_of_accounts(),
-                            index=None,
-                            placeholder="Search account",
-                            key=account_key,
-                        )
-                        raw_row["account"] = selected_account
-                        widget_keys = (
-                            type_key,
-                            memo_key,
-                            account_key,
-                            amount_key,
-                        )
-                    else:
-                        row_columns[2].caption(
-                            f"Posts to {PAID_ACCOUNT_BY_TYPE[raw_type]}"
-                        )
-                        widget_keys = (type_key, memo_key, amount_key)
-                amount = row_columns[3].number_input(
+                memo = row_columns[1].text_input(
+                    "Description / Memo",
+                    key=memo_key,
+                )
+                widget_keys = (account_key, memo_key, amount_key)
+                raw_row = {"account": selected_account, "memo": memo}
+                amount = row_columns[2].number_input(
                     "Amount",
                     min_value=0.0,
                     step=0.01,
@@ -3242,7 +3180,7 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 raw_rows.append({**raw_row, "amount": float(amount)})
 
             delete_key = f"delete_activity_{activity_key}_{row_id}"
-            if row_columns[4].button(
+            if row_columns[-1].button(
                 "×",
                 key=delete_key,
                 help=f"Delete {activity_title} item {row_number}",

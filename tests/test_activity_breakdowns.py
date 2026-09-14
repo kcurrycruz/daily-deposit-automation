@@ -283,6 +283,103 @@ class ActivityBreakdownTests(unittest.TestCase):
             }],
         )
 
+    def test_account_first_paid_rows_do_not_require_a_type(self):
+        api = self.activity_api()
+        payload = {
+            key: {"mode": "quickbooks", "rows": []}
+            for key in ("donation", "paid_out", "paid_in")
+        }
+        payload["paid_in"] = {
+            "mode": "app",
+            "rows": [{
+                "account": "8504000 · Education",
+                "memo": "Class registration",
+                "amount": 35.0,
+            }],
+        }
+        payload["paid_out"] = {
+            "mode": "app",
+            "rows": [{
+                "account": "8428000 · Admn - Office Supplies",
+                "memo": "Printer paper",
+                "amount": 42.5,
+            }],
+        }
+
+        lines = api["build_lines"](payload)
+
+        self.assertEqual(
+            lines["paid_in"],
+            [{
+                "account": "8504000 · Education",
+                "memo": "PAID IN: Class registration",
+                "class_name": "",
+                "qb_effect": 35.0,
+            }],
+        )
+        self.assertEqual(
+            lines["paid_out"],
+            [{
+                "account": "8428000 · Admn - Office Supplies",
+                "memo": "PAID OUT: Printer paper",
+                "class_name": "",
+                "qb_effect": -42.5,
+            }],
+        )
+
+    def test_donation_posts_to_the_selected_quickbooks_account(self):
+        api = self.activity_api()
+        payload = {
+            key: {"mode": "quickbooks", "rows": []}
+            for key in ("donation", "paid_out", "paid_in")
+        }
+        payload["donation"] = {
+            "mode": "app",
+            "rows": [{
+                "account": "8504000 · Education",
+                "given_to": "Community School",
+                "purpose": "Food workshop",
+                "manager": "KC",
+                "amount": 100.0,
+            }],
+        }
+
+        self.assertEqual(
+            api["build_lines"](payload)["donation"],
+            [{
+                "account": "8504000 · Education",
+                "memo": "Given to Community School for Food workshop - KC",
+                "class_name": "Marketing",
+                "qb_effect": -100.0,
+            }],
+        )
+
+    def test_new_account_first_rows_require_an_account_selection(self):
+        api = self.activity_api()
+        cases = (
+            (
+                "donation",
+                {
+                    "account": None,
+                    "given_to": "Food Pantry",
+                    "purpose": "Groceries",
+                    "manager": "KC",
+                    "amount": 100.0,
+                },
+            ),
+            (
+                "paid_out",
+                {"account": None, "memo": "Printer paper", "amount": 20.0},
+            ),
+        )
+        for category, row in cases:
+            with self.subTest(category=category):
+                with self.assertRaisesRegex(ValueError, "QuickBooks Account is required"):
+                    api["normalize_section"](
+                        category,
+                        {"mode": "app", "rows": [row]},
+                    )
+
     def test_actuals_are_locked_to_the_sum_of_each_app_breakdown(self):
         api = self.activity_api()
 

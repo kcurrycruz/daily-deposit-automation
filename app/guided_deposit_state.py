@@ -9,9 +9,11 @@ from app.deposit_workflow import (
     normalize_step_completions,
 )
 from app.activity_breakdowns import (
-    PAID_ACCOUNT_BY_TYPE,
+    DONATION_DEFAULT_ACCOUNT,
     PAID_ITEM_LABEL_BY_TYPE,
     normalize_activity_section,
+    paid_item_account,
+    paid_item_description,
 )
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
@@ -63,6 +65,9 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
             prefix = f"activity_{step}_{row_id}"
             session_state[f"{prefix}_amount"] = row["amount"]
             if step == "donation":
+                session_state[f"{prefix}_account"] = row.get(
+                    "account", DONATION_DEFAULT_ACCOUNT
+                )
                 session_state[f"{prefix}_given_to"] = row["given_to"]
                 session_state[f"{prefix}_purpose"] = row["purpose"]
                 session_state[f"{prefix}_manager"] = row["manager"]
@@ -75,12 +80,8 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
                         row["original_date"]
                     )
                     session_state[f"{prefix}_initials"] = row["initials"]
-                else:
-                    session_state[f"{prefix}_memo"] = row["memo"]
-                    if row["type"] == "other":
-                        session_state[f"{prefix}_account"] = row.get(
-                            "account", PAID_ACCOUNT_BY_TYPE["other"]
-                        )
+                session_state[f"{prefix}_account"] = paid_item_account(row)
+                session_state[f"{prefix}_memo"] = paid_item_description(row)
         return True
 
     if step == "coupons":

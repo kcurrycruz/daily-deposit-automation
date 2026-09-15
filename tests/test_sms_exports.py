@@ -25,7 +25,7 @@ class SmsExportTests(unittest.TestCase):
         self.assertEqual(classify_sms_rows(sms_rows("sales")), "sales")
 
     def test_ignores_totalizer_words_in_non_header_rows(self):
-        rows = sms_rows("sales") + ((6, "Totalizer Adjustment"),)
+        rows = sms_rows("sales") + (("Totalizer Adjustment", 6),)
 
         self.assertEqual(classify_sms_rows(rows), "sales")
 

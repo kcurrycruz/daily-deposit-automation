@@ -85,9 +85,7 @@ def _has_totalizer_values(
     text_rows: tuple[tuple[str, ...], ...], expected_values: set[str]
 ) -> bool:
     for row in text_rows:
-        if not row or not re.match(
-            r"(?:tlz\.?|totalizer)\s*:?(?:\s|$)", row[0]
-        ):
+        if not row or not re.fullmatch(r"(?:tlz\.?|totalizer)\s*:?\s*", row[0]):
             continue
         joined_row = " ".join(row)
         values = set(re.findall(r"\b\d+\b", joined_row))

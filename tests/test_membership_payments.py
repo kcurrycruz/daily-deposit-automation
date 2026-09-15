@@ -2288,7 +2288,7 @@ class MembershipPaymentTests(unittest.TestCase):
         finally:
             names_path.unlink(missing_ok=True)
 
-    def test_only_hundred_dollar_new_member_uses_free_text_name_entry(self):
+    def test_member_name_input_mode_follows_quickbooks_confirmation(self):
         from app.membership_payments import member_name_input_mode
 
         self.assertEqual(member_name_input_mode("New member — $100"), "new")
@@ -2302,9 +2302,42 @@ class MembershipPaymentTests(unittest.TestCase):
         ):
             with self.subTest(payment_option=payment_option):
                 self.assertEqual(
-                    member_name_input_mode(payment_option),
+                    member_name_input_mode(payment_option, None),
+                    "choice",
+                )
+                self.assertEqual(
+                    member_name_input_mode(payment_option, True),
                     "quickbooks",
                 )
+                self.assertEqual(
+                    member_name_input_mode(payment_option, False),
+                    "new",
+                )
+
+    def test_non_quickbooks_plan_keeps_new_name_for_reference_only(self):
+        from app.membership_payments import (
+            build_membership_lines,
+            membership_payment_from_entry,
+        )
+
+        payment = membership_payment_from_entry(
+            member_name="New Installment Member",
+            member_number_status="No",
+            member_number="",
+            quickbooks_member_exists=False,
+            payment_option="New plan — 1 year",
+            amount=10.00,
+            existing_quickbooks_names=("Existing Member",),
+        )
+
+        self.assertEqual(payment["new_member_name"], "New Installment Member")
+        self.assertEqual(payment["member_name"], "")
+        self.assertTrue(
+            all(
+                line["name"] == ""
+                for line in build_membership_lines([payment], handling_mode="automatic")
+            )
+        )
 
     def test_member_payment_entry_requires_quickbooks_name_confirmation(self):
         from app.membership_payments import membership_payment_from_entry

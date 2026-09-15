@@ -2686,17 +2686,38 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                     ),
                 )
             else:
-                quickbooks_name_status = "Yes"
-                st.session_state[quickbooks_status_key] = "Yes"
-                member_name = st.selectbox(
-                    "QuickBooks Member Name",
-                    options=quickbooks_member_names,
-                    index=None,
-                    placeholder="Start typing a name",
-                    key=f"{entry_key}_member_name_search",
-                    help="Names are alphabetized and narrow as you type.",
-                ) or ""
-                st.session_state[quickbooks_name_key] = member_name
+                if quickbooks_name_status == "Yes" and saved_quickbooks_name:
+                    member_name_label = "Member Name: Set"
+                elif quickbooks_name_status == "No":
+                    member_name_label = "Member Name: New"
+                else:
+                    member_name_label = "Member Name"
+                with st.popover(member_name_label, use_container_width=True):
+                    quickbooks_name_status = st.radio(
+                        "Does this member already exist in QuickBooks?",
+                        options=["Yes", "No"],
+                        index=None,
+                        horizontal=True,
+                        key=quickbooks_status_key,
+                    )
+                    if quickbooks_name_status == "Yes":
+                        member_name = st.selectbox(
+                            "QuickBooks Member Name",
+                            options=quickbooks_member_names,
+                            index=None,
+                            placeholder="Start typing a name",
+                            key=f"{entry_key}_member_name_search",
+                            help="Names are alphabetized and narrow as you type.",
+                        ) or ""
+                        st.session_state[quickbooks_name_key] = member_name
+                    elif quickbooks_name_status == "No":
+                        member_name = st.text_input(
+                            "New Member Name",
+                            key=f"{entry_key}_new_member_name",
+                            placeholder="Enter the name to create in QuickBooks",
+                        )
+                    else:
+                        member_name = ""
         quickbooks_member_exists = (
             True if quickbooks_name_status == "Yes"
             else False if quickbooks_name_status == "No"
@@ -2767,7 +2788,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                 key=f"{entry_key}_add",
             )
 
-        if payment_option == NEW_MEMBER_FULL_OPTION:
+        if quickbooks_member_exists is False:
             st.caption(
                 "Create this member name in QuickBooks before importing the IIF. "
                 "The app keeps the IIF NAME field blank until then."

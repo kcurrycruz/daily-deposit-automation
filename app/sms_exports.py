@@ -84,17 +84,16 @@ def _detection_text(value: object) -> str:
 def _has_totalizer_values(
     text_rows: tuple[tuple[str, ...], ...], expected_values: set[str]
 ) -> bool:
-    if not any(
-        "totalizer" in " ".join(row) or "tlz." in " ".join(row)
-        for row in text_rows
-    ):
-        return False
-    values = {
-        value
-        for row in text_rows
-        for value in re.findall(r"\b\d+\b", " ".join(row))
-    }
-    return expected_values <= values
+    for row in text_rows:
+        if not row or not re.match(
+            r"(?:tlz\.?|totalizer)\s*:?(?:\s|$)", row[0]
+        ):
+            continue
+        joined_row = " ".join(row)
+        values = set(re.findall(r"\b\d+\b", joined_row))
+        if expected_values <= values:
+            return True
+    return False
 
 
 def _has_hash_activity_markers(report_text: str) -> bool:
@@ -112,15 +111,10 @@ def _parse_report_date(rows: tuple[tuple[object, ...], ...]) -> date:
                 continue
             inline_match = re.search(r"\bdate\s*:\s*(.+)", value, flags=re.IGNORECASE)
             if inline_match:
-                parsed = _parse_date_value(inline_match.group(1))
-                if parsed is not None:
-                    dates.add(parsed)
+                dates.update(_parse_dates_in_value(inline_match.group(1)))
             if re.fullmatch(r"\s*date\s*:\s*", value, flags=re.IGNORECASE):
                 for following_value in row[index + 1 :]:
-                    parsed = _parse_date_value(following_value)
-                    if parsed is not None:
-                        dates.add(parsed)
-                        break
+                    dates.update(_parse_dates_in_value(following_value))
 
     if len(dates) == 1:
         return dates.pop()
@@ -129,15 +123,15 @@ def _parse_report_date(rows: tuple[tuple[object, ...], ...]) -> date:
     raise ValueError("This SMS report does not contain a report date.")
 
 
-def _parse_date_value(value: object) -> date | None:
+def _parse_dates_in_value(value: object) -> tuple[date, ...]:
     if not isinstance(value, str):
-        return None
-    match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", value)
-    if not match:
-        return None
-    for date_format in ("%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
-        try:
-            return datetime.strptime(match.group(0), date_format).date()
-        except ValueError:
-            continue
-    return None
+        return ()
+    parsed_dates = []
+    for date_text in re.findall(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", value):
+        for date_format in ("%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
+            try:
+                parsed_dates.append(datetime.strptime(date_text, date_format).date())
+                break
+            except ValueError:
+                continue
+    return tuple(parsed_dates)

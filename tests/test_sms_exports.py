@@ -2,11 +2,37 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from app.sms_exports import classify_sms_rows, parse_sms_export
-from tests.sms_fixture_factory import sms_rows
+from app.sms_exports import (
+    SMS_ROLE_ORDER,
+    build_sms_export_bundle,
+    classify_sms_rows,
+    parse_sms_export,
+)
+from tests.sms_fixture_factory import sms_exports_091426, sms_rows
 
 
 class SmsExportTests(unittest.TestCase):
+    def test_bundle_accepts_six_reports_in_any_order(self):
+        bundle = build_sms_export_bundle(reversed(sms_exports_091426()))
+
+        self.assertEqual(tuple(bundle.reports), SMS_ROLE_ORDER)
+        self.assertEqual(bundle.deposit_date, date(2026, 9, 14))
+
+    def test_bundle_names_duplicate_and_missing_roles(self):
+        with self.assertRaisesRegex(ValueError, "Two files were detected as HASH"):
+            build_sms_export_bundle(sms_exports_091426(duplicate="hash"))
+        with self.assertRaisesRegex(ValueError, "Milk Bottles report is missing"):
+            build_sms_export_bundle(sms_exports_091426(omit="milk_bottles"))
+
+    def test_bundle_blocks_mismatched_report_dates(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Coupon report date 09/13/2026.*Sales report date 09/14/2026",
+        ):
+            build_sms_export_bundle(
+                sms_exports_091426(coupon_date=date(2026, 9, 13))
+            )
+
     def test_classifies_each_report_from_content_instead_of_filename(self):
         cases = {
             "sales": sms_rows("sales"),

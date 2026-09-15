@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Iterable, Mapping
 
 import xlrd
 
@@ -16,6 +17,62 @@ class SmsExport:
     filename: str
     report_date: date
     rows: tuple[tuple[object, ...], ...]
+
+
+@dataclass(frozen=True)
+class SmsExportBundle:
+    deposit_date: date
+    reports: Mapping[str, SmsExport]
+
+
+_SMS_ROLE_LABELS = {
+    "sales": "Sales",
+    "coupons": "Coupon",
+    "discounts": "Discounts",
+    "hash": "HASH",
+    "bs": "Balance Sheet",
+    "milk_bottles": "Milk Bottles",
+}
+
+
+def validate_sms_exports(files: Iterable[object]) -> SmsExportBundle:
+    """Parse uploaded exports, then validate their roles and common date."""
+    parsed = [parse_sms_export(item.name, item.getvalue()) for item in files]
+    return build_sms_export_bundle(parsed)
+
+
+def build_sms_export_bundle(reports: Iterable[SmsExport]) -> SmsExportBundle:
+    """Validate the six required reports and return them in stable role order."""
+    reports_by_role: dict[str, SmsExport] = {}
+    for report in reports:
+        if report.role not in SMS_ROLE_ORDER:
+            raise ValueError("This SMS report has an unrecognized report role.")
+        if report.role in reports_by_role:
+            label = _SMS_ROLE_LABELS[report.role]
+            raise ValueError(f"Two files were detected as {label}.")
+        reports_by_role[report.role] = report
+
+    missing_roles = [role for role in SMS_ROLE_ORDER if role not in reports_by_role]
+    if missing_roles:
+        labels = [_SMS_ROLE_LABELS[role] for role in missing_roles]
+        if len(labels) == 1:
+            raise ValueError(f"{labels[0]} report is missing.")
+        raise ValueError(f"SMS reports are missing: {', '.join(labels)}.")
+
+    sales_date = reports_by_role["sales"].report_date
+    for role in SMS_ROLE_ORDER:
+        report_date = reports_by_role[role].report_date
+        if report_date != sales_date:
+            raise ValueError(
+                f"{_SMS_ROLE_LABELS[role]} report date "
+                f"{report_date:%m/%d/%Y} does not match Sales report date "
+                f"{sales_date:%m/%d/%Y}."
+            )
+
+    return SmsExportBundle(
+        deposit_date=sales_date,
+        reports={role: reports_by_role[role] for role in SMS_ROLE_ORDER},
+    )
 
 
 def read_sms_xls(file_bytes: bytes) -> tuple[tuple[object, ...], ...]:

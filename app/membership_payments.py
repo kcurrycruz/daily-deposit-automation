@@ -92,6 +92,15 @@ def payment_fields_from_option(option: str) -> dict:
         raise ValueError("Unknown membership payment option") from None
 
 
+def member_name_input_mode(payment_option: str) -> str:
+    payment_fields_from_option(payment_option)
+    return (
+        "new"
+        if payment_option in {NEW_MEMBER_FULL_OPTION, LEGACY_PAID_IN_FULL_OPTION}
+        else "quickbooks"
+    )
+
+
 def quickbooks_name_state_for_payment_option(
     payment_option: str,
     previous_option: str | None,

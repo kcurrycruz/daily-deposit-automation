@@ -106,6 +106,7 @@ from app.membership_payments import (
     build_membership_lines,
     exclusive_run_lock,
     membership_editor_key,
+    member_name_input_mode,
     membership_mode_from_choice,
     membership_payment_from_entry,
     load_quickbooks_member_names,
@@ -2672,13 +2673,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         with entry_columns[1]:
             quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
             quickbooks_name_key = f"{entry_key}_member_name"
-            if payment_option == NEW_MEMBER_FULL_OPTION:
-                member_name_label = "Member Name: New"
-            elif quickbooks_name_status == "Yes" and saved_quickbooks_name:
-                member_name_label = "Member Name: Set"
-            else:
-                member_name_label = "Member Name"
-            if payment_option == NEW_MEMBER_FULL_OPTION:
+            if member_name_input_mode(payment_option) == "new":
                 quickbooks_name_status = "No"
                 st.session_state[quickbooks_status_key] = "No"
                 member_name = st.text_input(
@@ -2690,33 +2685,18 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                         "blank until the member is created in QuickBooks."
                     ),
                 )
-                st.caption("Create this member name in QuickBooks before importing the IIF.")
             else:
-                with st.popover(member_name_label, use_container_width=True):
-                    quickbooks_name_status = st.radio(
-                        "Does this member already exist in QuickBooks?",
-                        options=["Yes", "No"],
-                        index=None,
-                        horizontal=True,
-                        key=quickbooks_status_key,
-                    )
-                    if quickbooks_name_status == "Yes":
-                        member_name = st.selectbox(
-                            "Search QuickBooks member name",
-                            options=quickbooks_member_names,
-                            index=None,
-                            placeholder="Search account name",
-                            key=f"{entry_key}_member_name_search",
-                        ) or ""
-                        st.session_state[quickbooks_name_key] = member_name
-                    elif quickbooks_name_status == "No":
-                        member_name = ""
-                        st.caption(
-                            "The QuickBooks NAME field will stay blank so the new member "
-                            "can be assigned after import."
-                        )
-                    else:
-                        member_name = ""
+                quickbooks_name_status = "Yes"
+                st.session_state[quickbooks_status_key] = "Yes"
+                member_name = st.selectbox(
+                    "QuickBooks Member Name",
+                    options=quickbooks_member_names,
+                    index=None,
+                    placeholder="Start typing a name",
+                    key=f"{entry_key}_member_name_search",
+                    help="Names are alphabetized and narrow as you type.",
+                ) or ""
+                st.session_state[quickbooks_name_key] = member_name
         quickbooks_member_exists = (
             True if quickbooks_name_status == "Yes"
             else False if quickbooks_name_status == "No"
@@ -2785,6 +2765,12 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                 type="secondary",
                 use_container_width=True,
                 key=f"{entry_key}_add",
+            )
+
+        if payment_option == NEW_MEMBER_FULL_OPTION:
+            st.caption(
+                "Create this member name in QuickBooks before importing the IIF. "
+                "The app keeps the IIF NAME field blank until then."
             )
 
         interest_periods = None

@@ -2288,6 +2288,24 @@ class MembershipPaymentTests(unittest.TestCase):
         finally:
             names_path.unlink(missing_ok=True)
 
+    def test_only_hundred_dollar_new_member_uses_free_text_name_entry(self):
+        from app.membership_payments import member_name_input_mode
+
+        self.assertEqual(member_name_input_mode("New member — $100"), "new")
+        for payment_option in (
+            "New plan — 1 year",
+            "New plan — 3 year",
+            "New plan — 5 year",
+            "Existing plan — 1 year",
+            "Existing plan — 3 year",
+            "Existing plan — 5 year",
+        ):
+            with self.subTest(payment_option=payment_option):
+                self.assertEqual(
+                    member_name_input_mode(payment_option),
+                    "quickbooks",
+                )
+
     def test_member_payment_entry_requires_quickbooks_name_confirmation(self):
         from app.membership_payments import membership_payment_from_entry
 

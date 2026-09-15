@@ -65,24 +65,6 @@ def load_quickbooks_member_names(path: str | Path) -> tuple[str, ...]:
     )
 
 
-def validate_new_member_name(name: str, existing_quickbooks_names=()) -> str:
-    new_member_name = str(name or "").strip()
-    if any(delimiter in new_member_name for delimiter in ("\t", "\r", "\n")):
-        raise ValueError("New member name cannot contain tabs or line breaks")
-    if not new_member_name:
-        raise ValueError("New member name is required")
-    existing_names = {
-        str(existing_name or "").strip().casefold()
-        for existing_name in existing_quickbooks_names
-        if str(existing_name or "").strip()
-    }
-    if new_member_name.casefold() in existing_names:
-        raise ValueError(
-            "This member name already exists in QuickBooks. Select another payment option."
-        )
-    return new_member_name
-
-
 def payment_fields_from_option(option: str) -> dict:
     if option == LEGACY_PAID_IN_FULL_OPTION:
         option = NEW_MEMBER_FULL_OPTION
@@ -98,10 +80,10 @@ def member_name_input_mode(
 ) -> str:
     payment_fields_from_option(payment_option)
     if payment_option in {NEW_MEMBER_FULL_OPTION, LEGACY_PAID_IN_FULL_OPTION}:
-        return "new"
+        return "none"
     if quickbooks_member_exists is None:
         return "choice"
-    return "quickbooks" if quickbooks_member_exists else "new"
+    return "quickbooks" if quickbooks_member_exists else "none"
 
 
 def quickbooks_name_state_for_payment_option(
@@ -185,21 +167,14 @@ def membership_payment_from_entry(
     payment_option: str,
     amount: float,
     interest_periods: int | None = None,
-    existing_quickbooks_names=(),
 ) -> dict:
     if quickbooks_member_exists is None:
         raise ValueError("Select Yes or No for whether the member exists in QuickBooks")
     if member_number_status not in {"Yes", "No"}:
         raise ValueError("Select Yes or No for the member number question")
     fields = payment_fields_from_option(payment_option)
-    new_member_name = ""
     if fields["payment_type"] == "Paid in full" and quickbooks_member_exists:
         raise ValueError("The $100 option is only for a new member")
-    if not quickbooks_member_exists:
-        new_member_name = validate_new_member_name(
-            member_name,
-            existing_quickbooks_names,
-        )
     payment = {
         "member_name": member_name if quickbooks_member_exists else "",
         "member_number": member_number if member_number_status == "Yes" else "",
@@ -209,8 +184,6 @@ def membership_payment_from_entry(
         "amount": amount,
         "interest_periods": interest_periods,
     }
-    if new_member_name:
-        payment["new_member_name"] = new_member_name
     payment.update(fields)
     payment.pop("payment_option")
     return payment
@@ -444,7 +417,6 @@ def _validate_payment(payment: dict) -> dict:
             raise ValueError("Member name is required")
     else:
         member_name = ""
-        validate_new_member_name(payment.get("new_member_name"))
 
     raw_member_number = str(payment.get("member_number") or "")
     if any(delimiter in raw_member_number for delimiter in ("\t", "\r", "\n")):

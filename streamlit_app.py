@@ -2673,18 +2673,16 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         with entry_columns[1]:
             quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
             quickbooks_name_key = f"{entry_key}_member_name"
-            if member_name_input_mode(payment_option) == "new":
+            if member_name_input_mode(payment_option) == "none":
                 quickbooks_name_status = "No"
                 st.session_state[quickbooks_status_key] = "No"
-                member_name = st.text_input(
-                    "New Member Name",
-                    key=f"{entry_key}_new_member_name",
-                    placeholder="Enter the name to create in QuickBooks",
-                    help=(
-                        "This name is saved for reference, but the IIF NAME field stays "
-                        "blank until the member is created in QuickBooks."
-                    ),
+                st.text_input(
+                    "Member Name",
+                    value="None",
+                    disabled=True,
+                    key=f"{entry_key}_no_member_name",
                 )
+                member_name = ""
             else:
                 if quickbooks_name_status == "Yes" and saved_quickbooks_name:
                     member_name_label = "Member Name: Set"
@@ -2711,10 +2709,10 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                         ) or ""
                         st.session_state[quickbooks_name_key] = member_name
                     elif quickbooks_name_status == "No":
-                        member_name = st.text_input(
-                            "New Member Name",
-                            key=f"{entry_key}_new_member_name",
-                            placeholder="Enter the name to create in QuickBooks",
+                        member_name = ""
+                        st.caption(
+                            "No QuickBooks name will be included. Continue with the "
+                            "remaining payment details."
                         )
                     else:
                         member_name = ""
@@ -2790,8 +2788,8 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
 
         if quickbooks_member_exists is False:
             st.caption(
-                "Create this member name in QuickBooks before importing the IIF. "
-                "The app keeps the IIF NAME field blank until then."
+                "The IIF NAME field will remain blank. Complete the member-name setup "
+                "in QuickBooks."
             )
 
         interest_periods = None
@@ -2814,7 +2812,6 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                     payment_option=payment_option,
                     amount=amount,
                     interest_periods=interest_periods,
-                    existing_quickbooks_names=quickbooks_member_names,
                 )
                 build_membership_lines([new_payment], handling_mode="automatic")
             except ValueError as exc:
@@ -2851,9 +2848,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                 )
             payment_columns = st.columns([2.2, 1.2, 2.0, 1.0, 0.8])
             payment_columns[0].write(
-                payment.get("new_member_name")
-                or payment["member_name"]
-                or "New member — assign in QuickBooks"
+                payment["member_name"] or "None"
             )
             payment_columns[1].write(saved_number)
             payment_columns[2].write(saved_option)

@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import date
 from io import BytesIO
 from numbers import Number
@@ -120,21 +121,24 @@ class DailyReportingWorkbookTests(unittest.TestCase):
         self.assertEqual(
             values_workbook["091426 Hash"]["B5"].value, "Pass Through Donations"
         )
-        for sheet_name, column, label in (
-            ("091426 Discounts", "B", "Member Discount"),
-            ("091426 BS", "B", "Milk Bottle Return"),
-            ("091426 Hash", "B", "Pass Through Donations"),
+        template = load_workbook(TEMPLATE, data_only=False)
+        for placeholder_name, sheet_name in (
+            ("XXXXXX Discounts", "091426 Discounts"),
+            ("XXXXXX BS", "091426 BS"),
+            ("XXXXXX Hash", "091426 Hash"),
         ):
-            with self.subTest(sheet=sheet_name, column=column):
-                self.assertGreaterEqual(
-                    values_workbook[sheet_name].column_dimensions[column].width,
-                    len(label) + 2,
-                )
+            for column in "ABCDEFG":
+                with self.subTest(sheet=sheet_name, column=column):
+                    self.assertEqual(
+                        values_workbook[sheet_name]
+                        .column_dimensions[column]
+                        .width,
+                        template[placeholder_name].column_dimensions[column].width,
+                    )
         self.assertEqual(
             tuple(report.report_date for report in bundle.reports.values()), input_dates
         )
 
-        template = load_workbook(TEMPLATE, data_only=False)
         for address in ("A1", "A4", "C22", "G54", "J3", "M1", "M2"):
             with self.subTest(style=address):
                 self.assertEqual(
@@ -161,6 +165,44 @@ class DailyReportingWorkbookTests(unittest.TestCase):
                 for cell in row
             )
         )
+
+    def test_extended_source_amount_rows_are_numeric_with_two_decimals(self):
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        data = build_sms_deposit_data(bundle)
+        reports = dict(bundle.reports)
+        for role in ("sales", "coupons"):
+            rows = (
+                ("Sub-department Single Total",),
+                ("Date:", "09/14/2026", "to", "09/14/2026"),
+                ("", "Sub-Department", "Qty", "Amount", "g/Weight"),
+                *tuple(
+                    (10000 + index, f"Extended {role} {index}", 1, "1.25", "0.00")
+                    for index in range(1, 36)
+                ),
+            )
+            reports[role] = replace(reports[role], rows=rows)
+        extended_bundle = replace(bundle, reports=reports)
+
+        workbook = load_workbook(
+            BytesIO(build_reporting_workbook(TEMPLATE, extended_bundle, data)),
+            data_only=True,
+        )
+        for sheet_name in ("SubDept Single", "SubDept Coupon (Local Discount)"):
+            for row_number in range(1, 36):
+                with self.subTest(sheet=sheet_name, row=row_number):
+                    cell = workbook[sheet_name].cell(row=row_number, column=7)
+                    self.assertIsInstance(cell.value, Number)
+                    self.assertIn(MONEY_FORMAT, cell.number_format)
+
+    def test_rejects_bundle_and_normalized_data_for_different_dates(self):
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        data = replace(build_sms_deposit_data(bundle), deposit_date=date(2026, 9, 15))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "SMS export bundle date 09/14/2026 does not match normalized data date 09/15/2026",
+        ):
+            build_reporting_workbook(TEMPLATE, bundle, data)
 
     def test_department_snapshot_uses_sales_plus_coupon_values(self):
         sales_rows = (

@@ -7,7 +7,6 @@ from io import BytesIO
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 
 from app.sms_deposit_data import SmsDepositData
 from app.sms_exports import SmsExport, SmsExportBundle
@@ -39,6 +38,12 @@ def build_reporting_workbook(
     data: SmsDepositData,
 ) -> bytes:
     """Build a formula-free daily reporting snapshot from validated SMS data."""
+    if bundle.deposit_date != data.deposit_date:
+        raise ValueError(
+            f"SMS export bundle date {bundle.deposit_date:%m/%d/%Y} does not match "
+            f"normalized data date {data.deposit_date:%m/%d/%Y}."
+        )
+
     workbook = load_workbook(Path(template_path))
     for role, sheet_name in _SOURCE_SHEETS.items():
         _write_subdepartment_rows(workbook[sheet_name], bundle.reports[role])
@@ -64,7 +69,9 @@ def _write_subdepartment_rows(sheet, report: SmsExport) -> None:
 
     for row_number, values in enumerate(_subdepartment_rows(report), start=1):
         for column_number, value in enumerate(values, start=1):
-            sheet.cell(row=row_number, column=column_number, value=value)
+            cell = sheet.cell(row=row_number, column=column_number, value=value)
+            if column_number == 7 and "0.00" not in cell.number_format:
+                cell.number_format = "0.00"
 
 
 def _subdepartment_rows(report: SmsExport) -> list[tuple[object, ...]]:
@@ -126,22 +133,6 @@ def _write_source_grid(sheet, report: SmsExport) -> None:
     for row_number, row in enumerate(report.rows, start=1):
         for column_number, value in enumerate(row, start=1):
             sheet.cell(row=row_number, column=column_number, value=value)
-    _fit_source_columns(sheet, report.rows)
-
-
-def _fit_source_columns(sheet, rows: tuple[tuple[object, ...], ...]) -> None:
-    column_count = max((len(row) for row in rows), default=0)
-    for column_number in range(1, column_count + 1):
-        content_width = max(
-            (
-                len(str(row[column_number - 1]))
-                for row in rows
-                if column_number <= len(row) and row[column_number - 1] is not None
-            ),
-            default=0,
-        )
-        column = sheet.column_dimensions[get_column_letter(column_number)]
-        column.width = max(column.width or 0, min(content_width + 2, 60))
 
 
 def _write_report_values(sheet, data: SmsDepositData) -> None:

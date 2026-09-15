@@ -2218,6 +2218,76 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual(payment["member_name"], "")
         self.assertEqual(lines[0]["name"], "")
 
+    def test_new_member_hundred_dollar_option_keeps_reference_name_out_of_iif(self):
+        from app.membership_payments import (
+            build_membership_lines,
+            membership_payment_from_entry,
+        )
+
+        payment = membership_payment_from_entry(
+            member_name="  New Member Name  ",
+            member_number_status="No",
+            member_number="",
+            quickbooks_member_exists=False,
+            payment_option="New member — $100",
+            amount=100.00,
+            existing_quickbooks_names=("Existing Member",),
+        )
+
+        self.assertEqual(payment["member_name"], "")
+        self.assertEqual(payment["new_member_name"], "New Member Name")
+        self.assertEqual(
+            build_membership_lines([payment], handling_mode="automatic")[0]["name"],
+            "",
+        )
+
+    def test_new_member_hundred_dollar_option_rejects_existing_quickbooks_name(self):
+        from app.membership_payments import membership_payment_from_entry
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "already exists in QuickBooks",
+        ):
+            membership_payment_from_entry(
+                member_name="  EXISTING MEMBER  ",
+                member_number_status="No",
+                member_number="",
+                quickbooks_member_exists=False,
+                payment_option="New member — $100",
+                amount=100.00,
+                existing_quickbooks_names=("Existing Member",),
+            )
+
+    def test_new_member_hundred_dollar_option_cannot_use_existing_member_mode(self):
+        from app.membership_payments import membership_payment_from_entry
+
+        with self.assertRaisesRegex(ValueError, "only for a new member"):
+            membership_payment_from_entry(
+                member_name="Existing Member",
+                member_number_status="No",
+                member_number="",
+                quickbooks_member_exists=True,
+                payment_option="New member — $100",
+                amount=100.00,
+                existing_quickbooks_names=("Existing Member",),
+            )
+
+    def test_quickbooks_member_name_file_is_cleaned_for_search(self):
+        from app.membership_payments import load_quickbooks_member_names
+
+        names_path = Path(__file__).parent / f"_quickbooks_names_{uuid4().hex}.txt"
+        names_path.write_text(
+            "  Zoe Member  \nAlpha Member\nzoe member\n\n",
+            encoding="utf-8",
+        )
+        try:
+            self.assertEqual(
+                load_quickbooks_member_names(names_path),
+                ("Alpha Member", "Zoe Member"),
+            )
+        finally:
+            names_path.unlink(missing_ok=True)
+
     def test_member_payment_entry_requires_quickbooks_name_confirmation(self):
         from app.membership_payments import membership_payment_from_entry
 

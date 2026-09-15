@@ -99,6 +99,7 @@ from app.closeout_reconciliation import (
     write_closeout_payload_file,
 )
 from app.membership_payments import (
+    NEW_MEMBER_FULL_OPTION,
     PAYMENT_OPTIONS,
     apply_membership_amount_option_state,
     apply_quickbooks_name_option_state,
@@ -107,6 +108,7 @@ from app.membership_payments import (
     membership_editor_key,
     membership_mode_from_choice,
     membership_payment_from_entry,
+    load_quickbooks_member_names,
     plan_reference_rows,
     read_subscription_total,
     remove_membership_payment,
@@ -2583,9 +2585,20 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
             icon="ℹ️",
         )
     else:
+        quickbooks_names_path = (
+            Path(__file__).parent / "assets" / "quickbooks_other_names.txt"
+        )
+        try:
+            quickbooks_member_names = load_quickbooks_member_names(
+                quickbooks_names_path
+            )
+        except OSError as exc:
+            quickbooks_member_names = ()
+            membership_valid = False
+            st.error(f"Could not load the QuickBooks member-name list: {exc}", icon="🚫")
         st.caption(
-            "Enter each payment below. Existing members must use the exact name shown in QuickBooks. "
-            "For a new member, leave the QuickBooks name blank and assign it after import."
+            "Select existing members from the searchable QuickBooks name list. "
+            "The $100 option is reserved for a new member who still needs to be created in QuickBooks."
         )
         st.info(
             "**Use the Ownership Payments sheet**\n\n"
@@ -2659,37 +2672,51 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         with entry_columns[1]:
             quickbooks_status_key = f"{entry_key}_quickbooks_name_status"
             quickbooks_name_key = f"{entry_key}_member_name"
-            if quickbooks_name_status == "No":
+            if payment_option == NEW_MEMBER_FULL_OPTION:
                 member_name_label = "Member Name: New"
             elif quickbooks_name_status == "Yes" and saved_quickbooks_name:
                 member_name_label = "Member Name: Set"
             else:
                 member_name_label = "Member Name"
-            with st.popover(member_name_label, use_container_width=True):
-                quickbooks_name_status = st.radio(
-                    "Does this member already exist in QuickBooks?",
-                    options=["Yes", "No"],
-                    index=None,
-                    horizontal=True,
-                    key=quickbooks_status_key,
+            if payment_option == NEW_MEMBER_FULL_OPTION:
+                quickbooks_name_status = "No"
+                st.session_state[quickbooks_status_key] = "No"
+                member_name = st.text_input(
+                    "New Member Name",
+                    key=f"{entry_key}_new_member_name",
+                    placeholder="Enter the name to create in QuickBooks",
+                    help=(
+                        "This name is saved for reference, but the IIF NAME field stays "
+                        "blank until the member is created in QuickBooks."
+                    ),
                 )
-                if quickbooks_name_status == "Yes":
-                    member_name = st.text_input(
-                        "Enter the exact QuickBooks member name",
-                        key=quickbooks_name_key,
+                st.caption("Create this member name in QuickBooks before importing the IIF.")
+            else:
+                with st.popover(member_name_label, use_container_width=True):
+                    quickbooks_name_status = st.radio(
+                        "Does this member already exist in QuickBooks?",
+                        options=["Yes", "No"],
+                        index=None,
+                        horizontal=True,
+                        key=quickbooks_status_key,
                     )
-                    st.caption(
-                        "Use the name exactly as it appears in QuickBooks. For example, "
-                        "the sheet may say Karl Cruz while QuickBooks says Karl Chester Cruz."
-                    )
-                elif quickbooks_name_status == "No":
-                    member_name = ""
-                    st.caption(
-                        "Name entry is disabled. The QuickBooks NAME field will stay blank "
-                        "so the new member can be assigned after import."
-                    )
-                else:
-                    member_name = ""
+                    if quickbooks_name_status == "Yes":
+                        member_name = st.selectbox(
+                            "Search QuickBooks member name",
+                            options=quickbooks_member_names,
+                            index=None,
+                            placeholder="Search account name",
+                            key=f"{entry_key}_member_name_search",
+                        ) or ""
+                        st.session_state[quickbooks_name_key] = member_name
+                    elif quickbooks_name_status == "No":
+                        member_name = ""
+                        st.caption(
+                            "The QuickBooks NAME field will stay blank so the new member "
+                            "can be assigned after import."
+                        )
+                    else:
+                        member_name = ""
         quickbooks_member_exists = (
             True if quickbooks_name_status == "Yes"
             else False if quickbooks_name_status == "No"
@@ -2699,7 +2726,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         member_number_status = None
         member_number = ""
         with entry_columns[2]:
-            if payment_option == "Paid in full — $100":
+            if payment_option == NEW_MEMBER_FULL_OPTION:
                 st.text_input(
                     "Member #",
                     value="Not required",
@@ -2736,7 +2763,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                         st.caption("The QuickBooks memo will use #Pending.")
 
         with entry_columns[3]:
-            if payment_option == "Paid in full — $100":
+            if payment_option == NEW_MEMBER_FULL_OPTION:
                 amount = st.number_input(
                     "Amount",
                     value=100.00,
@@ -2780,6 +2807,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                     payment_option=payment_option,
                     amount=amount,
                     interest_periods=interest_periods,
+                    existing_quickbooks_names=quickbooks_member_names,
                 )
                 build_membership_lines([new_payment], handling_mode="automatic")
             except ValueError as exc:
@@ -2806,7 +2834,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
             payment_headers[3].caption("Amount")
         for payment_index, payment in enumerate(saved_payments):
             if payment["payment_type"] == "Paid in full":
-                saved_option = "Paid in full — $100"
+                saved_option = NEW_MEMBER_FULL_OPTION
                 saved_number = "Not required"
             else:
                 saved_option = f"{payment['payment_type']} — {payment['plan']}"
@@ -2816,7 +2844,9 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
                 )
             payment_columns = st.columns([2.2, 1.2, 2.0, 1.0, 0.8])
             payment_columns[0].write(
-                payment["member_name"] or "New member — assign in QuickBooks"
+                payment.get("new_member_name")
+                or payment["member_name"]
+                or "New member — assign in QuickBooks"
             )
             payment_columns[1].write(saved_number)
             payment_columns[2].write(saved_option)

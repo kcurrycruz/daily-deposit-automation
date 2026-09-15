@@ -32,12 +32,14 @@ PLAN_MAX_PERIODS = {
 
 PAYMENT_TYPES = {"Paid in full", "New plan", "Existing plan"}
 HANDLING_MODES = {"automatic", "manual"}
+NEW_MEMBER_FULL_OPTION = "New member — $100"
+LEGACY_PAID_IN_FULL_OPTION = "Paid in full — $100"
 HANDLING_CHOICES = {
     "Breakdown in app using the Ownership Payments sheet": "automatic",
     "Finish manually in QuickBooks": "manual",
 }
 PAYMENT_OPTIONS = {
-    "Paid in full — $100": {"payment_type": "Paid in full", "plan": ""},
+    NEW_MEMBER_FULL_OPTION: {"payment_type": "Paid in full", "plan": ""},
     "New plan — 1 year": {"payment_type": "New plan", "plan": "1 year"},
     "New plan — 3 year": {"payment_type": "New plan", "plan": "3 year"},
     "New plan — 5 year": {"payment_type": "New plan", "plan": "5 year"},
@@ -47,7 +49,43 @@ PAYMENT_OPTIONS = {
 }
 
 
+def normalize_quickbooks_member_names(names) -> tuple[str, ...]:
+    """Return clean, case-insensitively unique names in search order."""
+    unique_names = {}
+    for value in names:
+        name = str(value or "").strip()
+        if name:
+            unique_names.setdefault(name.casefold(), name)
+    return tuple(sorted(unique_names.values(), key=str.casefold))
+
+
+def load_quickbooks_member_names(path: str | Path) -> tuple[str, ...]:
+    return normalize_quickbooks_member_names(
+        Path(path).read_text(encoding="utf-8").splitlines()
+    )
+
+
+def validate_new_member_name(name: str, existing_quickbooks_names=()) -> str:
+    new_member_name = str(name or "").strip()
+    if any(delimiter in new_member_name for delimiter in ("\t", "\r", "\n")):
+        raise ValueError("New member name cannot contain tabs or line breaks")
+    if not new_member_name:
+        raise ValueError("New member name is required")
+    existing_names = {
+        str(existing_name or "").strip().casefold()
+        for existing_name in existing_quickbooks_names
+        if str(existing_name or "").strip()
+    }
+    if new_member_name.casefold() in existing_names:
+        raise ValueError(
+            "This member name already exists in QuickBooks. Select another payment option."
+        )
+    return new_member_name
+
+
 def payment_fields_from_option(option: str) -> dict:
+    if option == LEGACY_PAID_IN_FULL_OPTION:
+        option = NEW_MEMBER_FULL_OPTION
     try:
         return dict(PAYMENT_OPTIONS[option])
     except KeyError:
@@ -62,13 +100,13 @@ def quickbooks_name_state_for_payment_option(
 ) -> tuple[str | None, str]:
     payment_fields_from_option(payment_option)
     if (
-        payment_option == "Paid in full — $100"
+        payment_fields_from_option(payment_option)["payment_type"] == "Paid in full"
         and previous_option != payment_option
     ):
         return "No", ""
     if (
-        payment_option != "Paid in full — $100"
-        and previous_option == "Paid in full — $100"
+        payment_fields_from_option(payment_option)["payment_type"] != "Paid in full"
+        and previous_option in {NEW_MEMBER_FULL_OPTION, LEGACY_PAID_IN_FULL_OPTION}
     ):
         return None, ""
     return current_status, str(current_name or "").strip()
@@ -135,11 +173,21 @@ def membership_payment_from_entry(
     payment_option: str,
     amount: float,
     interest_periods: int | None = None,
+    existing_quickbooks_names=(),
 ) -> dict:
     if quickbooks_member_exists is None:
         raise ValueError("Select Yes or No for whether the member exists in QuickBooks")
     if member_number_status not in {"Yes", "No"}:
         raise ValueError("Select Yes or No for the member number question")
+    fields = payment_fields_from_option(payment_option)
+    new_member_name = ""
+    if fields["payment_type"] == "Paid in full":
+        if quickbooks_member_exists:
+            raise ValueError("The $100 option is only for a new member")
+        new_member_name = validate_new_member_name(
+            member_name,
+            existing_quickbooks_names,
+        )
     payment = {
         "member_name": member_name if quickbooks_member_exists else "",
         "member_number": member_number if member_number_status == "Yes" else "",
@@ -149,7 +197,9 @@ def membership_payment_from_entry(
         "amount": amount,
         "interest_periods": interest_periods,
     }
-    payment.update(payment_fields_from_option(payment_option))
+    if new_member_name:
+        payment["new_member_name"] = new_member_name
+    payment.update(fields)
     payment.pop("payment_option")
     return payment
 
@@ -206,7 +256,10 @@ def normalize_membership_editor_rows(rows: list[dict]) -> tuple[list[dict], bool
     normalized_rows = [dict(row) for row in rows]
     refresh_required = False
     for row in normalized_rows:
-        if row.get("payment_option") != "Paid in full — $100":
+        if row.get("payment_option") not in {
+            NEW_MEMBER_FULL_OPTION,
+            LEGACY_PAID_IN_FULL_OPTION,
+        }:
             continue
         try:
             current_amount = Decimal(str(row.get("amount")))
@@ -365,6 +418,10 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
 
 
 def _validate_payment(payment: dict) -> dict:
+    payment_type = str(payment.get("payment_type") or "").strip()
+    if payment_type not in PAYMENT_TYPES:
+        raise ValueError("Payment type must be Paid in full, New plan, or Existing plan")
+
     quickbooks_member_exists = payment.get("quickbooks_member_exists", True) is not False
     if quickbooks_member_exists:
         raw_member_name = str(payment.get("member_name") or "")
@@ -375,10 +432,8 @@ def _validate_payment(payment: dict) -> dict:
             raise ValueError("Member name is required")
     else:
         member_name = ""
-
-    payment_type = str(payment.get("payment_type") or "").strip()
-    if payment_type not in PAYMENT_TYPES:
-        raise ValueError("Payment type must be Paid in full, New plan, or Existing plan")
+        if payment_type == "Paid in full":
+            validate_new_member_name(payment.get("new_member_name"))
 
     raw_member_number = str(payment.get("member_number") or "")
     if any(delimiter in raw_member_number for delimiter in ("\t", "\r", "\n")):

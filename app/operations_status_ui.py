@@ -5,6 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,18 @@ def build_operations_status(
     settlement_valid: bool,
     workflow_complete: bool,
     iif_generated: bool,
+    sms_reports: Mapping[str, object] | None = None,
 ) -> OperationsStatus:
+    if sms_reports is not None:
+        return _build_sms_operations_status(
+            deposit_date=deposit_date,
+            sms_reports=sms_reports,
+            settlement_uploaded=settlement_uploaded,
+            settlement_valid=settlement_valid,
+            workflow_complete=workflow_complete,
+            iif_generated=iif_generated,
+        )
+
     uploaded_count = int(daily_uploaded) + int(settlement_uploaded)
     date_text = (
         deposit_date.strftime("%m/%d/%Y")
@@ -75,6 +87,70 @@ def build_operations_status(
     elif workflow_complete and state == "ready":
         iif_progress = 75
     elif uploaded_count == 2 and workbook_valid and settlement_valid:
+        iif_progress = 50
+    else:
+        iif_progress = 0
+
+    return OperationsStatus(
+        date_text,
+        files_text,
+        iif_text,
+        state,
+        deposit_progress,
+        files_progress,
+        iif_progress,
+    )
+
+
+def _build_sms_operations_status(
+    *,
+    deposit_date: date | None,
+    sms_reports: Mapping[str, object],
+    settlement_uploaded: bool,
+    settlement_valid: bool,
+    workflow_complete: bool,
+    iif_generated: bool,
+) -> OperationsStatus:
+    """Build status text for six validated SMS reports plus settlement."""
+    from app.sms_exports import SMS_ROLE_ORDER
+
+    sms_count = sum(role in sms_reports for role in SMS_ROLE_ORDER)
+    sms_complete = sms_count == len(SMS_ROLE_ORDER)
+    upload_count = sms_count + int(settlement_uploaded)
+    date_text = (
+        deposit_date.strftime("%m/%d/%Y")
+        if deposit_date and upload_count
+        else "Waiting for SMS reports"
+    )
+
+    if sms_complete and settlement_valid:
+        files_text = "All reports verified"
+    elif settlement_uploaded and not settlement_valid:
+        files_text = f"{sms_count} of 6 SMS verified · Card Settlement needs attention"
+    elif settlement_uploaded:
+        files_text = f"{sms_count} of 6 SMS verified · Card Settlement uploaded"
+    else:
+        files_text = f"{sms_count} of 6 SMS verified · Card Settlement needed"
+
+    reports_valid = sms_complete and settlement_valid
+    if iif_generated and reports_valid and workflow_complete:
+        iif_text, state = "Ready to download", "ready"
+    elif sms_complete and settlement_uploaded and not settlement_valid:
+        iif_text, state = "Needs attention", "attention"
+    elif reports_valid and workflow_complete:
+        iif_text, state = "Ready to prepare IIF", "ready"
+    elif reports_valid:
+        iif_text, state = "Complete guided steps", "active"
+    else:
+        iif_text, state = "Not ready", "waiting"
+
+    deposit_progress = 100 if deposit_date and upload_count else 0
+    files_progress = round(upload_count / 7 * 100)
+    if iif_generated and state == "ready":
+        iif_progress = 100
+    elif workflow_complete and state == "ready":
+        iif_progress = 75
+    elif reports_valid:
         iif_progress = 50
     else:
         iif_progress = 0

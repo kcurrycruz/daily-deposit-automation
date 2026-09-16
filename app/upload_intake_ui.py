@@ -4,6 +4,17 @@ import html
 from dataclasses import dataclass
 
 
+SMS_ROLE_LABELS = (
+    ("sales", "Sales"),
+    ("coupons", "Coupon"),
+    ("discounts", "Discounts"),
+    ("hash", "HASH"),
+    ("bs", "Balance Sheet"),
+    ("milk_bottles", "Milk Bottles"),
+)
+
+# Kept temporarily for the existing app entry point while Task 5 replaces its
+# workbook ingestion with the normalized SMS export workflow.
 WORKBOOK_ROLE_LABELS = (
     ("sales", "Sales"),
     ("coupons", "Coupons"),
@@ -11,6 +22,36 @@ WORKBOOK_ROLE_LABELS = (
     ("bs", "Balance Sheet"),
     ("hash", "HASH"),
 )
+
+
+def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
+    """Render compact, safe progress for the six required SMS exports."""
+    verified_count = sum(role in reports for role, _ in SMS_ROLE_LABELS)
+    checks = "".join(
+        '<div class="hwfc-workbook-check">'
+        f'<div class="hwfc-workbook-check-label">'
+        f'{"✓" if role in reports else "•"} {html.escape(label)}</div>'
+        f'<div class="hwfc-workbook-check-sheet">'
+        f'{html.escape(str(getattr(reports.get(role), "filename", "Waiting for report")))}</div>'
+        "</div>"
+        for role, label in SMS_ROLE_LABELS
+    )
+    validation_message = (
+        '<div class="hwfc-sms-validation-message">'
+        f'{html.escape(str(error))}</div>'
+        if error is not None
+        else ""
+    )
+    ui.markdown(
+        '<div class="hwfc-workbook-validation-card">'
+        '<div class="hwfc-workbook-validation-title">'
+        f'SMS Reports · {verified_count} of 6 verified'
+        "</div>"
+        f'<div class="hwfc-workbook-checks">{checks}</div>'
+        f"{validation_message}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_workbook_validation(ui, *, roles: dict, report_date) -> bool:
@@ -70,12 +111,12 @@ def missing_settlement_date_warning(
 
 def retained_upload_pair(
     state, *, uploader_key: int
-) -> tuple[object | None, object | None]:
+) -> tuple[list[object] | None, object | None]:
     """Return the upload pair while its widgets are hidden on Deposit Steps."""
     from app.program_hub_ui import preserved_daily_upload
 
     return (
-        preserved_daily_upload(state, f"daily_workbook_{uploader_key}"),
+        preserved_daily_upload(state, f"sms_reports_{uploader_key}"),
         preserved_daily_upload(state, f"card_settlement_{uploader_key}"),
     )
 
@@ -84,9 +125,14 @@ def retained_upload_pair(
 class UploadIntakeRender:
     """Values and date slot from the compact horizontal upload row."""
 
-    daily_workbook: object
+    sms_exports: list[object] | None
     card_settlement: object
     date_slot: object
+
+    @property
+    def daily_workbook(self) -> None:
+        """Keep the pre-SMS app entry point inert until its Task 5 migration."""
+        return None
 
 
 def render_upload_inputs(
@@ -94,61 +140,59 @@ def render_upload_inputs(
     *,
     uploader_key: int,
 ) -> UploadIntakeRender:
-    """Render the original date/workbook/settlement row with native uploaders."""
+    """Render the date, multi-SMS-report, and settlement upload row."""
     from app.program_hub_ui import preserved_daily_upload, sync_daily_upload
 
     upload_change_state = getattr(ui, "session_state", None)
-    date_col, workbook_col, settlement_col = ui.columns(
+    date_col, sms_col, settlement_col = ui.columns(
         [0.22, 0.39, 0.39],
         gap="medium",
     )
 
     with date_col:
         ui.markdown(
-            '<div class="hwfc-section-label">Report date</div>',
+            '<div class="hwfc-section-label">Report Date</div>',
             unsafe_allow_html=True,
         )
         date_slot = ui.empty()
 
-    with workbook_col:
+    with sms_col:
         ui.markdown(
-            '<div class="hwfc-section-label">Daily workbook</div>',
+            '<div class="hwfc-section-label">SMS Reports</div>',
             unsafe_allow_html=True,
         )
-        daily_workbook_key = f"daily_workbook_{uploader_key}"
-        preserved_daily_workbook = (
-            preserved_daily_upload(upload_change_state, daily_workbook_key)
+        sms_reports_key = f"sms_reports_{uploader_key}"
+        preserved_sms_reports = (
+            preserved_daily_upload(upload_change_state, sms_reports_key)
             if upload_change_state is not None
             else None
         )
-        daily_change_kwargs = (
+        sms_change_kwargs = (
             {
                 "on_change": sync_daily_upload,
-                "args": (upload_change_state, daily_workbook_key),
+                "args": (upload_change_state, sms_reports_key),
             }
             if upload_change_state is not None
             else {}
         )
-        selected_daily_workbook = ui.file_uploader(
-            "Upload completed SubDept workbook",
-            type=["xlsx", "xlsm"],
+        selected_sms_reports = ui.file_uploader(
+            "Upload SMS reports",
+            type=["xls"],
+            accept_multiple_files=True,
             label_visibility="collapsed",
-            help=(
-                "Workbook should contain Sales, Coupons, Discounts, "
-                "BS, and HASH data."
-            ),
-            key=daily_workbook_key,
-            **daily_change_kwargs,
+            help="Upload the six legacy .xls SMS exports for the deposit date.",
+            key=sms_reports_key,
+            **sms_change_kwargs,
         )
-        daily_workbook = (
-            selected_daily_workbook
-            if selected_daily_workbook is not None
-            else preserved_daily_workbook
+        sms_exports = (
+            selected_sms_reports
+            if selected_sms_reports is not None
+            else preserved_sms_reports
         )
 
     with settlement_col:
         ui.markdown(
-            '<div class="hwfc-section-label">Card settlement</div>',
+            '<div class="hwfc-section-label">Card Settlement</div>',
             unsafe_allow_html=True,
         )
         card_settlement_key = f"card_settlement_{uploader_key}"
@@ -183,7 +227,7 @@ def render_upload_inputs(
         )
 
     return UploadIntakeRender(
-        daily_workbook=daily_workbook,
+        sms_exports=sms_exports,
         card_settlement=card_settlement,
         date_slot=date_slot,
     )

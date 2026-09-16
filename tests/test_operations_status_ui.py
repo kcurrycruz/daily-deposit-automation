@@ -4,6 +4,40 @@ from pathlib import Path
 
 
 class OperationsStatusModelTests(unittest.TestCase):
+    def test_sms_progress_distinguishes_card_settlement_readiness(self):
+        from app.operations_status_ui import build_operations_status
+
+        status = build_operations_status(
+            deposit_date=date(2026, 9, 14),
+            daily_uploaded=False,
+            settlement_uploaded=False,
+            workbook_valid=False,
+            settlement_valid=False,
+            workflow_complete=False,
+            iif_generated=False,
+            sms_reports={"sales": object(), "hash": object()},
+        )
+
+        self.assertEqual(status.files, "2 of 6 SMS verified · Card Settlement needed")
+        self.assertEqual(status.files_progress, 29)
+
+    def test_all_reports_verified_requires_six_sms_reports_and_card_settlement(self):
+        from app.operations_status_ui import build_operations_status
+        from app.sms_exports import SMS_ROLE_ORDER
+
+        status = build_operations_status(
+            deposit_date=date(2026, 9, 14),
+            daily_uploaded=False,
+            settlement_uploaded=True,
+            workbook_valid=False,
+            settlement_valid=True,
+            workflow_complete=False,
+            iif_generated=False,
+            sms_reports={role: object() for role in SMS_ROLE_ORDER},
+        )
+
+        self.assertEqual(status.files, "All reports verified")
+        self.assertEqual(status.files_progress, 100)
     def test_no_uploads_is_waiting_for_workbook(self):
         from app.operations_status_ui import build_operations_status
         status = build_operations_status(deposit_date=None, daily_uploaded=False, settlement_uploaded=False, workbook_valid=False, settlement_valid=False, workflow_complete=False, iif_generated=False)

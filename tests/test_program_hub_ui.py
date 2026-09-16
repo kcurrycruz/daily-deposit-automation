@@ -117,10 +117,10 @@ class ProgramHubStateTests(unittest.TestCase):
             return_to_program_hub,
         )
 
-        uploaded_workbook = object()
+        uploaded_sms_reports = [object(), object()]
         state = {
             "active_finance_program": DAILY_DEPOSITS,
-            "daily_workbook_0": uploaded_workbook,
+            "sms_reports_0": uploaded_sms_reports,
             "membership_entry_workbook-123_0_amount": 8.45,
             "membership_entry_workbook-123_0_add": True,
         }
@@ -128,29 +128,23 @@ class ProgramHubStateTests(unittest.TestCase):
         preserve_daily_program_state(state)
         return_to_program_hub(state)
         # Model Streamlit removing widget keys that the Hub run does not render.
-        state.pop("daily_workbook_0")
+        state.pop("sms_reports_0")
         state.pop("membership_entry_workbook-123_0_amount")
         state.pop("membership_entry_workbook-123_0_add")
 
         self.assertTrue(activate_program(state, DAILY_DEPOSITS))
         restore_daily_program_state(state)
 
-        self.assertNotIn("daily_workbook_0", state)
-        self.assertIs(
-            preserved_daily_upload(state, "daily_workbook_0"),
-            uploaded_workbook,
-        )
+        self.assertNotIn("sms_reports_0", state)
+        self.assertIs(preserved_daily_upload(state, "sms_reports_0"), uploaded_sms_reports)
         self.assertEqual(state["membership_entry_workbook-123_0_amount"], 8.45)
         self.assertNotIn("membership_entry_workbook-123_0_add", state)
 
         # An empty uploader rendered after reopening must not erase the fallback.
-        state["daily_workbook_0"] = None
+        state["sms_reports_0"] = None
         preserve_daily_program_state(state)
-        state.pop("daily_workbook_0")
-        self.assertIs(
-            preserved_daily_upload(state, "daily_workbook_0"),
-            uploaded_workbook,
-        )
+        state.pop("sms_reports_0")
+        self.assertIs(preserved_daily_upload(state, "sms_reports_0"), uploaded_sms_reports)
 
     def test_portal_round_trip_preserves_daily_deposit_page_stage(self):
         from app.deposit_page_flow import DEPOSIT_PAGE_STAGE_KEY, DEPOSIT_STEPS_STAGE
@@ -198,7 +192,7 @@ class ProgramHubStateTests(unittest.TestCase):
             sync_daily_upload,
         )
 
-        for widget_key in ("daily_workbook_0", "card_settlement_0"):
+        for widget_key in ("sms_reports_0", "card_settlement_0"):
             with self.subTest(widget_key=widget_key):
                 upload_a = object()
                 upload_b = object()
@@ -214,6 +208,30 @@ class ProgramHubStateTests(unittest.TestCase):
                 sync_daily_upload(state, widget_key)
                 self.assertIsNone(preserved_daily_upload(state, widget_key))
                 self.assertIsNone(state[widget_key])
+
+    def test_clear_daily_uploads_removes_sms_exports_and_settlement(self):
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_UPLOADS_KEY,
+            clear_daily_uploads,
+        )
+
+        sms_exports = [object()]
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                "sms_reports_3": sms_exports,
+                "card_settlement_3": object(),
+            },
+            "sms_reports_3": sms_exports,
+            "card_settlement_3": object(),
+            "membership_entry_3_amount": 5,
+        }
+
+        clear_daily_uploads(state)
+
+        self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
+        self.assertNotIn("sms_reports_3", state)
+        self.assertNotIn("card_settlement_3", state)
+        self.assertEqual(state["membership_entry_3_amount"], 5)
 
 
 class ProgramHubRendererTests(unittest.TestCase):

@@ -17,7 +17,7 @@ _DAILY_WIDGET_PREFIXES = (
     "coupon_",
     "closeout_",
 )
-_DAILY_UPLOAD_PREFIXES = ("daily_workbook_", "card_settlement_")
+_DAILY_UPLOAD_PREFIXES = ("sms_reports_", "card_settlement_")
 _DAILY_ACTION_PREFIXES = (
     "add_activity_",
     "save_activity_",
@@ -208,6 +208,14 @@ def sync_daily_upload(
         state[DAILY_PROGRAM_UPLOADS_KEY] = updated_uploads
     else:
         state.pop(DAILY_PROGRAM_UPLOADS_KEY, None)
+
+
+def clear_daily_uploads(state: MutableMapping[str, object]) -> None:
+    """Remove preserved and rendered Daily upload values for Start Over."""
+    state.pop(DAILY_PROGRAM_UPLOADS_KEY, None)
+    for key in tuple(state):
+        if isinstance(key, str) and key.startswith(_DAILY_UPLOAD_PREFIXES):
+            state.pop(key, None)
 
 
 def return_to_program_hub(state: MutableMapping[str, object]) -> None:

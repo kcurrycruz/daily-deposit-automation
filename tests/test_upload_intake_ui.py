@@ -1,81 +1,57 @@
 import unittest
+from types import SimpleNamespace
 
 
 class UploadIntakeUITests(unittest.TestCase):
-    def test_workbook_validation_renders_all_detected_sheets_in_one_verified_box(self):
-        from datetime import date
-        from app.upload_intake_ui import render_workbook_validation
+    def test_validation_card_shows_six_required_roles_and_progress(self):
+        from app.upload_intake_ui import render_sms_validation
 
         class RecordingUI:
             def __init__(self):
-                self.events = []
+                self.markup = ""
 
             def markdown(self, body, **kwargs):
-                self.events.append(("markdown", body, kwargs))
-
-            def warning(self, body, **kwargs):
-                self.events.append(("warning", body, kwargs))
+                self.markup += body
 
         ui = RecordingUI()
-        verified = render_workbook_validation(
+        render_sms_validation(
             ui,
-            roles={
-                "sales": "SubDept Sales Report",
-                "coupons": "SubDept Coupon (Local Discount)",
-                "discounts": "090826 Discount",
-                "bs": "090826 BS",
-                "hash": "090826 Hash",
-            },
-            report_date=date(2026, 9, 8),
+            reports={"sales": SimpleNamespace(filename="sales.xls")},
+            error=None,
         )
 
-        self.assertTrue(verified)
-        self.assertEqual(len(ui.events), 1)
-        self.assertEqual(ui.events[0][0], "markdown")
-        markup = ui.events[0][1]
-        self.assertIn("hwfc-workbook-validation-card", markup)
-        self.assertIn("Daily Workbook · 09/08/2026 · ✓ Verified", markup)
-        for label, sheet_name in (
-            ("Sales", "SubDept Sales Report"),
-            ("Coupons", "SubDept Coupon (Local Discount)"),
-            ("Discounts", "090826 Discount"),
-            ("Balance Sheet", "090826 BS"),
-            ("HASH", "090826 Hash"),
+        self.assertIn("1 of 6 verified", ui.markup)
+        for label in (
+            "Sales",
+            "Coupon",
+            "Discounts",
+            "HASH",
+            "Balance Sheet",
+            "Milk Bottles",
         ):
-            self.assertIn(label, markup)
-            self.assertIn(sheet_name, markup)
+            self.assertIn(label, ui.markup)
+        self.assertIn("sales.xls", ui.markup)
 
-    def test_workbook_validation_names_missing_sheets_without_verified_state(self):
-        from app.upload_intake_ui import render_workbook_validation
+    def test_validation_card_escapes_report_names_and_shows_error(self):
+        from app.upload_intake_ui import render_sms_validation
 
         class RecordingUI:
             def __init__(self):
-                self.events = []
+                self.markup = ""
 
             def markdown(self, body, **kwargs):
-                self.events.append(("markdown", body, kwargs))
-
-            def warning(self, body, **kwargs):
-                self.events.append(("warning", body, kwargs))
+                self.markup += body
 
         ui = RecordingUI()
-        verified = render_workbook_validation(
+        render_sms_validation(
             ui,
-            roles={
-                "sales": "Sales",
-                "coupons": "Coupons",
-                "discounts": None,
-                "bs": "BS",
-                "hash": None,
-            },
-            report_date=None,
+            reports={"sales": SimpleNamespace(filename="<sales>.xls")},
+            error=ValueError("Missing <HASH> report"),
         )
 
-        self.assertFalse(verified)
-        self.assertEqual(ui.events[0][0], "warning")
-        self.assertIn("Discounts", ui.events[0][1])
-        self.assertIn("HASH", ui.events[0][1])
-        self.assertNotIn("✓ Verified", ui.events[0][1])
+        self.assertIn("&lt;sales&gt;.xls", ui.markup)
+        self.assertIn("Missing &lt;HASH&gt; report", ui.markup)
+        self.assertNotIn("<sales>.xls", ui.markup)
 
     def test_missing_settlement_date_warning_requires_an_otherwise_valid_report(self):
         from app.upload_intake_ui import missing_settlement_date_warning
@@ -107,7 +83,7 @@ class UploadIntakeUITests(unittest.TestCase):
                     )
                 )
 
-    def test_upload_renderer_uses_compact_horizontal_layout_with_date_detector(self):
+    def test_upload_row_accepts_multiple_sms_xls_files_and_card_settlement(self):
         from app.upload_intake_ui import render_upload_inputs
 
         class RecordingUI:
@@ -138,7 +114,7 @@ class UploadIntakeUITests(unittest.TestCase):
 
             def file_uploader(self, label, **kwargs):
                 self.events.append(("file_uploader", label, kwargs))
-                return f"selected:{label}"
+                return ["sms-a", "sms-b"] if "SMS" in label else "settlement"
 
         ui = RecordingUI()
         result = render_upload_inputs(ui, uploader_key=7)
@@ -153,32 +129,28 @@ class UploadIntakeUITests(unittest.TestCase):
         self.assertEqual(
             [event[1] for event in upload_events],
             [
-                "Upload completed SubDept workbook",
+                "Upload SMS reports",
                 "Upload Daily Card Settlement Report",
             ],
         )
-        self.assertEqual(upload_events[0][2]["key"], "daily_workbook_7")
+        self.assertEqual(upload_events[0][2]["key"], "sms_reports_7")
         self.assertEqual(upload_events[1][2]["key"], "card_settlement_7")
-        self.assertEqual(upload_events[0][2]["type"], ["xlsx", "xlsm"])
+        self.assertEqual(upload_events[0][2]["type"], ["xls"])
+        self.assertTrue(upload_events[0][2]["accept_multiple_files"])
         self.assertEqual(upload_events[1][2]["type"], ["xlsx", "xlsm"])
         rendered_html = " ".join(
             event[1] for event in ui.events if event[0] == "markdown"
         )
-        self.assertIn("Report date", rendered_html)
-        self.assertIn("Daily workbook", rendered_html)
-        self.assertIn("Card settlement", rendered_html)
+        self.assertIn("Report Date", rendered_html)
+        self.assertIn("SMS Reports", rendered_html)
+        self.assertIn("Card Settlement", rendered_html)
         self.assertNotIn("Upload deposit reports", rendered_html)
         date_slots = [event[1] for event in ui.events if event[0] == "empty"]
         self.assertEqual(len(date_slots), 1)
         self.assertIs(result.date_slot, date_slots[0])
-        self.assertEqual(
-            result.daily_workbook,
-            "selected:Upload completed SubDept workbook",
-        )
-        self.assertEqual(
-            result.card_settlement,
-            "selected:Upload Daily Card Settlement Report",
-        )
+        self.assertEqual(result.sms_exports, ["sms-a", "sms-b"])
+        self.assertEqual(result.card_settlement, "settlement")
+        self.assertIsNone(result.daily_workbook)
 
     def test_preserved_uploads_are_used_without_assigning_uploader_widget_keys(self):
         from app.upload_intake_ui import render_upload_inputs
@@ -206,11 +178,11 @@ class UploadIntakeUITests(unittest.TestCase):
             def file_uploader(self, label, **kwargs):
                 return None
 
-        daily_workbook = object()
+        sms_exports = [object(), object()]
         card_settlement = object()
         state = {
             DAILY_PROGRAM_UPLOADS_KEY: {
-                "daily_workbook_3": daily_workbook,
+                "sms_reports_3": sms_exports,
                 "card_settlement_3": card_settlement,
             }
         }
@@ -220,7 +192,7 @@ class UploadIntakeUITests(unittest.TestCase):
             uploader_key=3,
         )
 
-        self.assertIs(result.daily_workbook, daily_workbook)
+        self.assertIs(result.sms_exports, sms_exports)
         self.assertIs(result.card_settlement, card_settlement)
 
     def test_uploaders_wire_change_callback_with_their_own_widget_keys(self):
@@ -260,27 +232,27 @@ class UploadIntakeUITests(unittest.TestCase):
         self.assertEqual(len(ui.uploader_calls), 2)
         for (_, kwargs), expected_key in zip(
             ui.uploader_calls,
-            ("daily_workbook_4", "card_settlement_4"),
+            ("sms_reports_4", "card_settlement_4"),
         ):
             self.assertIs(kwargs["on_change"], sync_daily_upload)
             self.assertEqual(kwargs["args"], (ui.session_state, expected_key))
 
-    def test_retained_upload_pair_reads_both_preserved_widget_values(self):
+    def test_retained_upload_pair_reads_sms_exports_and_settlement(self):
         from app.program_hub_ui import DAILY_PROGRAM_UPLOADS_KEY
         from app.upload_intake_ui import retained_upload_pair
 
-        daily = object()
+        sms_exports = [object(), object()]
         settlement = object()
         state = {
             DAILY_PROGRAM_UPLOADS_KEY: {
-                "daily_workbook_4": daily,
+                "sms_reports_4": sms_exports,
                 "card_settlement_4": settlement,
             }
         }
 
         self.assertEqual(
             retained_upload_pair(state, uploader_key=4),
-            (daily, settlement),
+            (sms_exports, settlement),
         )
 
 

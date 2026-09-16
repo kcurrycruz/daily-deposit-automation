@@ -1634,26 +1634,37 @@ def _safe_history_name(name: str) -> str:
 def archive_run(uploaded_file, settlement_file, result: dict, report_date: date, roles: dict, date_info: dict) -> dict:
     run_at = datetime.now()
     stamp = run_at.strftime("%Y%m%d_%H%M%S_%f")
-    upload_name = _safe_history_name(uploaded_file.name)
-    upload_path = HISTORY_UPLOAD_DIR / f"{stamp}_{upload_name}"
+    v = result.get("validation", {})
+    reporting_bytes = result.get("reporting_workbook_bytes")
+    reporting_name = result.get("reporting_workbook_name")
+    report_ready = (
+        v.get("all_ok") is True
+        and isinstance(reporting_bytes, bytes)
+        and bool(reporting_bytes)
+        and isinstance(reporting_name, str)
+        and bool(reporting_name.strip())
+    )
+    upload_path = (
+        HISTORY_UPLOAD_DIR / f"{stamp}_{_safe_history_name(reporting_name)}"
+        if report_ready
+        else None
+    )
     settlement_name = _safe_history_name(settlement_file.name) if settlement_file else None
     settlement_path = HISTORY_UPLOAD_DIR / f"{stamp}_settlement_{settlement_name}" if settlement_name else None
     iif_name = Path(result["iif_path"]).name
     iif_path = HISTORY_IIF_DIR / f"{stamp}_{iif_name}"
 
-    upload_path.write_bytes(uploaded_file.getvalue())
+    if upload_path is not None:
+        upload_path.write_bytes(reporting_bytes)
     if settlement_path is not None:
         settlement_path.write_bytes(settlement_file.getvalue())
     iif_path.write_bytes(result["iif_bytes"])
 
-    v = result.get("validation", {})
     record = {
         "id": stamp,
         "run_at": run_at.isoformat(timespec="seconds"),
         "report_date": report_date.isoformat(),
-        "uploaded_filename": uploaded_file.name,
         "settlement_filename": settlement_file.name if settlement_file else None,
-        "archived_upload": str(upload_path),
         "archived_settlement": str(settlement_path) if settlement_path else None,
         "iif_filename": iif_name,
         "archived_iif": str(iif_path),
@@ -1666,6 +1677,9 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
         "date_mismatch": bool(date_info.get("has_mismatch", False)),
         "sheet_roles": {k: v for k, v in roles.items() if v},
     }
+    if upload_path is not None:
+        record["uploaded_filename"] = reporting_name
+        record["archived_upload"] = str(upload_path)
 
     records = load_run_history()
     records.insert(0, record)

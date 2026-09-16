@@ -1,5 +1,11 @@
+import ast
+import json
+import re
 import unittest
+from datetime import date, datetime
 from importlib.util import find_spec
+from pathlib import Path
+from uuid import uuid4
 
 
 class RecordingUI:
@@ -39,6 +45,93 @@ class RecordingUI:
 
 
 class RunHistoryUITests(unittest.TestCase):
+    def test_failed_validation_archives_no_internal_workbook_or_history_download(self):
+        import app.run_history_ui as run_history_ui
+
+        source = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        function_names = {
+            "_safe_history_name",
+            "load_run_history",
+            "save_run_history",
+            "archive_run",
+        }
+        nodes = [
+            node
+            for node in ast.parse(source.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef) and node.name in function_names
+        ]
+
+        class Uploaded:
+            def __init__(self, name, data):
+                self.name = name
+                self._data = data
+
+            def getvalue(self):
+                return self._data
+
+        history_root = Path(__file__).parent / f"_run_history_{uuid4().hex}"
+        history_root.mkdir()
+        try:
+            upload_dir = history_root / "uploads"
+            iif_dir = history_root / "iif"
+            upload_dir.mkdir()
+            iif_dir.mkdir()
+            namespace = {
+                "Path": Path,
+                "date": date,
+                "datetime": datetime,
+                "json": json,
+                "re": re,
+                "HISTORY_DIR": history_root,
+                "HISTORY_FILE": history_root / "run_history.json",
+                "HISTORY_UPLOAD_DIR": upload_dir,
+                "HISTORY_IIF_DIR": iif_dir,
+            }
+            exec(
+                compile(
+                    ast.Module(body=nodes, type_ignores=[]),
+                    str(source),
+                    "exec",
+                ),
+                namespace,
+            )
+            record = namespace["archive_run"](
+                Uploaded("internal.xlsx", b"internal generated workbook"),
+                Uploaded("settlement.xlsx", b"settlement workbook"),
+                {
+                    "iif_path": Path("failed.iif"),
+                    "iif_bytes": b"failed validation IIF",
+                    "validation": {"all_ok": False},
+                },
+                date(2026, 9, 14),
+                {},
+                {},
+            )
+
+            ui = RecordingUI()
+            run_history_ui.render_run_history(
+                ui,
+                records=[record],
+                option_labeler=lambda item: "09/14/2026 · Review",
+                run_time_formatter=lambda value, include_date=False: "09/14/2026",
+            )
+            download_labels = [
+                event[1] for event in ui.events if event[0] == "download_button"
+            ]
+            archived_bytes = [
+                path.read_bytes()
+                for path in history_root.rglob("*")
+                if path.is_file()
+            ]
+        finally:
+            for path in sorted(history_root.rglob("*"), reverse=True):
+                path.unlink() if path.is_file() else path.rmdir()
+            history_root.rmdir()
+
+        self.assertIsNone(record.get("archived_upload"))
+        self.assertNotIn("Download Daily Workbook", download_labels)
+        self.assertNotIn(b"internal generated workbook", archived_bytes)
+
     def test_sidebar_collapse_request_is_consumed_once_on_program_entry(self):
         from app.program_hub_ui import SIDEBAR_COLLAPSE_REQUEST_KEY
         from app.run_history_ui import render_sidebar_collapse_request

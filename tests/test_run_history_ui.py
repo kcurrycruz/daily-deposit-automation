@@ -349,6 +349,44 @@ class RunHistoryUITests(unittest.TestCase):
         self.assertEqual(downloads[0][1], "Download Daily Reporting Workbook")
         self.assertEqual(downloads[0][2]["data"], b"legacy workbook")
 
+    def test_failed_legacy_history_never_exposes_archived_workbook(self):
+        import app.run_history_ui as run_history_ui
+
+        history_root = Path(__file__).parent / f"_run_history_{uuid4().hex}"
+        history_root.mkdir()
+        archived_upload = history_root / "failed-internal.xlsx"
+        archived_upload.write_bytes(b"failed internal workbook")
+        try:
+            ui = RecordingUI()
+            run_history_ui.render_run_history(
+                ui,
+                records=[
+                    {
+                        "id": "legacy-failed-run",
+                        "report_date": "2026-09-14",
+                        "run_at": "2026-09-14T12:00:00",
+                        "status": "Review",
+                        "uploaded_filename": "failed-internal.xlsx",
+                        "archived_upload": str(archived_upload),
+                    }
+                ],
+                option_labeler=lambda record: "09/14/2026 · Review",
+                run_time_formatter=lambda value, include_date=False: "09/14/2026",
+            )
+        finally:
+            archived_upload.unlink()
+            history_root.rmdir()
+
+        downloads = [event for event in ui.events if event[0] == "download_button"]
+        self.assertNotIn(
+            "Download Daily Reporting Workbook",
+            [event[1] for event in downloads],
+        )
+        self.assertNotIn(
+            b"failed internal workbook",
+            [event[2].get("data") for event in downloads],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

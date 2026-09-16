@@ -943,6 +943,7 @@ class MembershipPaymentTests(unittest.TestCase):
                     "iif_bytes": b"IIF content",
                     "reporting_workbook_bytes": b"XLSX content",
                     "reporting_workbook_name": "Daily Report.xlsx",
+                    "validation": {"all_ok": True},
                 }
             ),
             {
@@ -996,6 +997,41 @@ class MembershipPaymentTests(unittest.TestCase):
             ui.events[1][1]["file_name"],
             "SubDept Single Total Report 9-14-26.xlsx",
         )
+
+    def test_failed_validation_never_exposes_paired_downloads(self):
+        from app.guided_step_ui import render_prepare_iif_action
+        from app.ui_helpers import deposit_download_details
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def button(self, label, **kwargs):
+                self.events.append(("button", label, kwargs))
+                return False
+
+            def download_button(self, label, **kwargs):
+                self.events.append(("download", label, kwargs))
+
+        result = {
+            "iif_path": Path("failed.iif"),
+            "iif_bytes": b"unapproved IIF",
+            "reporting_workbook_bytes": b"internal workbook",
+            "reporting_workbook_name": "Internal Working Workbook.xlsx",
+            "validation": {"all_ok": False},
+        }
+
+        details = deposit_download_details(result)
+        ui = RecordingUI()
+        render_prepare_iif_action(
+            ui,
+            visible=True,
+            download_details=details,
+            disabled=False,
+        )
+
+        self.assertIsNone(details)
+        self.assertFalse(any(event[0] == "download" for event in ui.events))
 
     def test_sms_generated_workbook_posts_one_combined_milk_bottle_return(self):
         from dataclasses import replace

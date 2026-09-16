@@ -164,13 +164,18 @@ def _render_run_history_content(
         ui.warning("This run had a workbook date mismatch warning.", icon="⚠️")
 
     ui.markdown("#### Files from this run")
+    reporting_archive = (
+        record.get(
+            "archived_reporting_workbook",
+            record.get("archived_upload"),
+        )
+        if record.get("status") == "Passed"
+        else None
+    )
     archived_files = [
         (
             "Download Daily Reporting Workbook",
-            record.get(
-                "archived_reporting_workbook",
-                record.get("archived_upload"),
-            ),
+            reporting_archive,
             reporting_name,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             f"history_upload_{selected_history_id}",

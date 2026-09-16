@@ -80,6 +80,9 @@ def deposit_download_details(result: dict | None) -> dict | None:
     """Return both browser downloads only for a complete successful result."""
     if not isinstance(result, dict):
         return None
+    validation = result.get("validation")
+    if not isinstance(validation, dict) or validation.get("all_ok") is not True:
+        return None
     iif_data = result.get("iif_bytes")
     iif_path = result.get("iif_path")
     report_data = result.get("reporting_workbook_bytes")

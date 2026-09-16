@@ -77,6 +77,7 @@ class CurrentDepositTests(unittest.TestCase):
                 "iif_path": Path("deposit.iif"),
                 "reporting_workbook_bytes": b"generated report",
                 "reporting_workbook_name": "Daily Report.xlsx",
+                "validation": {"all_ok": True},
             },
         })
 
@@ -215,6 +216,7 @@ class CurrentDepositTests(unittest.TestCase):
             "iif_path": Path("deposit_20260914.iif"),
             "reporting_workbook_bytes": b"XLSX body",
             "reporting_workbook_name": "SubDept Single Total Report 9-14-26.xlsx",
+            "validation": {"all_ok": True},
         }
 
         details = deposit_download_details(result)

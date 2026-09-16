@@ -72,7 +72,12 @@ class CurrentDepositTests(unittest.TestCase):
         execute(assignments("current_run_context"), self.ns)
         self.ns["st"].session_state.update({
             "run_context": self.ns.get("current_run_context", "legacy-context"),
-            "run_result": {"iif_bytes": b"generated IIF", "iif_path": Path("deposit.iif")},
+            "run_result": {
+                "iif_bytes": b"generated IIF",
+                "iif_path": Path("deposit.iif"),
+                "reporting_workbook_bytes": b"generated report",
+                "reporting_workbook_name": "Daily Report.xlsx",
+            },
         })
 
     def render_state(self):
@@ -87,7 +92,16 @@ class CurrentDepositTests(unittest.TestCase):
 
     def test_unchanged_completed_deposit_remains_downloadable(self):
         download, status = self.render_state()
-        self.assertEqual(download, {"data": b"generated IIF", "file_name": "deposit.iif"})
+        self.assertEqual(
+            download,
+            {
+                "iif": {"data": b"generated IIF", "file_name": "deposit.iif"},
+                "report": {
+                    "data": b"generated report",
+                    "file_name": "Daily Report.xlsx",
+                },
+            },
+        )
         self.assertEqual(status.iif, "Ready to download")
 
     def test_removing_either_upload_hides_retained_download(self):
@@ -194,6 +208,22 @@ class CurrentDepositTests(unittest.TestCase):
         )
         self.assertTrue(result["reporting_workbook_bytes"])
         self.assertNotIn("reporting_workbook_bytes", engine_result)
+
+    def test_completed_result_offers_iif_and_reporting_workbook(self):
+        result = {
+            "iif_bytes": b"IIF body",
+            "iif_path": Path("deposit_20260914.iif"),
+            "reporting_workbook_bytes": b"XLSX body",
+            "reporting_workbook_name": "SubDept Single Total Report 9-14-26.xlsx",
+        }
+
+        details = deposit_download_details(result)
+
+        self.assertEqual(details["iif"]["file_name"], "deposit_20260914.iif")
+        self.assertEqual(
+            details["report"]["file_name"],
+            "SubDept Single Total Report 9-14-26.xlsx",
+        )
 
     def test_incomplete_engine_result_never_receives_reporting_workbook(self):
         complete_sms_run = streamlit_definition(

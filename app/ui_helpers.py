@@ -77,14 +77,30 @@ def plan_guide_html(rows: list[dict]) -> str:
 
 
 def deposit_download_details(result: dict | None) -> dict | None:
-    """Return browser-download data only for a complete generated IIF result."""
+    """Return both browser downloads only for a complete successful result."""
     if not isinstance(result, dict):
         return None
-    data = result.get("iif_bytes")
-    path = result.get("iif_path")
-    if not isinstance(data, bytes) or not data or path is None:
+    iif_data = result.get("iif_bytes")
+    iif_path = result.get("iif_path")
+    report_data = result.get("reporting_workbook_bytes")
+    report_name = result.get("reporting_workbook_name")
+    if (
+        not isinstance(iif_data, bytes)
+        or not iif_data
+        or iif_path is None
+        or not isinstance(report_data, bytes)
+        or not report_data
+        or not isinstance(report_name, str)
+        or not report_name.strip()
+    ):
         return None
     return {
-        "file_name": Path(path).name,
-        "data": data,
+        "iif": {
+            "file_name": Path(iif_path).name,
+            "data": iif_data,
+        },
+        "report": {
+            "file_name": Path(report_name).name,
+            "data": report_data,
+        },
     }

@@ -917,7 +917,7 @@ class MembershipPaymentTests(unittest.TestCase):
             self.assertIn(label, rendered)
             self.assertIn(value, rendered)
 
-    def test_deposit_download_details_requires_a_complete_iif_result(self):
+    def test_deposit_download_details_requires_both_successful_artifacts(self):
         try:
             from app.ui_helpers import deposit_download_details
         except ImportError:
@@ -928,17 +928,73 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIsNone(
             deposit_download_details({"working_workbook_bytes": b"internal"})
         )
-        self.assertEqual(
+        self.assertIsNone(
             deposit_download_details(
                 {
                     "iif_path": Path("deposit_20260827.iif"),
                     "iif_bytes": b"IIF content",
                 }
+            )
+        )
+        self.assertEqual(
+            deposit_download_details(
+                {
+                    "iif_path": Path("deposit_20260827.iif"),
+                    "iif_bytes": b"IIF content",
+                    "reporting_workbook_bytes": b"XLSX content",
+                    "reporting_workbook_name": "Daily Report.xlsx",
+                }
             ),
             {
-                "file_name": "deposit_20260827.iif",
-                "data": b"IIF content",
+                "iif": {
+                    "file_name": "deposit_20260827.iif",
+                    "data": b"IIF content",
+                },
+                "report": {
+                    "file_name": "Daily Report.xlsx",
+                    "data": b"XLSX content",
+                },
             },
+        )
+
+    def test_completed_action_renders_paired_downloads_together(self):
+        from app.guided_step_ui import render_prepare_iif_action
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def button(self, *args, **kwargs):
+                raise AssertionError("Prepare button rendered for a completed run")
+
+            def download_button(self, label, **kwargs):
+                self.events.append((label, kwargs))
+
+        ui = RecordingUI()
+        details = {
+            "iif": {"data": b"IIF", "file_name": "deposit_20260914.iif"},
+            "report": {
+                "data": b"XLSX",
+                "file_name": "SubDept Single Total Report 9-14-26.xlsx",
+            },
+        }
+
+        clicked = render_prepare_iif_action(
+            ui,
+            visible=True,
+            download_details=details,
+            disabled=False,
+        )
+
+        self.assertFalse(clicked)
+        self.assertEqual(
+            [label for label, _kwargs in ui.events],
+            ["Download QuickBooks IIF", "Download Daily Reporting Workbook"],
+        )
+        self.assertEqual(ui.events[0][1]["file_name"], "deposit_20260914.iif")
+        self.assertEqual(
+            ui.events[1][1]["file_name"],
+            "SubDept Single Total Report 9-14-26.xlsx",
         )
 
     def test_sms_generated_workbook_posts_one_combined_milk_bottle_return(self):

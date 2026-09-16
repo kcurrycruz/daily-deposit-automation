@@ -1631,7 +1631,7 @@ def _safe_history_name(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).name).strip("._")
     return cleaned or "uploaded_workbook.xlsx"
 
-def archive_run(uploaded_file, settlement_file, result: dict, report_date: date, roles: dict, date_info: dict) -> dict:
+def archive_run(uploaded_files, settlement_file, result: dict, report_date: date, roles: dict, date_info: dict) -> dict:
     run_at = datetime.now()
     stamp = run_at.strftime("%Y%m%d_%H%M%S_%f")
     v = result.get("validation", {})
@@ -1644,18 +1644,26 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
         and isinstance(reporting_name, str)
         and bool(reporting_name.strip())
     )
-    upload_path = (
+    reporting_path = (
         HISTORY_UPLOAD_DIR / f"{stamp}_{_safe_history_name(reporting_name)}"
         if report_ready
         else None
     )
+    sms_source_filenames = [str(item.name) for item in (uploaded_files or [])]
+    sms_source_paths = [
+        HISTORY_UPLOAD_DIR
+        / f"{stamp}_sms_{index:02d}_{_safe_history_name(item.name)}"
+        for index, item in enumerate(uploaded_files or [], start=1)
+    ]
     settlement_name = _safe_history_name(settlement_file.name) if settlement_file else None
     settlement_path = HISTORY_UPLOAD_DIR / f"{stamp}_settlement_{settlement_name}" if settlement_name else None
     iif_name = Path(result["iif_path"]).name
     iif_path = HISTORY_IIF_DIR / f"{stamp}_{iif_name}"
 
-    if upload_path is not None:
-        upload_path.write_bytes(reporting_bytes)
+    for source_file, source_path in zip(uploaded_files or [], sms_source_paths):
+        source_path.write_bytes(source_file.getvalue())
+    if reporting_path is not None:
+        reporting_path.write_bytes(reporting_bytes)
     if settlement_path is not None:
         settlement_path.write_bytes(settlement_file.getvalue())
     iif_path.write_bytes(result["iif_bytes"])
@@ -1664,6 +1672,8 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
         "id": stamp,
         "run_at": run_at.isoformat(timespec="seconds"),
         "report_date": report_date.isoformat(),
+        "sms_source_filenames": sms_source_filenames,
+        "archived_sms_sources": [str(path) for path in sms_source_paths],
         "settlement_filename": settlement_file.name if settlement_file else None,
         "archived_settlement": str(settlement_path) if settlement_path else None,
         "iif_filename": iif_name,
@@ -1677,9 +1687,9 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
         "date_mismatch": bool(date_info.get("has_mismatch", False)),
         "sheet_roles": {k: v for k, v in roles.items() if v},
     }
-    if upload_path is not None:
-        record["uploaded_filename"] = reporting_name
-        record["archived_upload"] = str(upload_path)
+    if reporting_path is not None:
+        record["reporting_workbook_filename"] = reporting_name
+        record["archived_reporting_workbook"] = str(reporting_path)
 
     records = load_run_history()
     records.insert(0, record)
@@ -4140,7 +4150,7 @@ if run_clicked:
                 st.session_state["run_settlement_filename"] = settlement_file.name
                 st.session_state["run_date_mismatch"] = date_info.get("has_mismatch", False)
                 history_record = archive_run(
-                    uploaded, settlement_file, result, deposit_date, roles, date_info
+                    sms_files, settlement_file, result, deposit_date, roles, date_info
                 )
                 st.session_state["last_history_id"] = history_record["id"]
         st.rerun()

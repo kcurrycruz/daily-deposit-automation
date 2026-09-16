@@ -127,7 +127,7 @@ def _render_run_history_content(
         f"**{status_icon} {html.escape(str(report_label))} · "
         f"{html.escape(str(record.get('status', '—')))}**"
     )
-    ui.caption(f"Run {run_label}")
+    ui.caption(f"Run {html.escape(str(run_label))}")
 
     history_checks = [
         ("Sales", record.get("sales_status", "N/A")),
@@ -143,37 +143,72 @@ def _render_run_history_content(
     ui.caption("  ·  ".join(status_text))
 
     ui.markdown("#### Run details")
-    ui.caption(f"Workbook: {record.get('uploaded_filename', '—')}")
-    ui.caption(f"Card Settlement: {record.get('settlement_filename', '—')}")
+    reporting_name = record.get(
+        "reporting_workbook_filename",
+        record.get("uploaded_filename", "—"),
+    )
+    ui.caption(
+        f"Daily Reporting Workbook: {html.escape(str(reporting_name or '—'))}"
+    )
+    source_names = record.get("sms_source_filenames", [])
+    if isinstance(source_names, list) and source_names:
+        ui.caption(
+            "SMS Sources: "
+            + ", ".join(html.escape(str(name)) for name in source_names)
+        )
+    ui.caption(
+        "Card Settlement: "
+        f"{html.escape(str(record.get('settlement_filename') or '—'))}"
+    )
     if record.get("date_mismatch"):
         ui.warning("This run had a workbook date mismatch warning.", icon="⚠️")
 
     ui.markdown("#### Files from this run")
     archived_files = [
         (
-            "Download Daily Workbook",
-            Path(record.get("archived_upload", "")),
-            record.get("uploaded_filename"),
+            "Download Daily Reporting Workbook",
+            record.get(
+                "archived_reporting_workbook",
+                record.get("archived_upload"),
+            ),
+            reporting_name,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             f"history_upload_{selected_history_id}",
         ),
         (
             "Download Card Settlement",
-            Path(record.get("archived_settlement", "")),
+            record.get("archived_settlement"),
             record.get("settlement_filename"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             f"history_settlement_{selected_history_id}",
         ),
         (
             "Download IIF",
-            Path(record.get("archived_iif", "")),
+            record.get("archived_iif"),
             record.get("iif_filename"),
             "text/plain",
             f"history_iif_{selected_history_id}",
         ),
     ]
+    source_paths = record.get("archived_sms_sources", [])
+    if isinstance(source_names, list) and isinstance(source_paths, list):
+        archived_files.extend(
+            (
+                f"Download SMS Source {index}",
+                source_path,
+                source_name,
+                "application/vnd.ms-excel",
+                f"history_sms_{selected_history_id}_{index}",
+            )
+            for index, (source_name, source_path) in enumerate(
+                zip(source_names, source_paths), start=1
+            )
+        )
     available_file = False
-    for label, path, filename, mime, key in archived_files:
+    for label, path_value, filename, mime, key in archived_files:
+        if not path_value:
+            continue
+        path = Path(path_value)
         if not path.is_file():
             continue
         available_file = True

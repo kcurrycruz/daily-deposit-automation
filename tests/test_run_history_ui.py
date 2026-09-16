@@ -7,6 +7,41 @@ from importlib.util import find_spec
 from pathlib import Path
 from uuid import uuid4
 
+from tests.sms_fixture_factory import sms_exports_091426
+
+
+class Uploaded:
+    def __init__(self, name, data):
+        self.name = name
+        self._data = data
+
+    def getvalue(self):
+        return self._data
+
+
+def uploaded_files_from_sms_rows(exports):
+    return [
+        Uploaded(report.filename, f"source bytes for {report.role}".encode("utf-8"))
+        for report in exports
+    ]
+
+
+def complete_result_091426():
+    return {
+        "iif_path": Path("deposit_20260914.iif"),
+        "iif_bytes": b"IIF body",
+        "reporting_workbook_bytes": b"XLSX body",
+        "reporting_workbook_name": "SubDept Single Total Report 9-14-26.xlsx",
+        "validation": {
+            "all_ok": True,
+            "sales_ok": True,
+            "discounts_ok": True,
+            "hash_ok": True,
+            "iif_ok": True,
+            "card_settlement_ok": True,
+        },
+    }
+
 
 class RecordingUI:
     def __init__(self, clicked_keys=()):
@@ -45,6 +80,67 @@ class RecordingUI:
 
 
 class RunHistoryUITests(unittest.TestCase):
+    def test_history_archives_six_sources_report_and_iif(self):
+        source = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+        function_names = {
+            "_safe_history_name",
+            "load_run_history",
+            "save_run_history",
+            "archive_run",
+        }
+        nodes = [
+            node
+            for node in ast.parse(source.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef) and node.name in function_names
+        ]
+        history_root = Path(__file__).parent / f"_run_history_{uuid4().hex}"
+        upload_dir = history_root / "uploads"
+        iif_dir = history_root / "iif"
+        upload_dir.mkdir(parents=True)
+        iif_dir.mkdir()
+        try:
+            namespace = {
+                "Path": Path,
+                "date": date,
+                "datetime": datetime,
+                "json": json,
+                "re": re,
+                "HISTORY_DIR": history_root,
+                "HISTORY_FILE": history_root / "run_history.json",
+                "HISTORY_UPLOAD_DIR": upload_dir,
+                "HISTORY_IIF_DIR": iif_dir,
+            }
+            exec(
+                compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"),
+                namespace,
+            )
+            uploads = uploaded_files_from_sms_rows(sms_exports_091426())
+            expected_names = [upload.name for upload in uploads]
+            record = namespace["archive_run"](
+                uploads,
+                Uploaded("settlement.xlsx", b"settlement workbook"),
+                complete_result_091426(),
+                date(2026, 9, 14),
+                {},
+                {},
+            )
+
+            self.assertEqual(set(record["sms_source_filenames"]), set(expected_names))
+            self.assertEqual(len(record["archived_sms_sources"]), 6)
+            for path in record["archived_sms_sources"]:
+                self.assertTrue(Path(path).is_file())
+            self.assertTrue(Path(record["archived_reporting_workbook"]).is_file())
+            self.assertEqual(
+                Path(record["archived_reporting_workbook"]).read_bytes(),
+                b"XLSX body",
+            )
+            self.assertTrue(Path(record["archived_settlement"]).is_file())
+            self.assertTrue(Path(record["archived_iif"]).is_file())
+        finally:
+            for path in sorted(history_root.rglob("*"), reverse=True):
+                path.unlink() if path.is_file() else path.rmdir()
+            history_root.rmdir()
+
     def test_failed_validation_archives_no_internal_workbook_or_history_download(self):
         import app.run_history_ui as run_history_ui
 
@@ -60,14 +156,6 @@ class RunHistoryUITests(unittest.TestCase):
             for node in ast.parse(source.read_text(encoding="utf-8")).body
             if isinstance(node, ast.FunctionDef) and node.name in function_names
         ]
-
-        class Uploaded:
-            def __init__(self, name, data):
-                self.name = name
-                self._data = data
-
-            def getvalue(self):
-                return self._data
 
         history_root = Path(__file__).parent / f"_run_history_{uuid4().hex}"
         history_root.mkdir()
@@ -96,11 +184,13 @@ class RunHistoryUITests(unittest.TestCase):
                 namespace,
             )
             record = namespace["archive_run"](
-                Uploaded("internal.xlsx", b"internal generated workbook"),
+                [Uploaded("091426-sales.xls", b"sales source")],
                 Uploaded("settlement.xlsx", b"settlement workbook"),
                 {
                     "iif_path": Path("failed.iif"),
                     "iif_bytes": b"failed validation IIF",
+                    "reporting_workbook_bytes": b"internal generated workbook",
+                    "reporting_workbook_name": "Internal Working Workbook.xlsx",
                     "validation": {"all_ok": False},
                 },
                 date(2026, 9, 14),
@@ -129,7 +219,8 @@ class RunHistoryUITests(unittest.TestCase):
             history_root.rmdir()
 
         self.assertIsNone(record.get("archived_upload"))
-        self.assertNotIn("Download Daily Workbook", download_labels)
+        self.assertIsNone(record.get("archived_reporting_workbook"))
+        self.assertNotIn("Download Daily Reporting Workbook", download_labels)
         self.assertNotIn(b"internal generated workbook", archived_bytes)
 
     def test_sidebar_collapse_request_is_consumed_once_on_program_entry(self):
@@ -218,6 +309,45 @@ class RunHistoryUITests(unittest.TestCase):
         self.assertIn("Files from this run", rendered_text)
         self.assertIn("daily.xlsx", rendered_text)
         self.assertIn("settlement.xlsx", rendered_text)
+
+    def test_legacy_history_workbook_download_and_metadata_render_safely(self):
+        import app.run_history_ui as run_history_ui
+
+        history_root = Path(__file__).parent / f"_run_history_{uuid4().hex}"
+        history_root.mkdir()
+        archived_upload = history_root / "daily.xlsx"
+        archived_upload.write_bytes(b"legacy workbook")
+        try:
+            ui = RecordingUI()
+            run_history_ui.render_run_history(
+                ui,
+                records=[
+                    {
+                        "id": "legacy-run",
+                        "report_date": "2026-09-14",
+                        "run_at": "2026-09-14T12:00:00",
+                        "status": "Passed",
+                        "uploaded_filename": "<script>alert(1)</script>.xlsx",
+                        "archived_upload": str(archived_upload),
+                    }
+                ],
+                option_labeler=lambda record: "09/14/2026 · Passed",
+                run_time_formatter=lambda value, include_date=False: "09/14/2026",
+            )
+        finally:
+            archived_upload.unlink()
+            history_root.rmdir()
+
+        rendered_text = " ".join(
+            str(event[1])
+            for event in ui.events
+            if event[0] in {"markdown", "caption"}
+        )
+        downloads = [event for event in ui.events if event[0] == "download_button"]
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;.xlsx", rendered_text)
+        self.assertNotIn("<script>alert(1)</script>.xlsx", rendered_text)
+        self.assertEqual(downloads[0][1], "Download Daily Reporting Workbook")
+        self.assertEqual(downloads[0][2]["data"], b"legacy workbook")
 
 
 if __name__ == "__main__":

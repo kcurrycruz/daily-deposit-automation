@@ -224,16 +224,23 @@ def render_prepare_iif_action(
     download_details,
     disabled: bool,
 ) -> bool:
-    """Render the final IIF action only after the guided workflow is complete."""
+    """Render the final action or paired downloads after workflow completion."""
     if not visible:
         return False
     if download_details is not None:
         ui.download_button(
-            "⬇ Download QuickBooks IIF",
-            data=download_details["data"],
-            file_name=download_details["file_name"],
+            "Download QuickBooks IIF",
+            data=download_details["iif"]["data"],
+            file_name=download_details["iif"]["file_name"],
             mime="text/plain",
             type="primary",
+            use_container_width=True,
+        )
+        ui.download_button(
+            "Download Daily Reporting Workbook",
+            data=download_details["report"]["data"],
+            file_name=download_details["report"]["file_name"],
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
         return False

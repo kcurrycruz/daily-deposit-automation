@@ -97,7 +97,7 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
             ### Before You Run
             Confirm that all six SMS reports and the Daily Card Settlement Report are for the same date. Resolve any date or report-validation message, then select **Validate & Prepare IIF**.
 
-            The app compares each card settlement amount with the matching Balance Sheet tender total. Review any red **✕** before importing the IIF into QuickBooks. Your dated report is generated after the IIF is complete.
+            The app compares each card settlement amount with the matching Balance Sheet tender total. Review any red **✕** before importing the IIF into QuickBooks. Your dated report is downloadable only after a successful IIF.
             """
         )
 

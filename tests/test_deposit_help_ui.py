@@ -162,7 +162,8 @@ class DepositHelpUITests(unittest.TestCase):
         ):
             self.assertIn(label, rendered_text)
         self.assertIn("same date", rendered_text)
-        self.assertIn("generated after the IIF is complete", rendered_text)
+        self.assertIn("downloadable only after a successful IIF", rendered_text)
+        self.assertNotIn("generated after the IIF is complete", rendered_text)
         self.assertIn("returned-item Net Sales", rendered_text)
         self.assertIn("BS code 910", rendered_text)
         self.assertIn("Validate & Prepare IIF", rendered_text)

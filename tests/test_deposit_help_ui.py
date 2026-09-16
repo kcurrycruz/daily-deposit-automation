@@ -55,6 +55,15 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertLess(source.index(upload_stage_marker), source.index(continue_marker))
         self.assertLess(source.index(continue_marker), source.index(guide_marker))
 
+    def test_upload_stage_describes_the_direct_sms_inputs(self):
+        source = self.app_source()
+
+        self.assertIn(
+            "Upload all six SMS reports and the separate Daily Card Settlement Report",
+            source,
+        )
+        self.assertNotIn("Upload the completed daily workbook", source)
+
     def test_continue_action_has_a_dedicated_coop_green_style(self):
         source = self.app_source()
 
@@ -108,7 +117,7 @@ class DepositHelpUITests(unittest.TestCase):
         )
         self.assertIn("Need Help", rendered_text)
 
-    def test_sop_renderer_keeps_original_steps_and_pictures(self):
+    def test_sop_renderer_explains_the_direct_sms_upload_workflow(self):
         from app.deposit_help_ui import render_daily_workbook_sop
 
         ui = RecordingUI()
@@ -116,8 +125,14 @@ class DepositHelpUITests(unittest.TestCase):
             ui,
             root=Path(__file__).resolve().parents[1],
             sop_steps=[
-                {"title": "Step 1 · Start", "body": "Open the template."},
-                {"title": "Step 2 · Sales", "body": "Paste the sales report."},
+                {
+                    "title": "Step 1 · Sales",
+                    "body": (
+                        "Export Sales, Coupons, Discounts, HASH, Balance Sheet, "
+                        "and Milk Bottles for the deposit date."
+                    ),
+                },
+                {"title": "Step 6 · Milk Bottles", "body": "Export Milk Bottles."},
             ],
         )
 
@@ -129,16 +144,31 @@ class DepositHelpUITests(unittest.TestCase):
             if event[0] == "markdown" and event[1]
         )
 
-        self.assertIn("📘 Daily Workbook SOP", expander_labels)
-        self.assertIn("Step 1 · Start", expander_labels)
-        self.assertIn("Step 2 · Sales", expander_labels)
+        self.assertIn("📘 Export & Upload Guide", expander_labels)
+        self.assertIn("Step 1 · Sales", expander_labels)
+        self.assertIn("Step 6 · Milk Bottles", expander_labels)
         self.assertIn("View Daily Card Settlement Example", expander_labels)
-        self.assertTrue(any(path.endswith("step1_daily_deposit_folder.png") for path in image_paths))
         self.assertTrue(any(path.endswith("step2a_sms_sales_export.png") for path in image_paths))
-        self.assertTrue(any(path.endswith("step2a_subdept_single_paste.png") for path in image_paths))
+        self.assertTrue(any(path.endswith("milk_bottle_returns_example.png") for path in image_paths))
         self.assertTrue(any(path.endswith("daily_card_settlement_example.png") for path in image_paths))
-        self.assertIn("How to Build the Daily Workbook", rendered_text)
-        self.assertIn("Before You Run", rendered_text)
+        self.assertFalse(any("paste" in path.lower() for path in image_paths))
+        for label in (
+            "Sales",
+            "Coupons",
+            "Discounts",
+            "HASH",
+            "Balance Sheet",
+            "Milk Bottles",
+        ):
+            self.assertIn(label, rendered_text)
+        self.assertIn("same date", rendered_text)
+        self.assertIn("generated after the IIF is complete", rendered_text)
+        self.assertIn("returned-item Net Sales", rendered_text)
+        self.assertIn("BS code 910", rendered_text)
+        self.assertIn("Validate & Prepare IIF", rendered_text)
+        self.assertNotIn("Move or Copy", rendered_text)
+        self.assertNotIn("master workbook", rendered_text)
+        self.assertNotIn("paste", rendered_text.lower())
 
     def test_known_exceptions_renderer_keeps_original_operational_guidance(self):
         from app.deposit_help_ui import render_known_exceptions

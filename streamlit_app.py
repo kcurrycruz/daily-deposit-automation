@@ -289,19 +289,7 @@ def build_history_option_label(record: dict) -> str:
 
 SOP_STEPS = [
     {
-        "title": "Step 1 · Open the Daily Deposit template",
-        "body": r"""
-Open the approved Excel template from:
-
-`S:\Finance & Payroll Forms\Finance Work Files\Daily Deposit`
-
-File name: **TEMPLATE - SubDept Single Total Report**
-
-Use this workbook as the master file for the deposit you are preparing. Do not build the deposit from a blank workbook.
-""".strip(),
-    },
-    {
-        "title": "Step 2 · Import daily sales from SMS",
+        "title": "Step 1 · Sales",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -313,17 +301,11 @@ In **SMS (POS System)** go to:
    - Start: **3 (Net Sales)**
    - End: **4 (Interstore Sales)**
 4. Select **Launch**.
-5. Export the report to Excel.
-6. In the exported Excel report, copy the sales data beginning with the first sub-department code and continuing through the final department shown for the day. In the example below, this is the highlighted report area from **Columns B–H**.
-7. Open the Daily Deposit template and go to the **SubDept Single** tab.
-8. Paste the copied sales data starting in **cell A1**.
-9. Confirm that the pasted table begins with the same first row as the exported report and that all rows through the final department were included.
-
-Do not paste over template formulas outside of the intended data-entry area.
+5. Export the report as **Sales**.
 """.strip(),
     },
     {
-        "title": "Step 2a · Import store coupons from SMS",
+        "title": "Step 2 · Coupons",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -335,36 +317,11 @@ In **SMS (POS System)** go to:
    - Start: **3542 (Elect. Store Coupon Distribution)**
    - End: **3542 (Elect. Store Coupon Distribution)**
 4. Select **Launch**.
-5. Export the report to Excel.
-6. Copy **Columns B–H**, starting with the sub-department codes and ending with Quantity.
-7. Paste those columns into **SubDept Coupon (Local Discount)** in the Daily Deposit template.
-
-### Sales check
-After Steps 2 and 2a, the **SubDept Sales Report** should be complete. Confirm that the green-filled **Sales Total** in the template matches the total at the bottom of the SMS **Sub-department Single Total** report **exactly**. If the totals do not match, stop and correct the workbook before continuing.
+5. Export the report as **Coupons**.
 """.strip(),
     },
     {
-        "title": "Step 3 · Enter Milk Bottle Returns",
-        "body": """
-In **SMS (POS System)** go to:
-
-**Reports → SubDepartments → Items → Item Multi Totals by Sub-department**
-
-1. Change the report date to the corresponding deposit date.
-2. Set the **Sub Department Range** to:
-   - Start: **27 (Store Coupons)**
-   - End: **27 (Store Coupons)**
-3. Select **Launch**.
-4. Scroll through the report and find all Milk Bottle Return items, such as:
-   - **MILK BOTTLE 1 - RETURNED**
-   - **MILK BOTTLE 2 - RETURNED**
-   - any additional **MILK BOTTLE ... - RETURNED** lines for that day
-5. Add together all Milk Bottle Returns for the day.
-6. Enter the total into cell **M1** on **SubDept Sales Report**.
-""".strip(),
-    },
-    {
-        "title": "Step 4 · Import the Discounts worksheet",
+        "title": "Step 3 · Discounts",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -372,17 +329,11 @@ In **SMS (POS System)** go to:
 
 1. Change the report date to the deposit date.
 2. Select **Launch**.
-3. Export the report to Excel.
-4. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
-5. Move or copy the entire worksheet into the Daily Deposit template workbook.
-6. Place it in the **`XXXXXX Discounts`** position/tab.
-7. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
-
-Example: for an August 21, 2026 deposit, rename the tab **`082126 Discounts`**.
+3. Export the report as **Discounts**.
 """.strip(),
     },
     {
-        "title": "Step 5 · Import the HASH worksheet",
+        "title": "Step 4 · HASH",
         "body": """
 The HASH report supplies **Refunded Discounts, Pass Through/Charity Donations, and Paid-Ins**.
 
@@ -391,21 +342,13 @@ In **SMS (POS System)** go to:
 **Reports → Sub-department Single Total**
 
 1. Change the report date to the deposit date.
-2. Set the **Totalizer Range** to:
-   - Start: **6 (HASH Sales)**
-   - End: **6 (HASH Sales)**
+2. Set the **Totalizer Range** to **6 (HASH Sales)** for both Start and End.
 3. Select **Launch**.
-4. Export the report to Excel.
-5. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
-6. Move or copy the entire worksheet into the Daily Deposit template workbook.
-7. Place it in the **`XXXXXX HASH`** position/tab.
-8. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
-
-Example: for an August 21, 2026 deposit, rename the tab **`082126 HASH`**.
+4. Export the report as **HASH**.
 """.strip(),
     },
     {
-        "title": "Step 6 · Import the Balance Sheet (BS)",
+        "title": "Step 5 · Balance Sheet",
         "body": """
 In **SMS (POS System)** go to:
 
@@ -413,30 +356,20 @@ In **SMS (POS System)** go to:
 
 1. Change the report date to the deposit date.
 2. Select **Launch**.
-3. Export the report to Excel.
-4. In Excel, right-click the exported worksheet tab and choose **Move or Copy**.
-5. Move or copy the entire worksheet into the Daily Deposit template workbook.
-6. Place it in the **`XXXXXX BS`** position/tab.
-7. After the worksheet has been copied into the template, rename the tab so `XXXXXX` matches the Daily Deposit date you are working on.
-
-Example: for an August 21, 2026 deposit, rename the tab **`082126 BS`**.
+3. Export the report as **Balance Sheet**.
 """.strip(),
     },
     {
-        "title": "Step 7 · Final Workbook Check",
+        "title": "Step 6 · Milk Bottles",
         "body": """
-Before uploading the workbook to the Daily Deposit app, confirm all of the following:
+In **SMS (POS System)** go to:
 
-- **SubDept Sales Report** is complete.
-- **SubDept Coupon (Local Discount)** is complete.
-- The green **Sales Total** matches the SMS Sub-department Single Total report exactly.
-- Milk Bottle Returns are entered in **M1**.
-- The dated **Discounts** tab is present.
-- The dated **HASH** tab is present.
-- The dated **BS** tab is present.
-- All tabs are for the same deposit date.
+**Reports → SubDepartments → Items → Item Multi Totals by Sub-department**
 
-Then compare your workbook against the approved example shown below. The workbook should follow the same tab structure before you run the deposit automation.
+1. Change the report date to the deposit date.
+2. Set the **Sub Department Range** to **27 (Store Coupons)** for both Start and End.
+3. Select **Launch**.
+4. Export the report as **Milk Bottles**.
 """.strip(),
     },
 ]
@@ -2242,7 +2175,7 @@ if requested_page_stage == UPLOAD_STAGE:
           <div class="hwfc-kicker">Honest Weight Food Co-op · Finance</div>
           <div class="hwfc-title">Daily Deposit Reconciliation</div>
           <div class="hwfc-subtitle">
-            Upload the completed daily workbook, validate the full deposit, then review the QuickBooks entry before import.
+            Upload all six SMS reports and the separate Daily Card Settlement Report, validate the deposit, then review the QuickBooks entry before import.
           </div>
         </div>
         """,
@@ -2434,7 +2367,7 @@ if settlement_file is not None:
         if settlement_date_mismatch:
             st.warning(
                 "**CARD SETTLEMENT DATE MISMATCH**\n\n"
-                f"Daily workbook: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
+                f"SMS report date: **{deposit_date.strftime('%m/%d/%Y')}**  \n"
                 f"Card settlement: **{settlement_date_info.strftime('%m/%d/%Y')}**  \n\n"
                 "Upload the matching Daily Card Settlement Report before continuing.",
                 icon="⚠️",

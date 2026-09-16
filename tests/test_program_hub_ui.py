@@ -209,6 +209,24 @@ class ProgramHubStateTests(unittest.TestCase):
                 self.assertIsNone(preserved_daily_upload(state, widget_key))
                 self.assertIsNone(state[widget_key])
 
+    def test_empty_sms_upload_callback_clears_the_preserved_list(self):
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_UPLOADS_KEY,
+            preserved_daily_upload,
+            sync_daily_upload,
+        )
+
+        widget_key = "sms_reports_0"
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {widget_key: [object()]},
+            widget_key: [],
+        }
+
+        sync_daily_upload(state, widget_key)
+
+        self.assertIsNone(preserved_daily_upload(state, widget_key))
+        self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
+
     def test_clear_daily_uploads_removes_sms_exports_and_settlement(self):
         from app.program_hub_ui import (
             DAILY_PROGRAM_UPLOADS_KEY,

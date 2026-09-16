@@ -3,15 +3,16 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
+from app.sms_exports import SMS_ROLE_ORDER
 
-SMS_ROLE_LABELS = (
-    ("sales", "Sales"),
-    ("coupons", "Coupon"),
-    ("discounts", "Discounts"),
-    ("hash", "HASH"),
-    ("bs", "Balance Sheet"),
-    ("milk_bottles", "Milk Bottles"),
-)
+SMS_ROLE_LABELS = {
+    "sales": "Sales",
+    "coupons": "Coupon",
+    "discounts": "Discounts",
+    "hash": "HASH",
+    "bs": "Balance Sheet",
+    "milk_bottles": "Milk Bottles",
+}
 
 # Kept temporarily for the existing app entry point while Task 5 replaces its
 # workbook ingestion with the normalized SMS export workflow.
@@ -26,7 +27,8 @@ WORKBOOK_ROLE_LABELS = (
 
 def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
     """Render compact, safe progress for the six required SMS exports."""
-    verified_count = sum(role in reports for role, _ in SMS_ROLE_LABELS)
+    role_count = len(SMS_ROLE_ORDER)
+    verified_count = sum(role in reports for role in SMS_ROLE_ORDER)
     checks = "".join(
         '<div class="hwfc-workbook-check">'
         f'<div class="hwfc-workbook-check-label">'
@@ -34,7 +36,8 @@ def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
         f'<div class="hwfc-workbook-check-sheet">'
         f'{html.escape(str(getattr(reports.get(role), "filename", "Waiting for report")))}</div>'
         "</div>"
-        for role, label in SMS_ROLE_LABELS
+        for role in SMS_ROLE_ORDER
+        for label in (SMS_ROLE_LABELS[role],)
     )
     validation_message = (
         '<div class="hwfc-sms-validation-message">'
@@ -45,7 +48,7 @@ def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
     ui.markdown(
         '<div class="hwfc-workbook-validation-card">'
         '<div class="hwfc-workbook-validation-title">'
-        f'SMS Reports · {verified_count} of 6 verified'
+        f'SMS Reports · {verified_count} of {role_count} verified'
         "</div>"
         f'<div class="hwfc-workbook-checks">{checks}</div>'
         f"{validation_message}"
@@ -186,7 +189,7 @@ def render_upload_inputs(
         )
         sms_exports = (
             selected_sms_reports
-            if selected_sms_reports is not None
+            if selected_sms_reports or not preserved_sms_reports
             else preserved_sms_reports
         )
 

@@ -38,6 +38,29 @@ class OperationsStatusModelTests(unittest.TestCase):
 
         self.assertEqual(status.files, "All reports verified")
         self.assertEqual(status.files_progress, 100)
+
+    def test_invalid_uploaded_settlement_does_not_complete_sms_progress(self):
+        from app.operations_status_ui import build_operations_status
+        from app.sms_exports import SMS_ROLE_ORDER
+
+        status = build_operations_status(
+            deposit_date=date(2026, 9, 14),
+            daily_uploaded=False,
+            settlement_uploaded=True,
+            workbook_valid=False,
+            settlement_valid=False,
+            workflow_complete=True,
+            iif_generated=True,
+            sms_reports={role: object() for role in SMS_ROLE_ORDER},
+        )
+
+        self.assertEqual(
+            status.files,
+            "6 of 6 SMS verified · Card Settlement needs attention",
+        )
+        self.assertEqual(status.files_progress, 86)
+        self.assertEqual(status.iif, "Needs attention")
+        self.assertEqual(status.state, "attention")
     def test_no_uploads_is_waiting_for_workbook(self):
         from app.operations_status_ui import build_operations_status
         status = build_operations_status(deposit_date=None, daily_uploaded=False, settlement_uploaded=False, workbook_valid=False, settlement_valid=False, workflow_complete=False, iif_generated=False)

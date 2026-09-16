@@ -161,6 +161,7 @@ def preserve_daily_program_state(state: MutableMapping[str, object]) -> None:
                 isinstance(key, str)
                 and key.startswith(_DAILY_UPLOAD_PREFIXES)
                 and value is not None
+                and not (key.startswith("sms_reports_") and value == [])
             )
         },
     }
@@ -200,6 +201,12 @@ def sync_daily_upload(
     uploads = state.get(DAILY_PROGRAM_UPLOADS_KEY)
     updated_uploads = dict(uploads) if isinstance(uploads, dict) else {}
     selected_upload = state.get(widget_key)
+    if (
+        widget_key.startswith("sms_reports_")
+        and selected_upload == []
+        and updated_uploads.get(widget_key)
+    ):
+        return
     if selected_upload is None:
         updated_uploads.pop(widget_key, None)
     else:

@@ -195,6 +195,58 @@ class UploadIntakeUITests(unittest.TestCase):
         self.assertIs(result.sms_exports, sms_exports)
         self.assertIs(result.card_settlement, card_settlement)
 
+    def test_empty_multi_upload_keeps_sms_reports_through_guided_and_hub_stages(self):
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            activate_program,
+            preserve_daily_program_state,
+            return_to_program_hub,
+        )
+        from app.upload_intake_ui import render_upload_inputs, retained_upload_pair
+
+        class EmptyMultiUploadUI:
+            def __init__(self, state):
+                self.session_state = state
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def columns(self, widths, **kwargs):
+                return [self for _ in widths]
+
+            def empty(self):
+                return object()
+
+            def markdown(self, body, **kwargs):
+                return None
+
+            def file_uploader(self, label, **kwargs):
+                return [] if label == "Upload SMS reports" else None
+
+        sms_exports = [object(), object()]
+        state = {
+            "active_finance_program": DAILY_DEPOSITS,
+            "sms_reports_8": [],
+            DAILY_PROGRAM_UPLOADS_KEY: {"sms_reports_8": sms_exports},
+        }
+
+        rendered = render_upload_inputs(EmptyMultiUploadUI(state), uploader_key=8)
+        self.assertIs(rendered.sms_exports, sms_exports)
+        preserve_daily_program_state(state)
+        self.assertEqual(retained_upload_pair(state, uploader_key=8)[0], sms_exports)
+
+        return_to_program_hub(state)
+        state.pop("sms_reports_8")
+        self.assertTrue(activate_program(state, DAILY_DEPOSITS))
+        self.assertEqual(
+            state[DAILY_PROGRAM_UPLOADS_KEY]["sms_reports_8"],
+            sms_exports,
+        )
+
     def test_uploaders_wire_change_callback_with_their_own_widget_keys(self):
         from app.upload_intake_ui import render_upload_inputs
         from app.program_hub_ui import sync_daily_upload

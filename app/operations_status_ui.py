@@ -114,25 +114,36 @@ def _build_sms_operations_status(
     """Build status text for six validated SMS reports plus settlement."""
     from app.sms_exports import SMS_ROLE_ORDER
 
+    role_count = len(SMS_ROLE_ORDER)
     sms_count = sum(role in sms_reports for role in SMS_ROLE_ORDER)
-    sms_complete = sms_count == len(SMS_ROLE_ORDER)
+    sms_complete = sms_count == role_count
     upload_count = sms_count + int(settlement_uploaded)
+    verified_upload_count = sms_count + int(
+        settlement_uploaded and settlement_valid
+    )
     date_text = (
         deposit_date.strftime("%m/%d/%Y")
         if deposit_date and upload_count
         else "Waiting for SMS reports"
     )
 
-    if sms_complete and settlement_valid:
+    reports_valid = sms_complete and settlement_uploaded and settlement_valid
+    if reports_valid:
         files_text = "All reports verified"
     elif settlement_uploaded and not settlement_valid:
-        files_text = f"{sms_count} of 6 SMS verified · Card Settlement needs attention"
+        files_text = (
+            f"{sms_count} of {role_count} SMS verified · "
+            "Card Settlement needs attention"
+        )
     elif settlement_uploaded:
-        files_text = f"{sms_count} of 6 SMS verified · Card Settlement uploaded"
+        files_text = (
+            f"{sms_count} of {role_count} SMS verified · Card Settlement uploaded"
+        )
     else:
-        files_text = f"{sms_count} of 6 SMS verified · Card Settlement needed"
+        files_text = (
+            f"{sms_count} of {role_count} SMS verified · Card Settlement needed"
+        )
 
-    reports_valid = sms_complete and settlement_valid
     if iif_generated and reports_valid and workflow_complete:
         iif_text, state = "Ready to download", "ready"
     elif sms_complete and settlement_uploaded and not settlement_valid:
@@ -145,7 +156,7 @@ def _build_sms_operations_status(
         iif_text, state = "Not ready", "waiting"
 
     deposit_progress = 100 if deposit_date and upload_count else 0
-    files_progress = round(upload_count / 7 * 100)
+    files_progress = round(verified_upload_count / (role_count + 1) * 100)
     if iif_generated and state == "ready":
         iif_progress = 100
     elif workflow_complete and state == "ready":

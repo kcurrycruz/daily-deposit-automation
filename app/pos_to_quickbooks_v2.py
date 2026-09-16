@@ -1441,7 +1441,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4150100 · Sales Tax Payable", "New York State Sales Tax", "", bs("sales_tax")),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Sales", bs("bottle_sales")),
         ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Fee", bs("milk_bottle_fee")),
-        ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Return", -(abs(milk_bottle_return) + bs("milk_bottle_return", 0.0)) if (milk_bottle_return or bs("milk_bottle_return")) else None),
+        ("1311100 · Inventory - Bottles Deposit", "", "Milk Bottle Return", abs(milk_bottle_return) + bs("milk_bottle_return", 0.0) if (milk_bottle_return or bs("milk_bottle_return")) else None),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Return", -bs("bottle_return") if bs("bottle_return") else None),
         ("4160000 · Charitable Donations Payable", "", "Charity/Pass through Donations (Round up)", charity_combined or None),
         ("9107000 · Miscellaneous Income", "", "Penny Round Up for Cash Transactions", bs_signed("penny_round")),

@@ -79,8 +79,8 @@ from app.deposit_page_flow import (
 )
 from app.operations_status_ui import (
     build_operations_status,
-    deposit_run_context,
     render_operations_status,
+    sms_run_context,
 )
 from app.run_history_ui import (
     render_daily_sidebar,
@@ -139,7 +139,7 @@ from app.guided_step_ui import (
 from app.upload_intake_ui import (
     missing_settlement_date_warning,
     render_upload_inputs,
-    render_workbook_validation,
+    render_sms_validation,
     retained_upload_pair,
 )
 from app.ui_helpers import (
@@ -150,18 +150,113 @@ from app.program_hub_ui import (
     ACTIVE_PROGRAM_KEY,
     DAILY_DEPOSITS,
     activate_program,
+    clear_daily_uploads,
     normalize_program_selection,
     preserve_daily_program_state,
     render_program_hub,
     restore_daily_program_state,
     return_to_program_hub,
 )
+from app.daily_reporting_workbook import (
+    build_reporting_workbook,
+    reporting_workbook_name,
+)
+from app.sms_deposit_data import build_sms_deposit_data
+from app.sms_exports import parse_sms_export, validate_sms_exports
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
 # ---------------------------------------------------------------------
 
 EASTERN_TZ = ZoneInfo("America/New_York")
+
+
+@dataclass(frozen=True)
+class GeneratedWorkbookUpload:
+    """In-memory generated workbook compatible with the existing engine API."""
+
+    name: str
+    data: bytes
+
+    def getvalue(self) -> bytes:
+        return self.data
+
+
+def inspect_sms_uploads(files) -> dict:
+    """Parse partial role progress and validate a complete six-report bundle."""
+    uploaded_files = list(files or ())
+    reports = {}
+    source_bytes = {}
+    parse_error = None
+
+    for uploaded_file in uploaded_files:
+        try:
+            file_bytes = uploaded_file.getvalue()
+            report = parse_sms_export(uploaded_file.name, file_bytes)
+        except (AttributeError, TypeError, ValueError) as exc:
+            if parse_error is None:
+                parse_error = exc
+            continue
+        if report.role in reports:
+            if parse_error is None:
+                parse_error = ValueError(
+                    f"Two files were detected as {report.role.replace('_', ' ').title()}."
+                )
+            continue
+        reports[report.role] = report
+        source_bytes[report.role] = file_bytes
+
+    bundle = None
+    validation_error = None
+    if uploaded_files:
+        try:
+            bundle = validate_sms_exports(uploaded_files)
+        except ValueError as exc:
+            validation_error = exc
+        else:
+            reports = dict(bundle.reports)
+
+    return {
+        "reports": reports,
+        "source_bytes": source_bytes,
+        "bundle": bundle,
+        "error": validation_error or parse_error,
+    }
+
+
+def complete_sms_run(
+    engine_result: dict,
+    bundle,
+    data,
+    *,
+    reporting_workbook_bytes: bytes | None = None,
+) -> dict:
+    """Attach the report download only after a fully validated IIF exists."""
+    result = dict(engine_result)
+    result.pop("reporting_workbook_bytes", None)
+    result.pop("reporting_workbook_name", None)
+    validation = result.get("validation")
+    if not (
+        isinstance(result.get("iif_bytes"), bytes)
+        and result["iif_bytes"]
+        and result.get("iif_path") is not None
+        and isinstance(validation, dict)
+        and validation.get("all_ok") is True
+    ):
+        return result
+
+    workbook_bytes = reporting_workbook_bytes
+    if workbook_bytes is None:
+        workbook_bytes = build_reporting_workbook(
+            ROOT / "assets" / "SubDept Single Total Report Template.xlsx",
+            bundle,
+            data,
+        )
+    result["reporting_workbook_bytes"] = workbook_bytes
+    result["reporting_workbook_name"] = reporting_workbook_name(
+        bundle.deposit_date
+    )
+    return result
 
 def format_history_run_time(value: str, include_date: bool = False) -> str:
     """Display stored Run History timestamps in HWFC local Eastern Time.
@@ -1580,6 +1675,7 @@ def archive_run(uploaded_file, settlement_file, result: dict, report_date: date,
 def reset_current_work() -> None:
     for key in ("run_result", "run_context", "run_date", "run_filename", "run_date_mismatch", "run_settlement_filename", "last_history_id"):
         st.session_state.pop(key, None)
+    clear_daily_uploads(st.session_state)
     reset_deposit_page(st.session_state)
     st.session_state["file_uploader_key"] = st.session_state.get("file_uploader_key", 0) + 1
 
@@ -2167,16 +2263,17 @@ date_info = {
     "source_sheet": None,
 }
 deposit_date = None
+sms_files = None
 
 if requested_page_stage == UPLOAD_STAGE:
     upload_render = render_upload_inputs(
         st,
         uploader_key=st.session_state["file_uploader_key"],
     )
-    uploaded = upload_render.daily_workbook
+    sms_files = upload_render.sms_exports
     settlement_file = upload_render.card_settlement
 else:
-    uploaded, settlement_file = retained_upload_pair(
+    sms_files, settlement_file = retained_upload_pair(
         st.session_state,
         uploader_key=st.session_state["file_uploader_key"],
     )
@@ -2187,58 +2284,63 @@ settlement_source_ok = False
 settlement_source_sheet = None
 upload_bytes = None
 missing_roles = []
+sms_inspection = inspect_sms_uploads(sms_files)
+sms_reports = sms_inspection["reports"]
+sms_source_bytes = sms_inspection["source_bytes"]
+sms_bundle = sms_inspection["bundle"]
+sms_validation_error = sms_inspection["error"]
+sms_data = None
+uploaded = None
 
-if uploaded is not None:
-    upload_bytes = uploaded.getvalue()
-    date_info = detect_workbook_dates(upload_bytes)
-    deposit_date = date_info["detected_date"]
-    roles = detect_sheet_roles(upload_bytes, preferred_date=deposit_date)
-    missing_roles = [
-        key
-        for key in ("sales", "coupons", "discounts", "bs", "hash")
-        if not roles.get(key)
-    ]
-
-    if requested_page_stage == UPLOAD_STAGE:
-        if deposit_date is not None:
-            upload_render.date_slot.markdown(
-                '<div class="hwfc-mini-card">'
-                '<div class="hwfc-mini-label">Detected</div>'
-                f'<div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div>'
-                "</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            upload_render.date_slot.error("Report date not detected", icon="⚠️")
-
-        if date_info["has_mismatch"]:
-            detail_lines = [
-                f"**{sheet}:** {dt.strftime('%m/%d/%Y')}"
-                for sheet, dt in date_info["dates_by_sheet"].items()
-            ]
-            source = date_info.get("source_sheet") or "workbook"
-            st.warning(
-                "**DATE MISMATCH WARNING**\n\n"
-                + "The workbook contains more than one report date. "
-                + f"The deposit will use **{deposit_date.strftime('%m/%d/%Y')}** "
-                + f"from **{source}**. You can still run the deposit, but review "
-                + "the dates first.\n\n"
-                + "  \n".join(detail_lines),
-                icon="⚠️",
-            )
-
-        render_workbook_validation(
-            st,
-            roles=roles,
-            report_date=deposit_date,
+if sms_bundle is not None:
+    try:
+        sms_data = build_sms_deposit_data(sms_bundle)
+        upload_bytes = build_reporting_workbook(
+            ROOT / "assets" / "SubDept Single Total Report Template.xlsx",
+            sms_bundle,
+            sms_data,
         )
-elif requested_page_stage == UPLOAD_STAGE:
-    upload_render.date_slot.markdown(
-        '<div class="hwfc-mini-card">'
-        '<div class="hwfc-mini-label">Detected</div>'
-        '<div class="hwfc-mini-value">Upload workbook</div>'
-        "</div>",
-        unsafe_allow_html=True,
+        uploaded = GeneratedWorkbookUpload(
+            reporting_workbook_name(sms_bundle.deposit_date),
+            upload_bytes,
+        )
+        deposit_date = sms_bundle.deposit_date
+        date_info = detect_workbook_dates(upload_bytes)
+        roles = detect_sheet_roles(upload_bytes, preferred_date=deposit_date)
+        missing_roles = [
+            key
+            for key in ("sales", "coupons", "discounts", "bs", "hash")
+            if not roles.get(key)
+        ]
+    except Exception as exc:
+        sms_validation_error = exc
+        sms_bundle = None
+        sms_data = None
+        uploaded = None
+        upload_bytes = None
+        deposit_date = None
+
+if requested_page_stage == UPLOAD_STAGE:
+    if deposit_date is not None:
+        upload_render.date_slot.markdown(
+            '<div class="hwfc-mini-card">'
+            '<div class="hwfc-mini-label">Verified</div>'
+            f'<div class="hwfc-mini-value">📅 {deposit_date.strftime("%m/%d/%Y")}</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        upload_render.date_slot.markdown(
+            '<div class="hwfc-mini-card">'
+            '<div class="hwfc-mini-label">Waiting</div>'
+            '<div class="hwfc-mini-value">Upload all six SMS reports</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    render_sms_validation(
+        st,
+        reports=sms_reports,
+        error=sms_validation_error,
     )
 
 if settlement_file is not None:
@@ -2315,7 +2417,11 @@ if settlement_file is not None:
             )
 
 workbook_status_valid = bool(
-    uploaded is not None and deposit_date is not None and not missing_roles
+    sms_bundle is not None
+    and sms_data is not None
+    and uploaded is not None
+    and deposit_date is not None
+    and not missing_roles
 )
 settlement_status_valid = bool(
     settlement_file is not None
@@ -2348,6 +2454,8 @@ if deposit_page_stage == UPLOAD_STAGE:
             settlement_valid=settlement_status_valid,
             workflow_complete=False,
             iif_generated=False,
+            sms_reports=sms_reports,
+            sms_valid=workbook_status_valid,
         ),
     )
     if reports_ready:
@@ -3932,8 +4040,8 @@ guided_workflow_ready = deposit_workflow_complete(
 ) and activity_detection_valid
 
 current_run_context = (
-    deposit_run_context(
-        upload_bytes,
+    sms_run_context(
+        sms_source_bytes,
         settlement_file.getvalue(),
         {
             "deposit_date": deposit_date.isoformat(),
@@ -3948,7 +4056,8 @@ current_run_context = (
             "step_completions": step_completions,
         },
     )
-    if (uploaded is not None and settlement_file is not None
+    if (sms_bundle is not None and sms_data is not None
+        and uploaded is not None and settlement_file is not None
         and workbook_status_valid and settlement_status_valid
         and guided_workflow_ready and membership_valid and coupon_valid
         and activity_valid and closeout_valid)
@@ -3969,6 +4078,8 @@ operations_status = build_operations_status(
     settlement_valid=settlement_status_valid,
     workflow_complete=guided_workflow_ready,
     iif_generated=download_details is not None,
+    sms_reports=sms_reports,
+    sms_valid=workbook_status_valid,
 )
 run_clicked = render_prepare_iif_action(
     st,
@@ -4001,6 +4112,12 @@ if run_clicked:
                     coupon_mfg_total,
                     activity_payload=activity_payload,
                     closeout_payload=closeout_payload,
+                )
+                result = complete_sms_run(
+                    result,
+                    sms_bundle,
+                    sms_data,
+                    reporting_workbook_bytes=upload_bytes,
                 )
                 st.session_state["run_result"] = result
                 st.session_state["run_context"] = current_run_context

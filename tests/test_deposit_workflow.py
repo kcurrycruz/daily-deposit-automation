@@ -1,8 +1,81 @@
+import ast
 import unittest
 from datetime import date
+from pathlib import Path
+
+from app.sms_exports import build_sms_export_bundle
+from tests.sms_fixture_factory import sms_exports_091426
+
+
+SOURCE = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+
+
+def streamlit_definition(name, namespace):
+    node = next(
+        node
+        for node in ast.parse(SOURCE.read_text(encoding="utf-8")).body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name == name
+    )
+    exec(
+        compile(ast.Module(body=[node], type_ignores=[]), str(SOURCE), "exec"),
+        namespace,
+    )
+    return namespace[name]
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_generated_workbook_upload_matches_engine_file_interface(self):
+        upload_type = streamlit_definition(
+            "GeneratedWorkbookUpload", {"dataclass": __import__("dataclasses").dataclass}
+        )
+
+        upload = upload_type("daily.xlsx", b"workbook bytes")
+
+        self.assertEqual(upload.name, "daily.xlsx")
+        self.assertEqual(upload.getvalue(), b"workbook bytes")
+
+    def test_partial_sms_roles_are_visible_but_bundle_waits_for_all_six(self):
+        reports = {report.filename: report for report in sms_exports_091426()}
+
+        class Uploaded:
+            def __init__(self, report):
+                self.name = report.filename
+                self._data = report.role.encode("ascii")
+
+            def getvalue(self):
+                return self._data
+
+        uploads = [Uploaded(report) for report in sms_exports_091426()]
+
+        def parse_export(filename, _data):
+            return reports[filename]
+
+        def validate_exports(files):
+            return build_sms_export_bundle(
+                parse_export(item.name, item.getvalue()) for item in files
+            )
+
+        inspect_sms_uploads = streamlit_definition(
+            "inspect_sms_uploads",
+            {
+                "parse_sms_export": parse_export,
+                "validate_sms_exports": validate_exports,
+            },
+        )
+
+        partial = inspect_sms_uploads(uploads[:2])
+        complete = inspect_sms_uploads(uploads)
+
+        self.assertEqual(set(partial["reports"]), {"sales", "coupons"})
+        self.assertIsNone(partial["bundle"])
+        self.assertIsInstance(partial["error"], ValueError)
+        self.assertEqual(tuple(complete["reports"]), tuple(complete["bundle"].reports))
+        self.assertEqual(
+            complete["source_bytes"],
+            {report.role: report.role.encode("ascii") for report in sms_exports_091426()},
+        )
+        self.assertIsNone(complete["error"])
+
     def test_reopening_manual_step_clears_choice_so_it_cannot_immediately_recomplete(self):
         import app.guided_deposit_state as guided_state
 

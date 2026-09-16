@@ -30,6 +30,43 @@ def deposit_run_context(daily_bytes: bytes, settlement_bytes: bytes, inputs: dic
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def sms_run_context(
+    source_bytes: Mapping[str, bytes], settlement_bytes: bytes, inputs: dict
+) -> str:
+    """Identify the six original SMS streams, settlement, and guided inputs."""
+    from app.sms_exports import SMS_ROLE_ORDER
+
+    expected_roles = set(SMS_ROLE_ORDER)
+    received_roles = set(source_bytes)
+    if received_roles != expected_roles:
+        missing = [role for role in SMS_ROLE_ORDER if role not in received_roles]
+        extra = sorted(received_roles - expected_roles)
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected: {', '.join(extra)}")
+        raise ValueError(
+            "SMS run context requires exactly one source for every role"
+            + (f" ({'; '.join(details)})" if details else "")
+            + "."
+        )
+
+    context = {
+        "sms": [
+            {
+                "role": role,
+                "sha256": hashlib.sha256(source_bytes[role]).hexdigest(),
+            }
+            for role in SMS_ROLE_ORDER
+        ],
+        "settlement": hashlib.sha256(settlement_bytes).hexdigest(),
+        "inputs": inputs,
+    }
+    encoded = json.dumps(context, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def build_operations_status(
     *,
     deposit_date: date | None,
@@ -40,6 +77,7 @@ def build_operations_status(
     workflow_complete: bool,
     iif_generated: bool,
     sms_reports: Mapping[str, object] | None = None,
+    sms_valid: bool | None = None,
 ) -> OperationsStatus:
     if sms_reports is not None:
         return _build_sms_operations_status(
@@ -49,6 +87,7 @@ def build_operations_status(
             settlement_valid=settlement_valid,
             workflow_complete=workflow_complete,
             iif_generated=iif_generated,
+            sms_valid=sms_valid,
         )
 
     uploaded_count = int(daily_uploaded) + int(settlement_uploaded)
@@ -110,6 +149,7 @@ def _build_sms_operations_status(
     settlement_valid: bool,
     workflow_complete: bool,
     iif_generated: bool,
+    sms_valid: bool | None,
 ) -> OperationsStatus:
     """Build status text for six validated SMS reports plus settlement."""
     from app.sms_exports import SMS_ROLE_ORDER
@@ -127,9 +167,12 @@ def _build_sms_operations_status(
         else "Waiting for SMS reports"
     )
 
-    reports_valid = sms_complete and settlement_uploaded and settlement_valid
+    sms_bundle_valid = sms_complete if sms_valid is None else sms_valid
+    reports_valid = sms_bundle_valid and settlement_uploaded and settlement_valid
     if reports_valid:
         files_text = "All reports verified"
+    elif sms_complete and sms_valid is False:
+        files_text = f"{sms_count} of {role_count} SMS identified · Needs attention"
     elif settlement_uploaded and not settlement_valid:
         files_text = (
             f"{sms_count} of {role_count} SMS verified · "
@@ -146,7 +189,9 @@ def _build_sms_operations_status(
 
     if iif_generated and reports_valid and workflow_complete:
         iif_text, state = "Ready to download", "ready"
-    elif sms_complete and settlement_uploaded and not settlement_valid:
+    elif sms_complete and settlement_uploaded and (
+        sms_valid is False or not settlement_valid
+    ):
         iif_text, state = "Needs attention", "attention"
     elif reports_valid and workflow_complete:
         iif_text, state = "Ready to prepare IIF", "ready"

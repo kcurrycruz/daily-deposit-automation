@@ -925,6 +925,9 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertIsNone(deposit_download_details(None))
         self.assertIsNone(deposit_download_details({"iif_path": Path("deposit.iif")}))
+        self.assertIsNone(
+            deposit_download_details({"working_workbook_bytes": b"internal"})
+        )
         self.assertEqual(
             deposit_download_details(
                 {
@@ -935,6 +938,133 @@ class MembershipPaymentTests(unittest.TestCase):
             {
                 "file_name": "deposit_20260827.iif",
                 "data": b"IIF content",
+            },
+        )
+
+    def test_sms_generated_workbook_posts_one_combined_milk_bottle_return(self):
+        from dataclasses import replace
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        from app import pos_to_quickbooks_v2 as engine
+        from app.daily_reporting_workbook import (
+            build_reporting_workbook,
+            reporting_workbook_name,
+        )
+        from app.sms_deposit_data import build_sms_deposit_data
+        from app.sms_exports import build_sms_export_bundle
+        from tests.sms_fixture_factory import sms_exports_091426
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        complete_node = next(
+            node
+            for node in ast.parse(source_path.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef) and node.name == "complete_sms_run"
+        )
+        namespace = {
+            "Path": Path,
+            "ROOT": source_path.parent,
+            "build_reporting_workbook": build_reporting_workbook,
+            "reporting_workbook_name": reporting_workbook_name,
+        }
+        exec(
+            compile(ast.Module(body=[complete_node], type_ignores=[]), str(source_path), "exec"),
+            namespace,
+        )
+
+        reports = {report.role: report for report in sms_exports_091426()}
+        reports["bs"] = replace(
+            reports["bs"],
+            rows=(
+                ("Store Balance Sheet",),
+                ("Date:", "09/14/2026"),
+                ("Code", "Description", None, None, "Amount"),
+                (39, "Bottle Sales", None, None, "3.00"),
+                (40, "Milk Bottle Fee", None, None, "2.00"),
+                (910, "Milk Bottle Return", None, None, "8.00"),
+                (911, "Bottle Return", None, None, "1.00"),
+            ),
+        )
+        bundle = build_sms_export_bundle(reports.values())
+        data = build_sms_deposit_data(bundle)
+        completed = namespace["complete_sms_run"](
+            {
+                "iif_bytes": b"validated IIF",
+                "iif_path": Path("deposit_20260914.iif"),
+                "validation": {"all_ok": True},
+            },
+            bundle,
+            data,
+        )
+        workbook_bytes = completed["reporting_workbook_bytes"]
+        workbook = load_workbook(BytesIO(workbook_bytes), data_only=True)
+        try:
+            self.assertEqual(
+                workbook["SubDept Sales Report"]["M1"].value,
+                74.00,
+            )
+        finally:
+            workbook.close()
+
+        fixture_root = Path(__file__).parent / f"_sms_workflow_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / completed["reporting_workbook_name"]
+        workbook_path.write_bytes(workbook_bytes)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            parsed = engine.parse_excel_report(workbook_path)
+            bs_data = engine.parse_bs_sheet(workbook_path, bundle.deposit_date)
+            iif_path = engine.generate_iif(
+                parsed[0],
+                {},
+                {},
+                bundle.deposit_date,
+                milk_bottle_return=parsed[2],
+                store_coupons_xl=parsed[3],
+                owner_apprec_xl=parsed[4],
+                misc_tba_lines=parsed[1],
+                excel_sales_total=parsed[5],
+                bs_data=bs_data,
+            )
+            milk_bottle_lines = [
+                line.split("\t")
+                for line in iif_path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("SPL\t")
+                and "\tMilk Bottle Return\t" in line
+            ]
+            bottle_lines = {
+                parts[6]: parts[5]
+                for parts in (
+                    line.split("\t")
+                    for line in iif_path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("SPL\t")
+                )
+                if parts[6]
+                in {"Bottle Sales", "Milk Bottle Fee", "Bottle Return"}
+            }
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertEqual(len(milk_bottle_lines), 1)
+        self.assertTrue(milk_bottle_lines[0][3].startswith("1311100"))
+        self.assertEqual(milk_bottle_lines[0][5], "-82.00")
+        self.assertEqual(
+            bottle_lines,
+            {
+                "Bottle Sales": "-3.00",
+                "Milk Bottle Fee": "-2.00",
+                "Bottle Return": "1.00",
             },
         )
 

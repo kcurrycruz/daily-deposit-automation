@@ -397,7 +397,7 @@ class ProgramHubEntryPointTests(unittest.TestCase):
     def test_upload_entrypoint_uses_the_stable_renderer_signature(self):
         app_source = self.app_source()
         call_start = app_source.index("upload_render = render_upload_inputs(")
-        call_end = app_source.index("uploaded = upload_render.daily_workbook")
+        call_end = app_source.index("sms_files = upload_render.sms_exports")
         upload_call = app_source[call_start:call_end]
 
         self.assertIn("uploader_key=", upload_call)

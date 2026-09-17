@@ -4350,6 +4350,113 @@ except RuntimeError:
         self.assertIn("parse_engine_status_summary(log_text)", source)
         self.assertIn("status_summary[\"all_ok\"]", source)
 
+    def test_fresh_single_digit_date_status_keeps_success_downloads_eligible(self):
+        from app.membership_payments import write_membership_payments_file
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        runtime_nodes = [
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {
+                "build_engine_command",
+                "run_engine",
+                "complete_sms_run",
+            }
+        ]
+        runtime_root = Path(__file__).parent / f"_single_digit_status_{uuid4().hex}"
+        input_dir = runtime_root / "input"
+        iif_dir = runtime_root / "qb_imports"
+        log_dir = runtime_root / "logs"
+        temp_dir = runtime_root / "runtime"
+        for folder in (input_dir, iif_dir, log_dir, temp_dir):
+            folder.mkdir(parents=True, exist_ok=True)
+
+        class UploadedWorkbook:
+            name = "daily.xlsx"
+
+            def getvalue(self):
+                return b"workbook"
+
+        class FakeSubprocess:
+            def run(self, _command, **_kwargs):
+                (iif_dir / "deposit_20260904.iif").write_bytes(b"current iif")
+                (log_dir / "last_run_status.txt").write_text(
+                    """HWFC Daily Deposit — Friday, September 04, 2026
+  SALES: ✓ MATCH   $86,502.80
+  DISCOUNTS: ✓ MATCH   $3,981.21
+  HASH SALES: ✓ MATCH   $10.89
+  ✓ ALL CHECKS PASSED — Safe to import into QuickBooks!
+""",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(
+                    stdout="Current run completed.",
+                    stderr="",
+                    returncode=0,
+                )
+
+        namespace = {
+            "Path": Path,
+            "date": date,
+            "json": __import__("json"),
+            "sys": sys,
+            "uuid4": uuid4,
+            "subprocess": FakeSubprocess(),
+            "ENGINE_PATH": source_path,
+            "ROOT": runtime_root,
+            "INPUT_DIR": input_dir,
+            "QB_IMPORT_DIR": iif_dir,
+            "LOG_DIR": log_dir,
+            "RUNTIME_TEMP_DIR": temp_dir,
+            "write_membership_payments_file": write_membership_payments_file,
+            "parse_iif": lambda _path: (["parsed line"], "parsed dataframe"),
+            "parse_validation": lambda log_text, _lines: {
+                "all_ok": "ALL CHECKS PASSED" in log_text
+            },
+            "reporting_workbook_name": lambda _date: "report.xlsx",
+        }
+        exec(
+            compile(
+                ast.Module(body=runtime_nodes, type_ignores=[]),
+                str(source_path),
+                "exec",
+            ),
+            namespace,
+        )
+
+        try:
+            result = namespace["run_engine"](
+                UploadedWorkbook(),
+                UploadedWorkbook(),
+                date(2026, 9, 4),
+                [],
+                "manual",
+                "quickbooks",
+                None,
+                None,
+                None,
+            )
+            completed = namespace["complete_sms_run"](
+                result,
+                SimpleNamespace(deposit_date=date(2026, 9, 4)),
+                None,
+                reporting_workbook_bytes=b"report",
+            )
+        finally:
+            for path in sorted(runtime_root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            runtime_root.rmdir()
+
+        self.assertTrue(result["validation"]["all_ok"])
+        self.assertIn("September 04, 2026", result["log_text"])
+        self.assertEqual(completed["iif_bytes"], b"current iif")
+        self.assertEqual(completed["reporting_workbook_bytes"], b"report")
+
     def test_stale_success_status_cannot_unlock_current_mismatch_downloads(self):
         from app.membership_payments import write_membership_payments_file
 

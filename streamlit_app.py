@@ -2038,9 +2038,7 @@ def run_engine(
         proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
         log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
-        expected_status_date = (
-            f"{deposit_date.strftime('%B')} {deposit_date.day}, {deposit_date.year}"
-        )
+        expected_status_date = deposit_date.strftime("%B %d, %Y")
         for status_path in status_paths:
             if status_path.exists():
                 try:

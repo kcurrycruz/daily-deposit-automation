@@ -117,12 +117,23 @@ def _subdepartment_columns(report: SmsExport) -> tuple[int, dict[str, int]]:
         )
         if code < 0:
             break
-        return row_index, {
+        columns = {
             "code": code,
             "description": description,
             "quantity": quantity,
             "amount": amount,
         }
+        if amount > 0:
+            for detail_row in report.rows[row_index + 1 :]:
+                if _integer(_cell(detail_row, code)) is None:
+                    continue
+                declared_amount = _money_number(_cell(detail_row, amount))
+                shifted_amount = _money_number(_cell(detail_row, amount - 1))
+                if declared_amount is None and shifted_amount is not None:
+                    columns["amount"] -= 1
+                    columns["quantity"] -= 1
+                break
+        return row_index, columns
     raise ValueError(f"{report.role.title()} report has no sub-department data header.")
 
 

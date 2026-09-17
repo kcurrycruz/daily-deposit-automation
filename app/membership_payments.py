@@ -282,6 +282,19 @@ def membership_editor_key(workbook_bytes: bytes, reset_counter: int) -> str:
     return f"membership_payments_{reset_counter}_{workbook_digest}"
 
 
+def sms_source_bundle_identity(source_bytes: dict[str, bytes]) -> bytes:
+    """Return an order-independent identity for one set of SMS source exports."""
+    digest = hashlib.sha256()
+    for source_name in sorted(source_bytes):
+        name_bytes = source_name.encode("utf-8")
+        payload = bytes(source_bytes[source_name])
+        digest.update(len(name_bytes).to_bytes(4, "big"))
+        digest.update(name_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.digest()
+
+
 def load_membership_payments_file(path: str | Path) -> list[dict]:
     payments = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payments, list):

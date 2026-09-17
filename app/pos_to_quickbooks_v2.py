@@ -403,7 +403,9 @@ def parse_excel_report(filepath: Path) -> tuple:
     dust_bunnies_total = 0.0
     milk_bottles_returns = 0.0
     refunded_discounts = 0.0
-    hash_sales_total = 0.0
+    hash_sales_total = _hash_control_total(wb)
+    if hash_sales_total:
+        log.info(f"    Hash Sales source control: ${hash_sales_total:.2f}")
 
     for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
         if i == 1:
@@ -581,6 +583,60 @@ def _content_report_sheet(wb, required_phrases: tuple[str, ...]):
             if any(phrase in joined for phrase in required_phrases):
                 return sheet, sheet_name
     return None, None
+
+
+def _hash_control_total(wb) -> float:
+    ws = next(
+        (
+            wb[sheet_name]
+            for sheet_name in wb.sheetnames
+            if sheet_name.strip().casefold().endswith(" hash")
+            and "xxxxxx" not in sheet_name.casefold()
+        ),
+        None,
+    )
+    if ws is None:
+        ws, _ = _content_report_sheet(
+            wb,
+            ("refunded discounts", "pass through donations"),
+        )
+    if ws is None:
+        return 0.0
+
+    amount_column = None
+    for row in ws.iter_rows(
+        min_row=1,
+        max_row=min(ws.max_row, 20),
+        values_only=True,
+    ):
+        for index, value in enumerate(row):
+            if re.sub(r"[^a-z0-9]", "", str(value or "").casefold()) == "amount":
+                amount_column = index
+                break
+        if amount_column is not None:
+            break
+    if amount_column is None:
+        return 0.0
+
+    for row in ws.iter_rows(values_only=True):
+        labels = {
+            re.sub(r"[^a-z0-9]", "", str(value).casefold())
+            for value in row
+            if isinstance(value, str) and value.strip()
+        }
+        if "total" not in labels and "hashdetailtotal" not in labels:
+            continue
+        candidates = (
+            row[amount_column : amount_column + 1]
+            if amount_column < len(row)
+            else ()
+        )
+        for value in (*candidates, *reversed(row)):
+            try:
+                return round(abs(float(value)), 2)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def parse_hash_sheet(filepath: Path, report_date) -> tuple:

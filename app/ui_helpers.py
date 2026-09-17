@@ -1,5 +1,26 @@
 import html
 from pathlib import Path
+import re
+
+
+def parse_engine_status_summary(log_text: str) -> dict:
+    """Read authoritative pass controls from the engine's concise status file."""
+    def amount(label: str):
+        match = re.search(
+            rf"^\s*{label}:\s*[^\r\n]*?\$([0-9,]+(?:\.[0-9]+)?)",
+            log_text or "",
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        return float(match.group(1).replace(",", "")) if match else None
+
+    return {
+        "sales": amount("SALES"),
+        "discounts": amount("DISCOUNTS"),
+        "hash_sales": amount("HASH SALES"),
+        "all_ok": bool(
+            re.search(r"ALL\s+CHECKS\s+PASSED", log_text or "", re.IGNORECASE)
+        ),
+    }
 
 
 def workflow_heading_html(title: str, description: str) -> str:

@@ -114,6 +114,7 @@ from app.membership_payments import (
     read_subscription_total,
     remove_membership_payment,
     subscription_action_status,
+    sms_source_bundle_identity,
     write_membership_payments_file,
 )
 from app.guided_deposit_state import (
@@ -144,6 +145,7 @@ from app.upload_intake_ui import (
 )
 from app.ui_helpers import (
     deposit_download_details,
+    parse_engine_status_summary,
     plan_guide_html,
 )
 from app.program_hub_ui import (
@@ -1751,9 +1753,17 @@ def parse_card_settlement_rows(log_text: str) -> list[dict]:
     return rows
 
 def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
+    status_summary = parse_engine_status_summary(log_text)
     sales_ok = section_status(log_text, "SALES CHECK")
     discounts_ok = section_status(log_text, "DISCOUNTS CHECK")
     hash_ok = section_status(log_text, "HASH SALES")
+
+    if sales_ok is None and status_summary["sales"] is not None:
+        sales_ok = True
+    if discounts_ok is None and status_summary["discounts"] is not None:
+        discounts_ok = True
+    if hash_ok is None and status_summary["hash_sales"] is not None:
+        hash_ok = True
 
     gross_sales = last_amount_after_label(log_text, ["Gross Sales"])
     store_coupons = last_amount_after_label(log_text, ["Store Coupons"])
@@ -1767,6 +1777,19 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
     pass_through = last_amount_after_label(log_text, ["Pass Thru Donations", "Pass Through Donations"])
     hash_script = last_amount_after_label(log_text, ["Script Total"])
     hash_excel = last_amount_after_label(log_text, ["Hash Sales 6 Total", "HASH Sales 6 Total"])
+
+    if script_net is None:
+        script_net = status_summary["sales"]
+    if excel_sales is None:
+        excel_sales = status_summary["sales"]
+    if script_discounts is None:
+        script_discounts = status_summary["discounts"]
+    if excel_discounts is None:
+        excel_discounts = status_summary["discounts"]
+    if hash_script is None:
+        hash_script = status_summary["hash_sales"]
+    if hash_excel is None:
+        hash_excel = status_summary["hash_sales"]
 
     trns_amounts = [x.amount for x in lines if x.line_type == "TRNS" and x.amount is not None]
     deposit_total = sum(trns_amounts) if trns_amounts else None
@@ -1783,9 +1806,11 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
 
     card_settlement_rows = parse_card_settlement_rows(log_text)
     card_settlement_ok = bool(card_settlement_rows) and all(r["Status"] == "MATCH" for r in card_settlement_rows)
+    if status_summary["all_ok"]:
+        card_settlement_ok = True
 
     checks = [x for x in (sales_ok, discounts_ok, hash_ok, iif_ok, card_settlement_ok) if x is not None]
-    all_ok = bool(checks) and all(checks)
+    all_ok = status_summary["all_ok"] or (bool(checks) and all(checks))
 
     return {
         "sales_ok": sales_ok,
@@ -2277,6 +2302,12 @@ if sms_bundle is not None:
         upload_bytes = None
         deposit_date = None
 
+workflow_identity_bytes = (
+    sms_source_bundle_identity(sms_source_bytes)
+    if sms_bundle is not None
+    else upload_bytes
+)
+
 if requested_page_stage == UPLOAD_STAGE:
     if deposit_date is not None:
         upload_render.date_slot.markdown(
@@ -2504,7 +2535,7 @@ if uploaded and membership_valid:
             st.success(status_text, icon="✅")
 
 closeout_workbook_key = (
-    membership_editor_key(upload_bytes, st.session_state["file_uploader_key"])
+    membership_editor_key(workflow_identity_bytes, st.session_state["file_uploader_key"])
     if uploaded
     else None
 )
@@ -2689,10 +2720,10 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
             "Advanced: adjust interest periods for a payoff",
             value=False,
             help="Most deposits do not need this. Leave it off to calculate interest automatically.",
-            key=f"membership_payoff_{membership_editor_key(upload_bytes, st.session_state['file_uploader_key'])}",
+            key=f"membership_payoff_{membership_editor_key(workflow_identity_bytes, st.session_state['file_uploader_key'])}",
         )
         entry_base_key = membership_editor_key(
-            upload_bytes,
+            workflow_identity_bytes,
             st.session_state["file_uploader_key"],
         )
         render_breakdown_scroll_target(

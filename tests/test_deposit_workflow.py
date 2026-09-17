@@ -1,8 +1,12 @@
 import ast
 import unittest
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from uuid import uuid4
 
+from app.daily_reporting_workbook import build_reporting_workbook
+from app.sms_deposit_data import build_sms_deposit_data
 from app.sms_exports import build_sms_export_bundle
 from tests.sms_fixture_factory import sms_exports_091426
 
@@ -24,6 +28,37 @@ def streamlit_definition(name, namespace):
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_engine_reads_real_hash_control_total_from_dated_source_tab(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        reports = dict(bundle.reports)
+        reports["hash"] = replace(
+            reports["hash"],
+            rows=(
+                (("Sub-department Single Total",) + ("",) * 11),
+                (("", "", "Sub-Department", "", "", "", "", "Qty", "Amount", "Pkg/Weight") + ("",) * 2),
+                (("", 23, "Refunded Discounts", "", "", "", 8, 4.89, "", "") + ("",) * 2),
+                (("", 32, "PASS THROUGH DONATIONS", "", "", "", 6, 6.00, "", "") + ("",) * 2),
+                (("", "", "", "", "Total", "", 14, "", 10.89, "") + ("",) * 2),
+            ),
+        )
+        real_hash_bundle = replace(bundle, reports=reports)
+        data = build_sms_deposit_data(real_hash_bundle)
+        workbook_bytes = build_reporting_workbook(
+            Path("assets/SubDept Single Total Report Template.xlsx"),
+            real_hash_bundle,
+            data,
+        )
+        fixture_path = Path(__file__).parent / f"_hash_control_{uuid4().hex}.xlsx"
+        fixture_path.write_bytes(workbook_bytes)
+        try:
+            parsed = engine.parse_excel_report(fixture_path)
+        finally:
+            fixture_path.unlink()
+
+        self.assertEqual(parsed[-1], 10.89)
+
     def test_generated_workbook_upload_matches_engine_file_interface(self):
         upload_type = streamlit_definition(
             "GeneratedWorkbookUpload", {"dataclass": __import__("dataclasses").dataclass}

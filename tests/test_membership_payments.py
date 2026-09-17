@@ -4291,6 +4291,65 @@ except RuntimeError:
         self.assertNotEqual(first, different)
         self.assertNotEqual(first, reset)
 
+    def test_sms_source_bundle_identity_is_stable_across_upload_order(self):
+        try:
+            from app.membership_payments import sms_source_bundle_identity
+        except ImportError as exc:
+            self.fail(f"SMS source bundle identity helper is missing: {exc}")
+
+        first = sms_source_bundle_identity(
+            {"sales.xls": b"sales", "hash.xls": b"hash"}
+        )
+        reordered = sms_source_bundle_identity(
+            {"hash.xls": b"hash", "sales.xls": b"sales"}
+        )
+        changed = sms_source_bundle_identity(
+            {"hash.xls": b"different", "sales.xls": b"sales"}
+        )
+
+        self.assertEqual(first, reordered)
+        self.assertNotEqual(first, changed)
+
+    def test_streamlit_uses_stable_sms_sources_for_guided_widget_keys(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("sms_source_bundle_identity", source)
+        self.assertIn("sms_source_bundle_identity(sms_source_bytes)", source)
+        self.assertIn(
+            "membership_editor_key(workflow_identity_bytes, st.session_state[\"file_uploader_key\"])",
+            source,
+        )
+
+    def test_status_summary_parser_recovers_authoritative_passed_controls(self):
+        try:
+            from app.ui_helpers import parse_engine_status_summary
+        except ImportError as exc:
+            self.fail(f"engine status summary parser is missing: {exc}")
+
+        parsed = parse_engine_status_summary(
+            """--- STATUS SUMMARY ---
+  SALES:       ✓ MATCH   $86,502.80
+  DISCOUNTS:   ✓ MATCH   $3,981.21
+  HASH SALES:  ✓ MATCH   $10.89
+  ✓ ALL CHECKS PASSED — Safe to import into QuickBooks!
+"""
+        )
+
+        self.assertEqual(parsed["sales"], 86502.80)
+        self.assertEqual(parsed["discounts"], 3981.21)
+        self.assertEqual(parsed["hash_sales"], 10.89)
+        self.assertTrue(parsed["all_ok"])
+
+    def test_streamlit_validation_uses_authoritative_status_summary(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("parse_engine_status_summary(log_text)", source)
+        self.assertIn("status_summary[\"all_ok\"]", source)
+
 
 if __name__ == "__main__":
     unittest.main()

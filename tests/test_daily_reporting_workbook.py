@@ -194,6 +194,62 @@ class DailyReportingWorkbookTests(unittest.TestCase):
                     self.assertIsInstance(cell.value, Number)
                     self.assertIn(MONEY_FORMAT, cell.number_format)
 
+    def test_real_sms_detail_columns_are_copied_into_reporting_sources(self):
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        data = build_sms_deposit_data(bundle)
+        reports = dict(bundle.reports)
+        reports["sales"] = replace(
+            reports["sales"],
+            rows=(
+                (("Sub-department Single Total",) + ("",) * 11),
+                (("", "", "Sub-Department", "", "", "", "", "Qty", "Amount", "Pkg/Weight") + ("",) * 2),
+                (("", 27, "Store coupons", "", "", "", None, -1428.18, "", "") + ("",) * 2),
+                (("", 110, "Grocery Non-Tax", "", "", "", 1, 87930.98, "", "") + ("",) * 2),
+                (("", "", "", "", "Total", "", 1, "", 86502.80, 4519.652) + ("",) * 2),
+            ),
+        )
+        reports["coupons"] = replace(
+            reports["coupons"],
+            rows=(
+                (("Sub-department Single Total",) + ("",) * 11),
+                (("", "", "Sub-Department", "", "", "", "", "Qty", "Amount", "Pkg/Weight") + ("",) * 2),
+                (("", 110, "Grocery Non-Tax", "", "", "", 1, 61.69, "", "") + ("",) * 2),
+                (("", "", "", "", "Total", "", 1, "", 61.69, "") + ("",) * 2),
+            ),
+        )
+        real_layout_bundle = replace(bundle, reports=reports)
+
+        workbook = load_workbook(
+            BytesIO(build_reporting_workbook(TEMPLATE, real_layout_bundle, data)),
+            data_only=True,
+        )
+
+        self.assertEqual(
+            list(
+                workbook["SubDept Single"].iter_rows(
+                    min_row=1,
+                    max_row=2,
+                    max_col=7,
+                    values_only=True,
+                )
+            ),
+            [
+                (27, "Store coupons", None, None, None, None, -1428.18),
+                (110, "Grocery Non-Tax", None, None, None, 1, 87930.98),
+            ],
+        )
+        self.assertEqual(
+            list(
+                workbook["SubDept Coupon (Local Discount)"].iter_rows(
+                    min_row=1,
+                    max_row=1,
+                    max_col=7,
+                    values_only=True,
+                )
+            ),
+            [(110, "Grocery Non-Tax", None, None, None, 1, 61.69)],
+        )
+
     def test_rejects_bundle_and_normalized_data_for_different_dates(self):
         bundle = build_sms_export_bundle(sms_exports_091426())
         data = replace(build_sms_deposit_data(bundle), deposit_date=date(2026, 9, 15))

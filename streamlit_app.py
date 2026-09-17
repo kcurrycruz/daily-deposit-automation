@@ -2023,19 +2023,33 @@ def run_engine(
             closeout_path=closeout_path,
             closeout_preview_path=closeout_preview_path,
         )
+        status_paths = (
+            LOG_DIR / "last_run_status.txt",
+            QB_IMPORT_DIR / "last_run_status.txt",
+        )
+        for status_path in status_paths:
+            try:
+                status_path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Could not clear the prior engine status file: {status_path}"
+                ) from exc
         engine_invocation_attempted = True
         proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=180)
         log_text = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
 
-        for status_path in [LOG_DIR / "last_run_status.txt", QB_IMPORT_DIR / "last_run_status.txt"]:
+        expected_status_date = (
+            f"{deposit_date.strftime('%B')} {deposit_date.day}, {deposit_date.year}"
+        )
+        for status_path in status_paths:
             if status_path.exists():
                 try:
                     status_text = status_path.read_text(encoding="utf-8", errors="replace")
-                    if status_text.strip():
-                        log_text += "\n\n--- STATUS SUMMARY ---\n" + status_text
-                except Exception:
-                    pass
-                break
+                except OSError:
+                    continue
+                if status_text.strip() and expected_status_date in status_text:
+                    log_text += "\n\n--- STATUS SUMMARY ---\n" + status_text
+                    break
 
         if proc.returncode != 0:
             raise RuntimeError(log_text.strip() or f"Deposit engine exited with code {proc.returncode}.")

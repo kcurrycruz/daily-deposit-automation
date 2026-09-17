@@ -28,6 +28,33 @@ def streamlit_definition(name, namespace):
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_engine_binds_hash_control_to_active_report_date(self):
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook = openpyxl.Workbook()
+        report = workbook.active
+        report.title = "SubDept Sales Report"
+        report["J3"] = 86502.80
+        for sheet_name, control in (
+            ("083126 Hash", 99.99),
+            ("091426 Hash", 10.89),
+        ):
+            sheet = workbook.create_sheet(sheet_name)
+            sheet["I1"] = "Amount"
+            sheet["E2"] = "Total"
+            sheet["I2"] = control
+
+        fixture_path = Path(__file__).parent / f"_multi_hash_{uuid4().hex}.xlsx"
+        workbook.save(fixture_path)
+        try:
+            parsed = engine.parse_excel_report(fixture_path, date(2026, 9, 14))
+        finally:
+            fixture_path.unlink()
+
+        self.assertEqual(parsed[-1], 10.89)
+
     def test_engine_reads_real_hash_control_total_from_dated_source_tab(self):
         from app import pos_to_quickbooks_v2 as engine
 

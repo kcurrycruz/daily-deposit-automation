@@ -373,7 +373,7 @@ MISC_SUBDEPTS = {
     560: "Candles/Incense/Baskets", 999: "UnAssigned",
 }
 
-def parse_excel_report(filepath: Path) -> tuple:
+def parse_excel_report(filepath: Path, report_date=None) -> tuple:
     import openpyxl
     log.info(f"  Reading Excel report: {filepath.name}")
     try:
@@ -403,7 +403,7 @@ def parse_excel_report(filepath: Path) -> tuple:
     dust_bunnies_total = 0.0
     milk_bottles_returns = 0.0
     refunded_discounts = 0.0
-    hash_sales_total = _hash_control_total(wb)
+    hash_sales_total = _hash_control_total(wb, report_date)
     if hash_sales_total:
         log.info(f"    Hash Sales source control: ${hash_sales_total:.2f}")
 
@@ -585,17 +585,30 @@ def _content_report_sheet(wb, required_phrases: tuple[str, ...]):
     return None, None
 
 
-def _hash_control_total(wb) -> float:
-    ws = next(
-        (
-            wb[sheet_name]
-            for sheet_name in wb.sheetnames
-            if sheet_name.strip().casefold().endswith(" hash")
-            and "xxxxxx" not in sheet_name.casefold()
-        ),
-        None,
-    )
-    if ws is None:
+def _hash_control_total(wb, report_date=None) -> float:
+    ws = None
+    if report_date is not None:
+        ws, _ = _dated_report_sheet(wb, report_date, "Hash")
+        if ws is None:
+            ws = next(
+                (
+                    wb[sheet_name]
+                    for sheet_name in wb.sheetnames
+                    if sheet_name.strip().casefold() == "hash"
+                ),
+                None,
+            )
+    else:
+        ws = next(
+            (
+                wb[sheet_name]
+                for sheet_name in wb.sheetnames
+                if sheet_name.strip().casefold().endswith(" hash")
+                and "xxxxxx" not in sheet_name.casefold()
+            ),
+            None,
+        )
+    if ws is None and report_date is None:
         ws, _ = _content_report_sheet(
             wb,
             ("refunded discounts", "pass through donations"),
@@ -2107,7 +2120,7 @@ def main():
 
         if excel_files:
             for f in excel_files:
-                xl_sales, xl_misc, mb_ret, sc_amt, oa_amt, xl_total, pt_total, db_total, mbr, rd, hs = parse_excel_report(f)
+                xl_sales, xl_misc, mb_ret, sc_amt, oa_amt, xl_total, pt_total, db_total, mbr, rd, hs = parse_excel_report(f, yesterday)
                 for k, v in xl_sales.items():
                     sales[k] = round(sales.get(k, 0.0) + v, 2)
                 misc_tba_lines.extend(xl_misc)

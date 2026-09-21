@@ -404,7 +404,7 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
     milk_bottles_returns = 0.0
     refunded_discounts = 0.0
     hash_sales_total = _hash_control_total(wb, report_date)
-    if hash_sales_total:
+    if hash_sales_total is not None:
         log.info(f"    Hash Sales source control: ${hash_sales_total:.2f}")
 
     for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
@@ -585,7 +585,7 @@ def _content_report_sheet(wb, required_phrases: tuple[str, ...]):
     return None, None
 
 
-def _hash_control_total(wb, report_date=None) -> float:
+def _hash_control_total(wb, report_date=None) -> float | None:
     ws = None
     if report_date is not None:
         ws, _ = _dated_report_sheet(wb, report_date, "Hash")
@@ -614,7 +614,7 @@ def _hash_control_total(wb, report_date=None) -> float:
             ("refunded discounts", "pass through donations"),
         )
     if ws is None:
-        return 0.0
+        return None
 
     amount_column = None
     for row in ws.iter_rows(
@@ -629,7 +629,7 @@ def _hash_control_total(wb, report_date=None) -> float:
         if amount_column is not None:
             break
     if amount_column is None:
-        return 0.0
+        return None
 
     for row in ws.iter_rows(values_only=True):
         labels = {
@@ -649,7 +649,7 @@ def _hash_control_total(wb, report_date=None) -> float:
                 return round(abs(float(value)), 2)
             except (TypeError, ValueError):
                 continue
-    return 0.0
+    return None
 
 
 def parse_hash_sheet(filepath: Path, report_date) -> tuple:
@@ -1152,7 +1152,7 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float = 0.0, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float | None = None, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
@@ -1864,7 +1864,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info("")
 
     script_hash = round(abs(refunded_discounts) + abs(pass_through_total), 2)
-    excel_hash = round(abs(hash_sales_total), 2)
+    hash_control_present = hash_sales_total is not None
+    excel_hash = round(abs(hash_sales_total), 2) if hash_control_present else 0.0
     hash_diff = round(abs(excel_hash - script_hash), 2)
     log.info("  ─────────────────────────────────────────")
     log.info("  HASH SALES 6 CHECK")
@@ -1874,7 +1875,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     log.info("  ─────────────────────────────────────────")
     log.info(f"  Script Total:        ${script_hash:>10,.2f}")
     log.info(f"  Hash Sales 6 Total:  ${excel_hash:>10,.2f}")
-    if hash_sales_total == 0.0:
+    if not hash_control_present:
         log.warning("  RESULT: ⚠ NO HASH SALES 6 TOTAL FOUND IN EXCEL — verify manually")
     elif hash_diff < 0.02:
         log.info("  RESULT: ✓ MATCH — OK to import!")
@@ -1932,7 +1933,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             status_lines.append(f"  DISCOUNTS: ✓ MATCH   ${disc_spl:,.2f}")
         else:
             status_lines.append(f"  DISCOUNTS: ⚠ MISMATCH  Script=${disc_spl:,.2f}  Excel=${excel_discount_total:,.2f}  (off by ${disc_diff:,.2f})")
-    if hash_sales_total != 0.0:
+    if hash_control_present:
         if hash_diff < 0.02:
             status_lines.append(f"  HASH SALES: ✓ MATCH   ${script_hash:,.2f}")
         else:
@@ -1944,7 +1945,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     overall_ok = all([
         abs(excel_sales_total - net_sales_check) < 0.02 if excel_sales_total else True,
         abs(excel_discount_total - round(sum(abs(v) for v in discounts.values()), 2)) < 0.02 if excel_discount_total else True,
-        hash_diff < 0.02 if hash_sales_total else False,
+        hash_diff < 0.02 if hash_control_present else False,
     ])
     if overall_ok:
         status_lines.append("  ✓ ALL CHECKS PASSED — Safe to import into QuickBooks!")
@@ -2112,7 +2113,7 @@ def main():
         dust_bunnies_total   = 0.0
         milk_bottles_returns = 0.0
         refunded_discounts   = 0.0
-        hash_sales_total     = 0.0
+        hash_sales_total     = None
         refunded_discounts   = 0.0
         paid_in_total        = 0.0
         bs_data            = {}
@@ -2132,7 +2133,8 @@ def main():
                 dust_bunnies_total   += db_total
                 milk_bottles_returns += mbr
                 refunded_discounts   += rd
-                hash_sales_total     += hs
+                if hs is not None:
+                    hash_sales_total = round((hash_sales_total or 0.0) + hs, 2)
             log.info(f"  Using Excel report for sales ({len(excel_files)} file(s))")
 
             # Also read BS sheet

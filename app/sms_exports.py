@@ -104,15 +104,23 @@ def classify_sms_rows(rows: tuple[tuple[object, ...], ...]) -> str:
         candidates.add("discounts")
     if "store balance sheet" in report_text:
         candidates.add("bs")
-    if "item multi totals by sub-department" in report_text:
+    if (
+        "item multi totals by sub-department" in report_text
+        and _has_milk_bottle_markers(report_text)
+    ):
         candidates.add("milk_bottles")
 
     if "sub-department single total" in report_text:
+        authoritative_candidates: set[str] = set()
         if _has_totalizer_values(text_rows, {"3", "4"}):
-            candidates.add("sales")
+            authoritative_candidates.add("sales")
         if _has_totalizer_values(text_rows, {"3542"}):
-            candidates.add("coupons")
-        if _has_totalizer_values(text_rows, {"6"}) or _has_hash_activity_markers(report_text):
+            authoritative_candidates.add("coupons")
+        if _has_totalizer_values(text_rows, {"6"}):
+            authoritative_candidates.add("hash")
+        if authoritative_candidates:
+            candidates.update(authoritative_candidates)
+        elif _has_hash_activity_markers(report_text):
             candidates.add("hash")
 
     if len(candidates) == 1:
@@ -155,6 +163,13 @@ def _has_hash_activity_markers(report_text: str) -> bool:
     return any(
         marker in report_text
         for marker in ("refunded discounts", "pass through donations", "paid in")
+    )
+
+
+def _has_milk_bottle_markers(report_text: str) -> bool:
+    return bool(
+        re.search(r"\bmilk\s+bottles?\b[^\n]*\breturn", report_text)
+        or re.search(r"\b11125[1-4]\b", report_text)
     )
 
 

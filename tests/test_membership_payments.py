@@ -4342,13 +4342,113 @@ except RuntimeError:
         self.assertEqual(parsed["hash_sales"], 10.89)
         self.assertTrue(parsed["all_ok"])
 
-    def test_streamlit_validation_uses_authoritative_status_summary(self):
+    def test_streamlit_validation_uses_summary_for_recoverable_controls_only(self):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
             encoding="utf-8"
         )
 
         self.assertIn("parse_engine_status_summary(log_text)", source)
-        self.assertIn("status_summary[\"all_ok\"]", source)
+        for control in ("sales", "discounts", "hash_sales"):
+            self.assertIn(f'status_summary["{control}"]', source)
+        self.assertNotIn('status_summary["all_ok"]', source)
+
+    def test_status_success_cannot_override_iif_or_settlement_mismatch(self):
+        import re
+        from dataclasses import dataclass
+        from typing import Optional
+
+        import pandas as pd
+
+        from app.ui_helpers import (
+            deposit_download_details,
+            parse_engine_status_summary,
+        )
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        runtime_names = {
+            "IIFLine",
+            "complete_sms_run",
+            "last_amount_after_label",
+            "parse_card_settlement_rows",
+            "parse_iif",
+            "parse_money",
+            "parse_validation",
+            "section_status",
+        }
+        runtime_nodes = [
+            node
+            for node in source_tree.body
+            if (
+                isinstance(node, (ast.ClassDef, ast.FunctionDef))
+                and node.name in runtime_names
+            )
+            or (
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "MONEY_RE"
+                    for target in node.targets
+                )
+            )
+        ]
+        namespace = {
+            "Optional": Optional,
+            "Path": Path,
+            "dataclass": dataclass,
+            "parse_engine_status_summary": parse_engine_status_summary,
+            "pd": pd,
+            "re": re,
+            "reporting_workbook_name": lambda _date: "report.xlsx",
+        }
+        exec(
+            compile(
+                ast.Module(body=runtime_nodes, type_ignores=[]),
+                str(source_path),
+                "exec",
+            ),
+            namespace,
+        )
+        iif_path = Path(__file__).parent / f"_unbalanced_{uuid4().hex}.iif"
+        iif_path.write_text(
+            """!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS
+!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLASS
+TRNS\tDEPOSIT\t09/14/2026\t1000000 · Checking\t\t100.00\tDeposit\t
+SPL\tDEPOSIT\t09/14/2026\t7110110 · Sales\t\t-90.00\tSales\t
+ENDTRNS
+""",
+            encoding="utf-8",
+        )
+        log_text = """--- STATUS SUMMARY ---
+  SALES: ✓ MATCH   $86,502.80
+  DISCOUNTS: ✓ MATCH   $3,981.21
+  HASH SALES: ✓ MATCH   $10.89
+  ✓ ALL CHECKS PASSED — Safe to import into QuickBooks!
+CARD SETTLEMENT | VISA/MC | Settlement=100.00 | BS=90.00 | Difference=10.00 | Adjustment=0.00 | MISMATCH
+"""
+        try:
+            lines, frame = namespace["parse_iif"](iif_path)
+            validation = namespace["parse_validation"](log_text, lines)
+            result = namespace["complete_sms_run"](
+                {
+                    "iif_path": iif_path,
+                    "iif_bytes": iif_path.read_bytes(),
+                    "lines": lines,
+                    "iif_df": frame,
+                    "validation": validation,
+                    "log_text": log_text,
+                },
+                SimpleNamespace(deposit_date=date(2026, 9, 14)),
+                None,
+                reporting_workbook_bytes=b"report",
+            )
+        finally:
+            iif_path.unlink()
+
+        self.assertFalse(validation["iif_ok"])
+        self.assertFalse(validation["card_settlement_ok"])
+        self.assertFalse(validation["all_ok"])
+        self.assertIsNone(deposit_download_details(result))
+        self.assertNotIn("reporting_workbook_bytes", result)
 
     def test_fresh_single_digit_date_status_keeps_success_downloads_eligible(self):
         from app.membership_payments import write_membership_payments_file

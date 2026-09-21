@@ -139,17 +139,33 @@ class DailyReportingWorkbookTests(unittest.TestCase):
             tuple(report.report_date for report in bundle.reports.values()), input_dates
         )
 
-        for address in ("A1", "A4", "C22", "G54", "J3", "M1", "M2"):
+        report_sheet = formula_workbook["SubDept Sales Report"]
+        totals_row = next(
+            cell.row for cell in report_sheet["B"] if cell.value == "Totals"
+        )
+        for address in ("A1", "A4", "C22", "J3", "M1", "M2"):
             with self.subTest(style=address):
                 self.assertEqual(
-                    formula_workbook["SubDept Sales Report"][address]._style,
+                    report_sheet[address]._style,
                     template["SubDept Sales Report"][address]._style,
                 )
+        self.assertEqual(
+            report_sheet[f"G{totals_row}"]._style,
+            template["SubDept Sales Report"]["G54"]._style,
+        )
 
         for sheet_name, addresses in {
             "SubDept Single": ("G1", "G2"),
             "SubDept Coupon (Local Discount)": ("G1", "G2", "G3"),
-            "SubDept Sales Report": ("C22", "G22", "C54", "G54", "J3", "M1", "M2"),
+            "SubDept Sales Report": (
+                "C22",
+                "G22",
+                f"C{totals_row}",
+                f"G{totals_row}",
+                "J3",
+                "M1",
+                "M2",
+            ),
         }.items():
             for address in addresses:
                 with self.subTest(sheet=sheet_name, money=address):

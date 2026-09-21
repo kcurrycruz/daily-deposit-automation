@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
@@ -147,8 +148,41 @@ def _write_source_grid(sheet, report: SmsExport) -> None:
 
 
 def _write_report_values(sheet, data: SmsDepositData) -> None:
+    existing_codes = {
+        _integer(sheet.cell(row=row_number, column=1).value)
+        for row_number in range(5, 54)
+    }
+    additional_codes = sorted(
+        (
+            set(data.sales_by_subdept)
+            | set(data.coupons_by_subdept)
+        )
+        - existing_codes
+    )
+    if additional_codes:
+        sheet.insert_rows(54, amount=len(additional_codes))
+        for offset, code in enumerate(additional_codes):
+            row_number = 54 + offset
+            for column_number in range(1, sheet.max_column + 1):
+                source = sheet.cell(row=53, column=column_number)
+                target = sheet.cell(row=row_number, column=column_number)
+                target._style = copy(source._style)
+                target.number_format = source.number_format
+            sheet.row_dimensions[row_number].height = sheet.row_dimensions[53].height
+            sheet.row_dimensions[row_number].hidden = False
+            sheet.cell(row=row_number, column=1, value=code)
+            sheet.cell(row=row_number, column=2, value="Unmapped Subdepartment")
+
     for row_number in range(5, 54):
         code = _integer(sheet.cell(row=row_number, column=1).value)
+        sales = data.sales_by_subdept.get(code, Decimal("0.00"))
+        coupons = data.coupons_by_subdept.get(code, Decimal("0.00"))
+        values = (sales, coupons, Decimal("0.00"), Decimal("0.00"), sales + coupons)
+        for column_number, value in enumerate(values, start=3):
+            sheet.cell(row=row_number, column=column_number, value=_money_float(value))
+
+    for offset, code in enumerate(additional_codes):
+        row_number = 54 + offset
         sales = data.sales_by_subdept.get(code, Decimal("0.00"))
         coupons = data.coupons_by_subdept.get(code, Decimal("0.00"))
         values = (sales, coupons, Decimal("0.00"), Decimal("0.00"), sales + coupons)
@@ -162,8 +196,9 @@ def _write_report_values(sheet, data: SmsDepositData) -> None:
         Decimal("0.00"),
         data.sales_total - data.store_coupons_raw + data.coupon_total,
     )
+    totals_row = 54 + len(additional_codes)
     for column_number, value in enumerate(totals, start=3):
-        sheet.cell(row=54, column=column_number, value=_money_float(value))
+        sheet.cell(row=totals_row, column=column_number, value=_money_float(value))
 
     summary = {
         "J1": data.store_coupons_raw,

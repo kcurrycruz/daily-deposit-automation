@@ -227,6 +227,85 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertIsNone(preserved_daily_upload(state, widget_key))
         self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
 
+    def test_recreated_sms_uploader_merges_addition_with_preserved_files(self):
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            activate_program,
+            preserved_daily_upload,
+            preserve_daily_program_state,
+            reconcile_daily_upload_selection,
+            restore_daily_program_state,
+            return_to_program_hub,
+            sync_daily_upload,
+        )
+
+        class Upload:
+            def __init__(self, name, body):
+                self.name = name
+                self._body = body
+
+            def getvalue(self):
+                return self._body
+
+        widget_key = "sms_reports_0"
+        settlement_key = "card_settlement_0"
+        sales = Upload("sales.xls", b"sales")
+        coupon = Upload("coupon.xls", b"coupon")
+        settlement = Upload("settlement.xlsx", b"settlement")
+        state = {
+            "active_finance_program": DAILY_DEPOSITS,
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                widget_key: [sales],
+                settlement_key: settlement,
+            },
+            widget_key: [sales],
+            settlement_key: settlement,
+        }
+        reconcile_daily_upload_selection(
+            state, widget_key, [sales], explicit=False
+        )
+
+        preserve_daily_program_state(state)
+        return_to_program_hub(state)
+        state.pop(widget_key)
+        state.pop(settlement_key)
+        self.assertTrue(activate_program(state, DAILY_DEPOSITS))
+        restore_daily_program_state(state)
+
+        # The recreated browser input is visually empty even though Streamlit
+        # can return the restored value on its first run.  Its next selection
+        # is therefore an addition, not a request to remove all saved files.
+        reconcile_daily_upload_selection(
+            state, widget_key, [sales], explicit=False
+        )
+        state[widget_key] = []
+        sync_daily_upload(state, widget_key)
+        self.assertEqual(
+            [upload.name for upload in preserved_daily_upload(state, widget_key)],
+            ["sales.xls"],
+        )
+        state[widget_key] = [coupon]
+        sync_daily_upload(state, widget_key)
+        # Streamlit can also report the other recreated uploader as empty in
+        # the same callback cycle; that is not an explicit settlement removal.
+        state[settlement_key] = None
+        sync_daily_upload(state, settlement_key)
+
+        self.assertEqual(
+            [upload.name for upload in preserved_daily_upload(state, widget_key)],
+            ["sales.xls", "coupon.xls"],
+        )
+        self.assertIs(
+            preserved_daily_upload(state, settlement_key), settlement
+        )
+
+        state[widget_key] = []
+        sync_daily_upload(state, widget_key)
+
+        self.assertIsNone(preserved_daily_upload(state, widget_key))
+        self.assertNotIn("_daily_program_upload_widget_selections", state)
+
     def test_clear_daily_uploads_removes_sms_exports_and_settlement(self):
         from app.program_hub_ui import (
             DAILY_PROGRAM_UPLOADS_KEY,
@@ -241,6 +320,9 @@ class ProgramHubStateTests(unittest.TestCase):
             },
             "sms_reports_3": sms_exports,
             "card_settlement_3": object(),
+            "_daily_program_upload_widget_selections": {
+                "sms_reports_3": (("sales.xls", "digest"),),
+            },
             "membership_entry_3_amount": 5,
         }
 
@@ -249,6 +331,7 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
         self.assertNotIn("sms_reports_3", state)
         self.assertNotIn("card_settlement_3", state)
+        self.assertNotIn("_daily_program_upload_widget_selections", state)
         self.assertEqual(state["membership_entry_3_amount"], 5)
 
 

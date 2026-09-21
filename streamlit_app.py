@@ -1806,11 +1806,9 @@ def parse_validation(log_text: str, lines: list[IIFLine]) -> dict:
 
     card_settlement_rows = parse_card_settlement_rows(log_text)
     card_settlement_ok = bool(card_settlement_rows) and all(r["Status"] == "MATCH" for r in card_settlement_rows)
-    if status_summary["all_ok"]:
-        card_settlement_ok = True
 
     checks = [x for x in (sales_ok, discounts_ok, hash_ok, iif_ok, card_settlement_ok) if x is not None]
-    all_ok = status_summary["all_ok"] or (bool(checks) and all(checks))
+    all_ok = bool(checks) and all(checks)
 
     return {
         "sales_ok": sales_ok,

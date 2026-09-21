@@ -144,7 +144,11 @@ def render_upload_inputs(
     uploader_key: int,
 ) -> UploadIntakeRender:
     """Render the date, multi-SMS-report, and settlement upload row."""
-    from app.program_hub_ui import preserved_daily_upload, sync_daily_upload
+    from app.program_hub_ui import (
+        preserved_daily_upload,
+        reconcile_daily_upload_selection,
+        sync_daily_upload,
+    )
 
     upload_change_state = getattr(ui, "session_state", None)
     date_col, sms_col, settlement_col = ui.columns(
@@ -188,9 +192,18 @@ def render_upload_inputs(
             **sms_change_kwargs,
         )
         sms_exports = (
-            selected_sms_reports
-            if selected_sms_reports or not preserved_sms_reports
-            else preserved_sms_reports
+            reconcile_daily_upload_selection(
+                upload_change_state,
+                sms_reports_key,
+                selected_sms_reports,
+                explicit=False,
+            )
+            if upload_change_state is not None
+            else (
+                selected_sms_reports
+                if selected_sms_reports or not preserved_sms_reports
+                else preserved_sms_reports
+            )
         )
 
     with settlement_col:

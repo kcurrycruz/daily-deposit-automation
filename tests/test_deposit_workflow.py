@@ -28,6 +28,74 @@ def streamlit_definition(name, namespace):
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_unknown_sales_subdepartment_survives_into_engine_tba_path(self):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        reports = []
+        for report in sms_exports_091426():
+            if report.role == "sales":
+                rows = (
+                    ("Sub-department Single Total",),
+                    ("Date:", "09/14/2026", "to", "09/14/2026"),
+                    ("", "Sub-Department", "Qty", "Amount", "g/Weight"),
+                    (110, "Grocery", 1, "50000.00", "0.00"),
+                    (120, "Dairy", 1, "36502.80", "0.00"),
+                    (777, "Unmapped Department", 1, "12.34", "0.00"),
+                    ("Sales Total", "", "", "86515.14", ""),
+                )
+                reports.append(replace(report, rows=rows))
+            elif report.role == "coupons":
+                rows = (
+                    ("Sub-department Single Total",),
+                    ("Date:", "09/14/2026", "to", "09/14/2026"),
+                    ("", "Sub-Department", "Qty", "Amount", "g/Weight"),
+                    (110, "Grocery Coupon Distribution", 1, "31.69", "0.00"),
+                    (120, "Dairy Coupon Distribution", 1, "30.00", "0.00"),
+                    (3542, "Store Coupons", 1, "-1428.18", "0.00"),
+                    ("Coupon Distribution Total", "", "", "61.69", ""),
+                    ("Store Coupons Total", "", "", "-1428.18", ""),
+                )
+                reports.append(replace(report, rows=rows))
+            else:
+                reports.append(report)
+
+        bundle = build_sms_export_bundle(reports)
+        data = build_sms_deposit_data(bundle)
+        workbook_bytes = build_reporting_workbook(
+            Path("assets/SubDept Single Total Report Template.xlsx"),
+            bundle,
+            data,
+        )
+        workbook = load_workbook(BytesIO(workbook_bytes), data_only=True)
+        report_sheet = workbook["SubDept Sales Report"]
+        unknown_rows = [
+            row
+            for row in report_sheet.iter_rows(values_only=True)
+            if row[0] == 777
+        ]
+        template = load_workbook(
+            Path("assets/SubDept Single Total Report Template.xlsx"),
+            data_only=False,
+        )
+
+        self.assertEqual(len(unknown_rows), 1)
+        self.assertEqual(unknown_rows[0][2], 12.34)
+        self.assertEqual(unknown_rows[0][6], 12.34)
+        self.assertEqual(report_sheet["C22"]._style, template["SubDept Sales Report"]["C22"]._style)
+
+        fixture_path = Path(__file__).parent / f"_unknown_subdept_{uuid4().hex}.xlsx"
+        fixture_path.write_bytes(workbook_bytes)
+        try:
+            parsed = engine.parse_excel_report(fixture_path, date(2026, 9, 14))
+        finally:
+            fixture_path.unlink()
+
+        self.assertIn(("Dept 777", 12.34), parsed[1])
+
     def test_engine_binds_hash_control_to_active_report_date(self):
         import openpyxl
 
@@ -85,6 +153,93 @@ class DepositWorkflowTests(unittest.TestCase):
             fixture_path.unlink()
 
         self.assertEqual(parsed[-1], 10.89)
+
+    def test_present_zero_hash_control_matches_zero_activity(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        reports = []
+        for report in sms_exports_091426():
+            if report.role == "hash":
+                rows = (
+                    ("Sub-department Single Total",),
+                    ("Date:", "09/14/2026", "to", "09/14/2026"),
+                    ("", "Sub-Department", "Qty", "Amount", "g/Weight"),
+                    (23, "Refunded Discounts", 0, "0.00", "0.00"),
+                    (32, "Pass Through Donations", 0, "0.00", "0.00"),
+                    (34, "Paid In", 0, "0.00", "0.00"),
+                    ("HASH Detail Total", "", "", "0.00", ""),
+                )
+                reports.append(replace(report, rows=rows))
+            else:
+                reports.append(report)
+
+        bundle = build_sms_export_bundle(reports)
+        data = build_sms_deposit_data(bundle)
+        workbook_bytes = build_reporting_workbook(
+            Path("assets/SubDept Single Total Report Template.xlsx"),
+            bundle,
+            data,
+        )
+
+        fixture_root = Path(__file__).parent / f"_zero_hash_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "zero-hash.xlsx"
+        workbook_path.write_bytes(workbook_bytes)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            parsed = engine.parse_excel_report(workbook_path, bundle.deposit_date)
+            hash_activity = engine.parse_hash_sheet(
+                workbook_path,
+                bundle.deposit_date,
+            )
+            engine.generate_iif(
+                {},
+                {},
+                {},
+                bundle.deposit_date,
+                refunded_discounts=hash_activity[0],
+                pass_through_total=hash_activity[1],
+                paid_in_total=hash_activity[2],
+                hash_sales_total=parsed[-1],
+            )
+            status_text = (fixture_root / "last_run_status.txt").read_text(
+                encoding="utf-8"
+            )
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertEqual(parsed[-1], 0.0)
+        self.assertEqual(hash_activity, (0.0, 0.0, 0.0))
+        self.assertIn("HASH SALES: ✓ MATCH   $0.00", status_text)
+        self.assertIn("✓ ALL CHECKS PASSED", status_text)
+        self.assertNotIn("NO EXCEL TOTAL FOUND", status_text)
+
+    def test_absent_hash_control_is_none(self):
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "SubDept Sales Report"
+        workbook_path = Path(__file__).parent / f"_no_hash_{uuid4().hex}.xlsx"
+        workbook.save(workbook_path)
+        workbook.close()
+        try:
+            parsed = engine.parse_excel_report(workbook_path, date(2026, 9, 14))
+        finally:
+            workbook_path.unlink()
+
+        self.assertIsNone(parsed[-1])
 
     def test_generated_workbook_upload_matches_engine_file_interface(self):
         upload_type = streamlit_definition(

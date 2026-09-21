@@ -47,8 +47,58 @@ class SmsExportTests(unittest.TestCase):
             with self.subTest(role=expected):
                 self.assertEqual(classify_sms_rows(rows), expected)
 
+    def test_classifies_milk_bottle_item_activity(self):
+        rows = (
+            ("Item Multi Totals by Sub-department",),
+            ("Date:", "09/14/2026"),
+            ("Sub-Dept.", 27, "to", 27),
+            ("Item Description", "Net Sales"),
+            (111251, "MILK BOTTLE - 1 - RETURNED $2"),
+            ("", "Net Sales", -20.00),
+        )
+
+        self.assertEqual(classify_sms_rows(rows), "milk_bottles")
+
+    def test_classifies_explicit_zero_activity_milk_bottle_report(self):
+        rows = (
+            ("Item Multi Totals by Sub-department",),
+            ("Date:", "09/14/2026"),
+            ("Sub-Dept.", 27, "to", 27),
+            ("Item Description", "Net Sales"),
+            ("Milk Bottle Returns", "No activity", 0.00),
+            ("Grand Total", 0.00),
+        )
+
+        self.assertEqual(classify_sms_rows(rows), "milk_bottles")
+
+    def test_rejects_unrelated_item_multi_report_as_milk_bottles(self):
+        rows = (
+            ("Item Multi Totals by Sub-department",),
+            ("Date:", "09/14/2026"),
+            ("Sub-Dept.", 10, "to", 10),
+            ("Item Description", "Net Sales"),
+            (100001, "Grocery Apples", 12.34),
+            ("Grand Total", 12.34),
+        )
+
+        with self.assertRaisesRegex(ValueError, "layout is not recognized"):
+            classify_sms_rows(rows)
+
     def test_classifies_sales_when_data_contains_hash_totalizer_number(self):
         self.assertEqual(classify_sms_rows(sms_rows("sales")), "sales")
+
+    def test_authoritative_sales_header_wins_over_refunded_discount_activity(self):
+        rows = sms_rows("sales") + (
+            (23, "Refunded Discounts", 1, -4.89, 0.0),
+        )
+
+        self.assertEqual(classify_sms_rows(rows), "sales")
+
+    def test_conflicting_sales_and_hash_totalizers_remain_ambiguous(self):
+        rows = sms_rows("sales") + (("Tlz.:", 6, "to", 6),)
+
+        with self.assertRaisesRegex(ValueError, "ambiguous content"):
+            classify_sms_rows(rows)
 
     def test_ignores_totalizer_words_in_non_header_rows(self):
         rows = sms_rows("sales") + (("Totalizer Adjustment", 6),)

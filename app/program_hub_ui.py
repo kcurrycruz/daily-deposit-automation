@@ -13,6 +13,7 @@ DAILY_PROGRAM_SNAPSHOT_KEY = "_daily_program_widget_snapshot"
 DAILY_PROGRAM_UPLOADS_KEY = "_daily_program_preserved_uploads"
 DAILY_PROGRAM_UPLOAD_SELECTIONS_KEY = "_daily_program_upload_widget_selections"
 DAILY_PROGRAM_RECREATED_UPLOADS_KEY = "_daily_program_recreated_uploaders"
+DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY = "_daily_program_sms_sibling_callback"
 
 _DAILY_WIDGET_PREFIXES = (
     "membership_",
@@ -258,13 +259,6 @@ def reconcile_daily_upload_selection(
     )
     was_recreated = widget_key in recreated_uploads
 
-    if explicit and not current and was_recreated:
-        return (
-            preserved_value
-            if isinstance(preserved_value, list)
-            else preserved or None
-        )
-
     if explicit and not current:
         updated_uploads.pop(widget_key, None)
         updated_selections.pop(widget_key, None)
@@ -339,6 +333,13 @@ def sync_daily_upload(
             selected_upload,
             explicit=True,
         )
+        # Streamlit invokes callbacks before the app reruns.  Remember a
+        # non-empty SMS change only through that callback batch so its
+        # recreated, empty settlement sibling cannot look like a user clear.
+        if selected_upload:
+            state[DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY] = widget_key
+        else:
+            state.pop(DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY, None)
         return
     recreated_value = state.get(DAILY_PROGRAM_RECREATED_UPLOADS_KEY)
     recreated_uploads = (
@@ -346,7 +347,16 @@ def sync_daily_upload(
         if isinstance(recreated_value, (list, tuple, set))
         else set()
     )
-    if widget_key in recreated_uploads and selected_upload is None:
+    if (
+        widget_key.startswith("card_settlement_")
+        and selected_upload is None
+        and state.pop(DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY, None)
+    ):
+        recreated_uploads.discard(widget_key)
+        if recreated_uploads:
+            state[DAILY_PROGRAM_RECREATED_UPLOADS_KEY] = tuple(recreated_uploads)
+        else:
+            state.pop(DAILY_PROGRAM_RECREATED_UPLOADS_KEY, None)
         return
     recreated_uploads.discard(widget_key)
     if recreated_uploads:
@@ -363,11 +373,17 @@ def sync_daily_upload(
         state.pop(DAILY_PROGRAM_UPLOADS_KEY, None)
 
 
+def finish_daily_upload_callback_batch(state: MutableMapping[str, object]) -> None:
+    """Expire the SMS sibling signal after Streamlit has completed its rerun."""
+    state.pop(DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY, None)
+
+
 def clear_daily_uploads(state: MutableMapping[str, object]) -> None:
     """Remove preserved and rendered Daily upload values for Start Over."""
     state.pop(DAILY_PROGRAM_UPLOADS_KEY, None)
     state.pop(DAILY_PROGRAM_UPLOAD_SELECTIONS_KEY, None)
     state.pop(DAILY_PROGRAM_RECREATED_UPLOADS_KEY, None)
+    state.pop(DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY, None)
     for key in tuple(state):
         if isinstance(key, str) and key.startswith(_DAILY_UPLOAD_PREFIXES):
             state.pop(key, None)

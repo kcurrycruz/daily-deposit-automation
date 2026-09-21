@@ -145,6 +145,7 @@ def render_upload_inputs(
 ) -> UploadIntakeRender:
     """Render the date, multi-SMS-report, and settlement upload row."""
     from app.program_hub_ui import (
+        finish_daily_upload_callback_batch,
         preserved_daily_upload,
         reconcile_daily_upload_selection,
         sync_daily_upload,
@@ -241,6 +242,9 @@ def render_upload_inputs(
             if selected_card_settlement is not None
             else preserved_card_settlement
         )
+
+    if upload_change_state is not None:
+        finish_daily_upload_callback_batch(upload_change_state)
 
     return UploadIntakeRender(
         sms_exports=sms_exports,

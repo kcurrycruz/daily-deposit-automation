@@ -227,6 +227,54 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertIsNone(preserved_daily_upload(state, widget_key))
         self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
 
+    def test_first_recreated_sms_clear_removes_preserved_reports(self):
+        """An empty SMS callback is a real clear when it is the user's action."""
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            preserved_daily_upload,
+            sync_daily_upload,
+        )
+
+        widget_key = "sms_reports_0"
+        state = {
+            "active_finance_program": DAILY_DEPOSITS,
+            DAILY_PROGRAM_UPLOADS_KEY: {widget_key: [object()]},
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY: (widget_key,),
+            widget_key: [],
+        }
+
+        sync_daily_upload(state, widget_key)
+
+        self.assertIsNone(preserved_daily_upload(state, widget_key))
+        self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
+        self.assertNotIn(DAILY_PROGRAM_RECREATED_UPLOADS_KEY, state)
+
+    def test_first_recreated_settlement_clear_removes_preserved_file(self):
+        """A settlement clear is not swallowed merely because its uploader reopened."""
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            preserved_daily_upload,
+            sync_daily_upload,
+        )
+
+        widget_key = "card_settlement_0"
+        state = {
+            "active_finance_program": DAILY_DEPOSITS,
+            DAILY_PROGRAM_UPLOADS_KEY: {widget_key: object()},
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY: (widget_key,),
+            widget_key: None,
+        }
+
+        sync_daily_upload(state, widget_key)
+
+        self.assertIsNone(preserved_daily_upload(state, widget_key))
+        self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
+        self.assertNotIn(DAILY_PROGRAM_RECREATED_UPLOADS_KEY, state)
+
     def test_recreated_sms_uploader_merges_addition_with_preserved_files(self):
         from app.program_hub_ui import (
             DAILY_DEPOSITS,
@@ -273,17 +321,10 @@ class ProgramHubStateTests(unittest.TestCase):
         self.assertTrue(activate_program(state, DAILY_DEPOSITS))
         restore_daily_program_state(state)
 
-        # The recreated browser input is visually empty even though Streamlit
-        # can return the restored value on its first run.  Its next selection
-        # is therefore an addition, not a request to remove all saved files.
+        # Rendering a recreated browser input is empty; it must retain the
+        # fallback until the user changes the selection.
         reconcile_daily_upload_selection(
-            state, widget_key, [sales], explicit=False
-        )
-        state[widget_key] = []
-        sync_daily_upload(state, widget_key)
-        self.assertEqual(
-            [upload.name for upload in preserved_daily_upload(state, widget_key)],
-            ["sales.xls"],
+            state, widget_key, [], explicit=False
         )
         state[widget_key] = [coupon]
         sync_daily_upload(state, widget_key)
@@ -305,6 +346,89 @@ class ProgramHubStateTests(unittest.TestCase):
 
         self.assertIsNone(preserved_daily_upload(state, widget_key))
         self.assertNotIn("_daily_program_upload_widget_selections", state)
+
+    def test_recreated_sms_addition_ignores_only_its_empty_settlement_sibling(self):
+        """An SMS change shields its same-rerun empty sibling, not a later clear."""
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            finish_daily_upload_callback_batch,
+            preserved_daily_upload,
+            sync_daily_upload,
+        )
+
+        class Upload:
+            def __init__(self, name, body):
+                self.name = name
+                self._body = body
+
+            def getvalue(self):
+                return self._body
+
+        sms_key = "sms_reports_0"
+        settlement_key = "card_settlement_0"
+        sales = Upload("sales.xls", b"sales")
+        coupon = Upload("coupon.xls", b"coupon")
+        settlement = Upload("settlement.xlsx", b"settlement")
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                sms_key: [sales],
+                settlement_key: settlement,
+            },
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY: (sms_key, settlement_key),
+            sms_key: [coupon],
+            settlement_key: None,
+        }
+
+        sync_daily_upload(state, sms_key)
+        sync_daily_upload(state, settlement_key)
+
+        self.assertEqual(
+            [upload.name for upload in preserved_daily_upload(state, sms_key)],
+            ["sales.xls", "coupon.xls"],
+        )
+        self.assertIs(preserved_daily_upload(state, settlement_key), settlement)
+
+        finish_daily_upload_callback_batch(state)
+        sync_daily_upload(state, settlement_key)
+
+        self.assertIsNone(preserved_daily_upload(state, settlement_key))
+
+    def test_start_over_clears_recreated_upload_callback_state(self):
+        """Start Over removes preserved uploads and all reconciliation signals."""
+        from app.program_hub_ui import (
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY,
+            DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY,
+            DAILY_PROGRAM_UPLOAD_SELECTIONS_KEY,
+            DAILY_PROGRAM_UPLOADS_KEY,
+            clear_daily_uploads,
+        )
+
+        state = {
+            DAILY_PROGRAM_UPLOADS_KEY: {
+                "sms_reports_3": [object()],
+                "card_settlement_3": object(),
+            },
+            DAILY_PROGRAM_UPLOAD_SELECTIONS_KEY: {
+                "sms_reports_3": (("sales.xls", "digest"),),
+            },
+            DAILY_PROGRAM_RECREATED_UPLOADS_KEY: (
+                "sms_reports_3",
+                "card_settlement_3",
+            ),
+            DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY: "sms_reports_3",
+            "sms_reports_3": [object()],
+            "card_settlement_3": object(),
+        }
+
+        clear_daily_uploads(state)
+
+        self.assertNotIn(DAILY_PROGRAM_UPLOADS_KEY, state)
+        self.assertNotIn(DAILY_PROGRAM_UPLOAD_SELECTIONS_KEY, state)
+        self.assertNotIn(DAILY_PROGRAM_RECREATED_UPLOADS_KEY, state)
+        self.assertNotIn(DAILY_PROGRAM_SMS_SIBLING_CALLBACK_KEY, state)
+        self.assertNotIn("sms_reports_3", state)
+        self.assertNotIn("card_settlement_3", state)
 
     def test_clear_daily_uploads_removes_sms_exports_and_settlement(self):
         from app.program_hub_ui import (

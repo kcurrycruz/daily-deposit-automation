@@ -187,7 +187,7 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
         amount = _maybe_money(_cell(row, columns["amount"]))
         if code is None or amount is None:
             continue
-        amounts[code] = _money(amounts.get(code, _ZERO) + abs(amount))
+        amounts[code] = _money(amounts.get(code, _ZERO) + amount)
     _assert_control(
         report,
         "hash detail total",
@@ -195,6 +195,7 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
         "HASH detail",
         absolute=True,
         amount_column=columns["amount"],
+        control_amount_column=columns.get("control_amount"),
         fallback_control_labels=("total",),
     )
     return (

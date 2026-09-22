@@ -121,6 +121,56 @@ class SmsDepositDataTests(unittest.TestCase):
         self.assertEqual(data.hash_refunded, Decimal("4.89"))
         self.assertEqual(data.hash_pass_through, Decimal("6.00"))
 
+    def test_hash_uses_printed_amount_total_when_paid_in_adds_a_right_hand_value(self):
+        reports = list(sms_exports_091426())
+        hash_index = next(
+            index for index, report in enumerate(reports) if report.role == "hash"
+        )
+        hash_report = reports[hash_index]
+        reports[hash_index] = SmsExport(
+            role=hash_report.role,
+            filename="090226 Hash.xls",
+            report_date=hash_report.report_date,
+            rows=(
+                (("Sub-department Single Total",) + ("",) * 11),
+                (("", "", "Sub-Department", "", "", "", "", "Qty", "Amount", "Pkg/Weight") + ("",) * 2),
+                (("", 23, "Refunded Discounts", "", "", "", 1, 1.00, "", "") + ("",) * 2),
+                (("", 32, "PASS THROUGH DONATIONS", "", "", "", 1, 1.00, "", "") + ("",) * 2),
+                (("", 34, "PAID-INS", "", "", "", 1, 13.98, "", 13.98) + ("",) * 2),
+                (("", "", "", "", "Total", "", 3, "", 15.98, 13.98) + ("",) * 2),
+            ),
+        )
+
+        data = build_sms_deposit_data(build_sms_export_bundle(reports))
+
+        self.assertEqual(data.hash_refunded, Decimal("1.00"))
+        self.assertEqual(data.hash_pass_through, Decimal("1.00"))
+        self.assertEqual(data.hash_paid_in, Decimal("13.98"))
+
+    def test_hash_preserves_signed_detail_amounts_for_control_validation(self):
+        reports = list(sms_exports_091426())
+        hash_index = next(
+            index for index, report in enumerate(reports) if report.role == "hash"
+        )
+        hash_report = reports[hash_index]
+        reports[hash_index] = SmsExport(
+            role=hash_report.role,
+            filename="082326 Hash.xls",
+            report_date=hash_report.report_date,
+            rows=(
+                (("Sub-department Single Total",) + ("",) * 11),
+                (("", "", "Sub-Department", "", "", "", "", "Qty", "Amount", "Pkg/Weight") + ("",) * 2),
+                (("", 23, "Refunded Discounts", "", "", "", "", -70.06, "", "") + ("",) * 2),
+                (("", 32, "PASS THROUGH DONATIONS", "", "", "", 1, 1.00, "", "") + ("",) * 2),
+                (("", "", "", "", "Total", "", 1, "", -69.06, "") + ("",) * 2),
+            ),
+        )
+
+        data = build_sms_deposit_data(build_sms_export_bundle(reports))
+
+        self.assertEqual(data.hash_refunded, Decimal("-70.06"))
+        self.assertEqual(data.hash_pass_through, Decimal("1.00"))
+
     def test_milk_bottles_only_sums_returned_item_net_sales(self):
         data = build_sms_deposit_data(
             build_sms_export_bundle(sms_exports_091426())

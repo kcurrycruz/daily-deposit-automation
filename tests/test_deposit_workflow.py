@@ -28,6 +28,26 @@ def streamlit_definition(name, namespace):
 
 
 class DepositWorkflowTests(unittest.TestCase):
+    def test_section_status_stops_before_the_next_validation_section(self):
+        from typing import Optional
+
+        section_status = streamlit_definition(
+            "section_status",
+            {"Optional": Optional},
+        )
+        log_text = """SALES CHECK
+Script Net Sales: $88,463.13
+Excel Sales Total: $88,463.13
+RESULT: ✓ MATCH — OK to import!
+HASH SALES 6 CHECK
+Script Total: $28.09
+Hash Sales 6 Total: $17.09
+RESULT: ⚠ MISMATCH — Check before importing!
+"""
+
+        self.assertTrue(section_status(log_text, "SALES CHECK"))
+        self.assertFalse(section_status(log_text, "HASH SALES"))
+
     def test_unknown_sales_subdepartment_survives_into_engine_tba_path(self):
         from io import BytesIO
 
@@ -223,6 +243,41 @@ class DepositWorkflowTests(unittest.TestCase):
         self.assertIn("HASH SALES: ✓ MATCH   $0.00", status_text)
         self.assertIn("✓ ALL CHECKS PASSED", status_text)
         self.assertNotIn("NO EXCEL TOTAL FOUND", status_text)
+
+    def test_signed_hash_activity_matches_its_net_control_total(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        fixture_root = Path(__file__).parent / f"_signed_hash_{uuid4().hex}"
+        fixture_root.mkdir()
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 9, 21),
+                refunded_discounts=-22.59,
+                pass_through_total=5.50,
+                hash_sales_total=-17.09,
+            )
+            status_text = (fixture_root / "last_run_status.txt").read_text(
+                encoding="utf-8"
+            )
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertIn("HASH SALES: ✓ MATCH   $17.09", status_text)
+        self.assertIn("✓ ALL CHECKS PASSED", status_text)
 
     def test_absent_hash_control_is_none(self):
         import openpyxl

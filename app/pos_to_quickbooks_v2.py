@@ -1863,7 +1863,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info("  ─────────────────────────────────────────")
         log.info("")
 
-    script_hash = round(abs(refunded_discounts) + abs(pass_through_total), 2)
+    script_hash = round(abs(refunded_discounts + pass_through_total), 2)
     hash_control_present = hash_sales_total is not None
     excel_hash = round(abs(hash_sales_total), 2) if hash_control_present else 0.0
     hash_diff = round(abs(excel_hash - script_hash), 2)

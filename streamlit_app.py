@@ -1299,7 +1299,13 @@ def section_status(log_text: str, section_name: str) -> Optional[bool]:
     start = upper.rfind(section_name.upper())
     if start < 0:
         return None
-    chunk = upper[start : start + 1600]
+    section_end = len(upper)
+    search_start = start + len(section_name)
+    for next_section in ("SALES CHECK", "HASH SALES 6 CHECK", "DISCOUNTS CHECK"):
+        next_start = upper.find(next_section, search_start)
+        if next_start >= 0:
+            section_end = min(section_end, next_start)
+    chunk = upper[start:section_end]
     if "MISMATCH" in chunk or "FAILED" in chunk or "ERROR" in chunk:
         return False
     if "MATCH" in chunk or "OK TO IMPORT" in chunk:

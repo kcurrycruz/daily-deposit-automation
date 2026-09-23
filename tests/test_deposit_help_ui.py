@@ -146,7 +146,9 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertIn("Step 1 · Sales", expander_labels)
         self.assertIn("Step 6 · Milk Bottles", expander_labels)
         self.assertIn("View Daily Card Settlement Example", expander_labels)
-        self.assertTrue(any(path.endswith("step2a_sms_sales_export.png") for path in image_paths))
+        self.assertTrue(any(path.endswith("sms_save_export_button.png") for path in image_paths))
+        self.assertTrue(any(path.endswith("sms_report_save_dialog.png") for path in image_paths))
+        self.assertFalse(any(path.endswith("step2a_sms_sales_export.png") for path in image_paths))
         self.assertTrue(any(path.endswith("milk_bottle_returns_example.png") for path in image_paths))
         self.assertTrue(any(path.endswith("daily_card_settlement_example.png") for path in image_paths))
         self.assertFalse(any("paste" in path.lower() for path in image_paths))
@@ -180,6 +182,43 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertNotIn("Move or Copy", rendered_text)
         self.assertNotIn("master workbook", rendered_text)
         self.assertNotIn("paste", rendered_text.lower())
+
+    def test_sales_sop_places_new_reference_images_after_steps_five_and_seven(self):
+        from app.deposit_help_ui import render_daily_workbook_sop
+
+        ui = RecordingUI()
+        render_daily_workbook_sop(
+            ui,
+            root=Path(__file__).resolve().parents[1],
+            sop_steps=[{"title": "Step 1 · Sales", "body": "1–4. Prepare and launch."}],
+        )
+
+        step_five = next(
+            index
+            for index, event in enumerate(ui.events)
+            if event[0] == "markdown" and "5. Select the yellow" in str(event[1][0])
+        )
+        save_button_image = next(
+            index
+            for index, event in enumerate(ui.events)
+            if event[0] == "image"
+            and str(event[1][0]).endswith("sms_save_export_button.png")
+        )
+        step_seven = next(
+            index
+            for index, event in enumerate(ui.events)
+            if event[0] == "markdown" and "7. Select **OK**" in str(event[1][0])
+        )
+        save_dialog_image = next(
+            index
+            for index, event in enumerate(ui.events)
+            if event[0] == "image"
+            and str(event[1][0]).endswith("sms_report_save_dialog.png")
+        )
+
+        self.assertLess(step_five, save_button_image)
+        self.assertLess(save_button_image, step_seven)
+        self.assertLess(step_seven, save_dialog_image)
 
     def test_known_exceptions_renderer_keeps_original_operational_guidance(self):
         from app.deposit_help_ui import render_known_exceptions

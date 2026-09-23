@@ -11,20 +11,22 @@ SMS_EXPORT_SAVE_DETAILS = {
 }
 
 
-def _sms_export_save_instructions(step_title: str) -> str | None:
+def _sms_export_save_instruction_parts(step_title: str) -> tuple[str, str] | None:
     details = SMS_EXPORT_SAVE_DETAILS.get(step_title)
     if details is None:
         return None
 
     first_step, filename, example = details
-    return f"""
-{first_step}. Select the yellow **Save/Export** button on the report toolbar.
+    return (
+        f"{first_step}. Select the yellow **Save/Export** button on the report toolbar.",
+        f"""
 {first_step + 1}. In the **Report save** window, enter:
    - **File name:** `{filename}` (example: `{example}`)
    - **Directory:** `M:\\export\\SMSExport\\`
    - **File type:** **Excel File (xls)**
 {first_step + 2}. Select **OK**.
-""".strip()
+""".strip(),
+    )
 
 
 def render_need_help_label(ui) -> None:
@@ -49,35 +51,45 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
             expanded = index == 0
             with ui.expander(step["title"], expanded=expanded):
                 ui.markdown(step["body"])
-                save_instructions = _sms_export_save_instructions(step["title"])
-                if save_instructions is not None:
-                    ui.markdown(save_instructions)
-
-                if step["title"].startswith("Step 1 · Sales"):
-                    step2a_export_image = root / "assets" / "step2a_sms_sales_export.png"
-                    if step2a_export_image.exists():
-                        ui.image(
-                            str(step2a_export_image),
-                            caption=(
-                                "Sales report in SMS: select the report date and ranges, select Launch, then export."
-                            ),
-                            use_container_width=True,
-                        )
-                    else:
-                        ui.info(
-                            "Sales SMS export example is not installed. "
-                            "Add assets/step2a_sms_sales_export.png to show it here."
-                        )
-
-                    ui.warning(
-                        "**⚠️ Unexpected / Unique Item**\n\n"
-                        "The example report contains **23 · Refunded Discounts**. This is not a normal Sales item and "
-                        "would ordinarily be expected in the **HASH** process. If an unexpected item appears in the "
-                        "Sub-department Single Total report, do not assume it should simply be kept or deleted. "
-                        "Drill into the activity in SMS to determine why it appeared, confirm whether it is also represented "
-                        "in the HASH report, and ask the Finance team for help if the source is unclear before completing the deposit.",
-                        icon="⚠️",
+                save_instruction_parts = _sms_export_save_instruction_parts(
+                    step["title"]
+                )
+                if save_instruction_parts is not None:
+                    save_button_instruction, save_dialog_instructions = (
+                        save_instruction_parts
                     )
+                    ui.markdown(save_button_instruction)
+
+                    if step["title"].startswith("Step 1 · Sales"):
+                        save_button_image = (
+                            root / "assets" / "sms_save_export_button.png"
+                        )
+                        if save_button_image.exists():
+                            ui.image(
+                                str(save_button_image),
+                                caption="Step 5: Select the yellow Save/Export button.",
+                                use_container_width=True,
+                            )
+                        else:
+                            ui.info("The Step 5 Save/Export reference image is unavailable.")
+
+                    ui.markdown(save_dialog_instructions)
+
+                    if step["title"].startswith("Step 1 · Sales"):
+                        save_dialog_image = (
+                            root / "assets" / "sms_report_save_dialog.png"
+                        )
+                        if save_dialog_image.exists():
+                            ui.image(
+                                str(save_dialog_image),
+                                caption=(
+                                    "Step 7 reference: confirm the file name, export folder, "
+                                    "and Excel File (xls), then select OK."
+                                ),
+                                use_container_width=True,
+                            )
+                        else:
+                            ui.info("The Step 7 Report save reference image is unavailable.")
 
                 if step["title"].startswith("Step 6 · Milk Bottles"):
                     milk_bottle_returns_example = root / "assets" / "milk_bottle_returns_example.png"

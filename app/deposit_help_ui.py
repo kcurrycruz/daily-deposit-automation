@@ -13,6 +13,10 @@ SMS_EXPORT_SAVE_DETAILS = {
 SMS_REPORT_SAVE_IMAGES = {
     "Step 1 · Sales": "sms_report_save_dialog.png",
     "Step 2 · Coupons": "sms_coupon_report_save_dialog.png",
+    "Step 3 · Discounts": "sms_discount_report_save_dialog.png",
+    "Step 4 · HASH": "sms_hash_report_save_dialog.png",
+    "Step 5 · Balance Sheet": "sms_bs_report_save_dialog.png",
+    "Step 6 · Milk Bottles": "sms_milk_bottles_report_save_dialog.png",
 }
 
 

@@ -154,6 +154,13 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertTrue(
             any(path.endswith("sms_coupon_report_save_dialog.png") for path in image_paths)
         )
+        for filename in (
+            "sms_discount_report_save_dialog.png",
+            "sms_hash_report_save_dialog.png",
+            "sms_bs_report_save_dialog.png",
+            "sms_milk_bottles_report_save_dialog.png",
+        ):
+            self.assertTrue(any(path.endswith(filename) for path in image_paths))
         self.assertFalse(any(path.endswith("step2a_sms_sales_export.png") for path in image_paths))
         self.assertTrue(any(path.endswith("milk_bottle_returns_example.png") for path in image_paths))
         self.assertTrue(any(path.endswith("daily_card_settlement_example.png") for path in image_paths))

@@ -139,6 +139,47 @@ def _nonnegative_money(value, label: str) -> Decimal:
     return amount
 
 
+def _required_iif_text(value, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} is required")
+    cleaned = value.strip()
+    if any(delimiter in cleaned for delimiter in ("\t", "\r", "\n")):
+        raise ValueError(f"{label} cannot contain tabs or line breaks")
+    return cleaned
+
+
+def normalize_inhouse_charges(rows, expected_total) -> list[dict]:
+    """Validate account-coded InHouse rows against Charge (House)."""
+    target = _nonnegative_money(expected_total, "Charge (House) actual")
+    if not isinstance(rows, list):
+        raise ValueError("InHouse charges must be a list")
+
+    normalized = []
+    total = Decimal("0.00")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("InHouse row must be an object")
+        account = _required_iif_text(row.get("account"), "InHouse account")
+        memo = _required_iif_text(row.get("memo"), "InHouse memo")
+        amount = _nonnegative_money(row.get("amount"), "InHouse amount")
+        if amount <= 0:
+            raise ValueError("InHouse amount must be greater than zero")
+        normalized.append(
+            {"account": account, "memo": memo, "amount": float(amount)}
+        )
+        total += amount
+
+    total = total.quantize(_CENTS)
+    if target == 0 and normalized:
+        raise ValueError("InHouse charges must be empty when Charge (House) is zero")
+    if total != target:
+        raise ValueError(
+            f"InHouse breakdown total ${total:,.2f} must equal "
+            f"Charge (House) ${target:,.2f}"
+        )
+    return normalized
+
+
 def _adjustment(kind: str, account: str, memo: str, qb_effect) -> dict:
     effect = _money(qb_effect, memo)
     return {
@@ -484,6 +525,10 @@ def normalize_closeout_payload(payload: dict) -> dict:
         )
 
     normalized_misc = _normalize_misc_values(payload)
+    normalized_inhouse = normalize_inhouse_charges(
+        payload.get("inhouse_charges", []),
+        normalized_actuals["charge_house"],
+    )
     final_total = _money(payload.get("final_total"), "Final Closeout Sheet Deposit Total")
     if final_total <= 0:
         raise ValueError("Final Closeout Sheet Deposit Total must be greater than zero")
@@ -499,6 +544,7 @@ def normalize_closeout_payload(payload: dict) -> dict:
         "safe": normalized_misc["safe"],
         "plants_purchase": normalized_misc["plants_purchase"],
         "custom_tba": normalized_misc["custom_tba"],
+        "inhouse_charges": normalized_inhouse,
         "final_total": float(final_total),
         "approve_final_pos": approve_final_pos,
     }
@@ -516,6 +562,7 @@ def build_closeout_form_payload(
     custom_tba: list[dict],
     final_total: float,
     approve_final_pos: bool,
+    inhouse_charges: list[dict] | None = None,
 ) -> dict:
     """Build and validate the canonical payload produced by the employee form."""
     if reviewed is not True:
@@ -536,6 +583,9 @@ def build_closeout_form_payload(
             "safe": {"type": safe_type, "amount": safe_amount},
             "plants_purchase": plants_purchase,
             "custom_tba": custom_tba,
+            "inhouse_charges": (
+                [] if inhouse_charges is None else inhouse_charges
+            ),
             "final_total": final_total,
             "approve_final_pos": approve_final_pos,
         }

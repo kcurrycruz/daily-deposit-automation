@@ -439,6 +439,13 @@ class CloseoutAdjustmentTests(unittest.TestCase):
             "safe": {"type": "none", "amount": 0},
             "plants_purchase": 0,
             "custom_tba": [],
+            "inhouse_charges": [
+                {
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day",
+                    "amount": 10,
+                }
+            ],
             "final_total": 1000,
             "approve_final_pos": False,
         }
@@ -538,6 +545,81 @@ class CloseoutAdjustmentTests(unittest.TestCase):
                 ValueError, "Custom TBA memo cannot contain tabs or line breaks"
             ):
                 normalize_closeout_payload(payload)
+
+    def test_normalize_closeout_payload_canonicalizes_inhouse_charges(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        actuals = {key: 10 for key in STANDARD_ORDER}
+        actuals["charge_house"] = 30
+        payload = self.closeout_payload(
+            actuals=actuals,
+            inhouse_charges=[
+                {
+                    "account": "  8320000 · Store Supplies  ",
+                    "memo": "  End of Day  ",
+                    "amount": "12.004",
+                },
+                {
+                    "account": "8504000 · Education",
+                    "memo": "Class supplies",
+                    "amount": "17.996",
+                },
+            ],
+        )
+
+        normalized = normalize_closeout_payload(payload)
+
+        self.assertEqual(
+            normalized["inhouse_charges"],
+            [
+                {
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day",
+                    "amount": 12.0,
+                },
+                {
+                    "account": "8504000 · Education",
+                    "memo": "Class supplies",
+                    "amount": 18.0,
+                },
+            ],
+        )
+
+    def test_normalize_closeout_payload_rejects_invalid_inhouse_breakdowns(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        actuals = {key: 10 for key in STANDARD_ORDER}
+        cases = [
+            ([], r"must equal Charge \(House\)"),
+            (
+                [{"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 9.99}],
+                r"must equal Charge \(House\)",
+            ),
+            (
+                [{"account": " ", "memo": "End of Day", "amount": 10}],
+                "InHouse account is required",
+            ),
+            (
+                [{"account": "8320000 · Store Supplies", "memo": "Bad\tmemo", "amount": 10}],
+                "cannot contain tabs or line breaks",
+            ),
+            (
+                [{"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 0}],
+                "must be greater than zero",
+            ),
+        ]
+        for rows, message in cases:
+            with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, message):
+                normalize_closeout_payload(
+                    self.closeout_payload(actuals=actuals, inhouse_charges=rows)
+                )
+
+        zero_actuals = dict(actuals)
+        zero_actuals["charge_house"] = 0
+        with self.assertRaisesRegex(ValueError, "must be empty"):
+            normalize_closeout_payload(
+                self.closeout_payload(actuals=zero_actuals)
+            )
 
     def test_final_difference_requires_explicit_approval_with_exact_pos_line(self):
         from app.closeout_reconciliation import calculate_final_pos_adjustment

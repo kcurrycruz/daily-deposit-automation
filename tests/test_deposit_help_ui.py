@@ -220,7 +220,7 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertLess(save_button_image, step_seven)
         self.assertLess(step_seven, save_dialog_image)
 
-    def test_known_exceptions_renderer_keeps_original_operational_guidance(self):
+    def test_known_exceptions_renderer_matches_the_current_guided_workflow(self):
         from app.deposit_help_ui import render_known_exceptions
 
         ui = RecordingUI()
@@ -232,10 +232,34 @@ class DepositHelpUITests(unittest.TestCase):
             for event in ui.events
             if event[0] == "markdown" and event[1]
         )
-        self.assertIn("💡 Tips & Known Exceptions · WIP", expander_labels)
-        self.assertIn("Unique / unrecognized items", rendered_text)
-        self.assertIn("Automation Does Not Replace Final Review", rendered_text)
-        self.assertIn("Future tips to document", rendered_text)
+        self.assertIn("💡 Tips & Known Exceptions", expander_labels)
+        self.assertNotIn("💡 Tips & Known Exceptions · WIP", expander_labels)
+        for dropdown in (
+            "Unique / unrecognized items → TBA",
+            "Unexpected SMS items",
+            "Occasional daily activity",
+            "Closeout Sheet reconciliation",
+            "QuickBooks final review",
+        ):
+            self.assertIn(dropdown, expander_labels)
+        self.assertIn("Any unique item", rendered_text)
+        self.assertIn("Refunded Discounts", rendered_text)
+        for label in ("Membership Revenue", "Donations", "Paid In", "Paid Out"):
+            self.assertIn(label, rendered_text)
+        self.assertIn("full Closeout Sheet workflow", rendered_text)
+        for label in (
+            "Payroll check cashing",
+            "Plants / Market Purchases",
+            "Safe overage or shortage",
+            "Custom Closeout adjustments",
+            "Final Closeout Sheet Deposit Total",
+        ):
+            self.assertIn(label, rendered_text)
+        self.assertIn("Before importing", rendered_text)
+        self.assertNotIn("Automation Limitations", rendered_text)
+        self.assertNotIn("does not automatically include", rendered_text)
+        self.assertNotIn("apply the Store Closeout adjustments directly in QuickBooks", rendered_text)
+        self.assertNotIn("Future tips to document", rendered_text)
 
 
 if __name__ == "__main__":

@@ -146,76 +146,46 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
 
 
 def render_known_exceptions(ui) -> None:
-    with ui.expander("💡 Tips & Known Exceptions · WIP", expanded=False):
+    with ui.expander("💡 Tips & Known Exceptions", expanded=False):
         ui.caption(
-            "Working guidance for unusual situations. This section will continue to grow as Finance documents more exceptions."
+            "Open the topic that matches the situation you are reviewing."
         )
 
-        ui.markdown(
-            """
-            <div class="hwfc-tip-card attention">
-              <div class="hwfc-tip-title">⚠️ Unique / unrecognized items → TBA</div>
-              <div class="hwfc-tip-body">
-                Any unique item the automation does not recognize is coded as <strong>TBA</strong> at the bottom of the generated IIF.
-                Review those lines and change them to the correct QuickBooks account before final posting. If the correct coding is unclear,
-                research the SMS/source reports and ask Finance before posting.
-              </div>
-            </div>
+        with ui.expander("Unique / unrecognized items → TBA", expanded=False):
+            ui.markdown(
+                """
+                Any unique item the automation does not recognize is coded as **TBA** in the generated IIF. Review every TBA line and select the correct QuickBooks account before posting. If the correct coding is unclear, research the SMS source report and ask Finance before importing.
+                """
+            )
 
-            <div class="hwfc-tip-card info">
-              <div class="hwfc-tip-title">🔎 Unexpected SMS items</div>
-              <div class="hwfc-tip-body">
-                If an item appears in a report where it normally does not belong, investigate the source activity in SMS before changing
-                the deposit. For example, if Refunded Discounts appears in the Sales report, confirm whether it is also
-                represented in HASH and involve Finance if the reason is unclear.
-              </div>
-            </div>
+        with ui.expander("Unexpected SMS items", expanded=False):
+            ui.markdown(
+                """
+                If an item appears in a report where it normally does not belong, investigate the source activity in SMS before changing the deposit. For example, if Refunded Discounts appears in the Sales report, confirm whether it is also represented in HASH and involve Finance if the reason is unclear.
+                """
+            )
 
-            <div class="hwfc-tip-card info">
-              <div class="hwfc-tip-title">💵 Paid Out</div>
-              <div class="hwfc-tip-body">
-                Paid Out does not appear every day. When it is detected on the <strong>Balance Sheet</strong>, the automation carries that
-                amount into the generated IIF, similar to <strong>Paid-Ins</strong> and <strong>Pass Through Donations</strong>.
-                Paid Out is treated as a <strong>negative amount</strong>, so it reduces the QuickBooks deposit total.
-                <div class="hwfc-tip-example">Example: $47.06 Paid Out → -$47.06 deposit effect</div>
-              </div>
-            </div>
+        with ui.expander("Occasional daily activity", expanded=False):
+            ui.markdown(
+                """
+                **Membership Revenue, Donations, Paid In, and Paid Out** may not appear every day. When one is detected, the app adds the appropriate guided step so you can review the amount, choose how it should be handled, and provide any required member name or QuickBooks account.
 
-            <div class="hwfc-tip-card attention">
-              <div class="hwfc-tip-title">⚠️ Important Disclosures &amp; Automation Limitations</div>
-              <div class="hwfc-tip-body">
-                <strong>1. SMS-Based Automation</strong><br>
-                The automated IIF is built from <strong>SMS data</strong>. It does not automatically include every actual daily adjustment
-                documented on the <strong>Store Closeout</strong> sheet provided by the Front End Manager.<br><br>
-                <strong>2. Store Closeout Review Is Required</strong><br>
-                Import the generated IIF into <strong>QuickBooks first</strong>, then compare the deposit to the Store Closeout and manually
-                adjust the deposit in QuickBooks for Cash Over / Short, additional cash differences, Plants / Dept. Market Purchases,
-                Payroll cash activity, Comments / Notes / Issues from Front End, safe overage or shortage, and any other documented amount
-                that changes the actual daily deposit.<br><br>
-                <strong>3. Automation Does Not Replace Final Review</strong><br>
-                A successfully generated and balanced IIF does not necessarily mean the final QuickBooks deposit matches the actual Store
-                Closeout. The deposit is not complete until required Store Closeout adjustments are made in QuickBooks and the final deposit
-                has been reviewed for accuracy.
-              </div>
-            </div>
+                Paid Out reduces the deposit. The other activities follow the transaction direction detected from the source reports. Always confirm the selected account, member information, description, and amount before saving the step.
+                """
+            )
 
-            <div class="hwfc-tip-card success">
-              <div class="hwfc-tip-title">✅ QuickBooks final review</div>
-              <div class="hwfc-tip-body">
-                Review all TBA lines, confirm Sales / Discounts / HASH checks, review card settlement differences, import the IIF, apply the
-                Store Closeout adjustments directly in QuickBooks, and confirm the final deposit is correct before posting.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        with ui.expander("Closeout Sheet reconciliation", expanded=False):
+            ui.markdown(
+                """
+                The app now supports the full Closeout Sheet workflow. Enter the actual Closeout amounts for **Cash, Checks, Donations, Charge (House), Offline ZON, Vendor Coupons, Paid In, and Paid Out**.
 
-        ui.markdown(
-            """
-            **Future tips to document**
-            - Date mismatch handling
-            - When to stop and ask Finance
-            - Common TBA mappings once approved
-            - QuickBooks pre-post review reminders
-            """
-        )
+                The same workflow also supports **Payroll check cashing, Plants / Market Purchases, Safe overage or shortage,** and **Custom Closeout adjustments**. Enter the required **Final Closeout Sheet Deposit Total**, review the calculated differences, and approve a final POS adjustment only after confirming it against the paper Closeout Sheet.
+                """
+            )
+
+        with ui.expander("QuickBooks final review", expanded=False):
+            ui.markdown(
+                """
+                Before importing, review all TBA lines, confirm the Sales / Discounts / HASH checks, resolve card-settlement differences, and verify the completed Closeout Sheet reconciliation. Download both the **QuickBooks IIF** and the **SubDept Single Total Report**, import the IIF, and confirm the final deposit is correct before posting.
+                """
+            )

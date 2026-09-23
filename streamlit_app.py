@@ -303,7 +303,6 @@ In **SMS (POS System)** go to:
    - Start: **3 (Net Sales)**
    - End: **4 (Interstore Sales)**
 4. Select **Launch**.
-5. Export the report as **Sales**.
 """.strip(),
     },
     {
@@ -319,7 +318,6 @@ In **SMS (POS System)** go to:
    - Start: **3542 (Elect. Store Coupon Distribution)**
    - End: **3542 (Elect. Store Coupon Distribution)**
 4. Select **Launch**.
-5. Export the report as **Coupons**.
 """.strip(),
     },
     {
@@ -331,7 +329,6 @@ In **SMS (POS System)** go to:
 
 1. Change the report date to the deposit date.
 2. Select **Launch**.
-3. Export the report as **Discounts**.
 """.strip(),
     },
     {
@@ -346,7 +343,6 @@ In **SMS (POS System)** go to:
 1. Change the report date to the deposit date.
 2. Set the **Totalizer Range** to **6 (HASH Sales)** for both Start and End.
 3. Select **Launch**.
-4. Export the report as **HASH**.
 """.strip(),
     },
     {
@@ -358,7 +354,6 @@ In **SMS (POS System)** go to:
 
 1. Change the report date to the deposit date.
 2. Select **Launch**.
-3. Export the report as **Balance Sheet**.
 """.strip(),
     },
     {
@@ -371,7 +366,6 @@ In **SMS (POS System)** go to:
 1. Change the report date to the deposit date.
 2. Set the **Sub Department Range** to **27 (Store Coupons)** for both Start and End.
 3. Select **Launch**.
-4. Export the report as **Milk Bottles**.
 """.strip(),
     },
 ]

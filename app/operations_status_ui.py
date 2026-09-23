@@ -109,7 +109,7 @@ def build_operations_status(
 
     if (iif_generated and uploaded_count == 2 and workbook_valid
             and settlement_valid and workflow_complete):
-        iif_text, state = "Ready to download", "ready"
+        iif_text, state = "2 downloads ready", "ready"
     elif uploaded_count == 2 and not (workbook_valid and settlement_valid):
         iif_text, state = "Needs attention", "attention"
     elif uploaded_count == 2 and workflow_complete:
@@ -188,7 +188,7 @@ def _build_sms_operations_status(
         )
 
     if iif_generated and reports_valid and workflow_complete:
-        iif_text, state = "Ready to download", "ready"
+        iif_text, state = "2 downloads ready", "ready"
     elif sms_complete and settlement_uploaded and (
         sms_valid is False or not settlement_valid
     ):

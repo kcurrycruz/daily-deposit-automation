@@ -990,7 +990,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertFalse(clicked)
         self.assertEqual(
             [label for label, _kwargs in ui.events],
-            ["Download QuickBooks IIF", "Download Daily Reporting Workbook"],
+            ["Download QuickBooks IIF", "Download SubDept Single Total Report"],
         )
         self.assertEqual(ui.events[0][1]["file_name"], "deposit_20260914.iif")
         self.assertEqual(

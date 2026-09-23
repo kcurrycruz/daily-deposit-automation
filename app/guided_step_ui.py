@@ -237,7 +237,7 @@ def render_prepare_iif_action(
             use_container_width=True,
         )
         ui.download_button(
-            "Download Daily Reporting Workbook",
+            "Download SubDept Single Total Report",
             data=download_details["report"]["data"],
             file_name=download_details["report"]["file_name"],
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

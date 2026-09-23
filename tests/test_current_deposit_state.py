@@ -89,7 +89,7 @@ class CurrentDepositTests(unittest.TestCase):
     def assert_stale(self):
         download, status = self.render_state()
         self.assertIsNone(download, "Stale generated IIF must not be downloadable")
-        self.assertNotEqual(status.iif, "Ready to download")
+        self.assertNotEqual(status.iif, "2 downloads ready")
 
     def test_unchanged_completed_deposit_remains_downloadable(self):
         download, status = self.render_state()
@@ -103,7 +103,7 @@ class CurrentDepositTests(unittest.TestCase):
                 },
             },
         )
-        self.assertEqual(status.iif, "Ready to download")
+        self.assertEqual(status.iif, "2 downloads ready")
 
     def test_removing_either_upload_hides_retained_download(self):
         for field in ("uploaded", "settlement_file"):
@@ -262,7 +262,7 @@ class CurrentDepositTests(unittest.TestCase):
                               settlement_uploaded=True, workbook_valid=True,
                               settlement_valid=True, workflow_complete=True, iif_generated=True)
                 status = operations_status_ui.build_operations_status(**(inputs | override))
-                self.assertNotEqual(status.iif, "Ready to download")
+                self.assertNotEqual(status.iif, "2 downloads ready")
 
     def run_action(self, engine):
         self.ns.update(run_clicked=True, run_engine=engine, RUN_LOCK_PATH="unused",

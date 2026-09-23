@@ -122,10 +122,30 @@ class OperationsStatusModelTests(unittest.TestCase):
         self.assertEqual(status.state, "ready")
         self.assertEqual(status.iif_progress, 75)
 
-    def test_generated_iif_is_ready_to_download(self):
+    def test_generated_artifacts_show_two_downloads_ready(self):
         from app.operations_status_ui import build_operations_status
         status = build_operations_status(deposit_date=date(2026, 9, 8), daily_uploaded=True, settlement_uploaded=True, workbook_valid=True, settlement_valid=True, workflow_complete=True, iif_generated=True)
-        self.assertEqual(status.iif, "Ready to download")
+        self.assertEqual(status.iif, "2 downloads ready")
+        self.assertEqual(status.state, "ready")
+        self.assertEqual(status.iif_progress, 100)
+
+    def test_sms_generated_artifacts_show_two_downloads_ready(self):
+        from app.operations_status_ui import build_operations_status
+        from app.sms_exports import SMS_ROLE_ORDER
+
+        status = build_operations_status(
+            deposit_date=date(2026, 9, 14),
+            daily_uploaded=False,
+            settlement_uploaded=True,
+            workbook_valid=False,
+            settlement_valid=True,
+            workflow_complete=True,
+            iif_generated=True,
+            sms_reports={role: object() for role in SMS_ROLE_ORDER},
+            sms_valid=True,
+        )
+
+        self.assertEqual(status.iif, "2 downloads ready")
         self.assertEqual(status.state, "ready")
         self.assertEqual(status.iif_progress, 100)
 

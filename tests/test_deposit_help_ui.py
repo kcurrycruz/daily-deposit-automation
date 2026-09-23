@@ -125,13 +125,11 @@ class DepositHelpUITests(unittest.TestCase):
             ui,
             root=Path(__file__).resolve().parents[1],
             sop_steps=[
-                {
-                    "title": "Step 1 · Sales",
-                    "body": (
-                        "Export Sales, Coupons, Discounts, HASH, Balance Sheet, "
-                        "and Milk Bottles for the deposit date."
-                    ),
-                },
+                {"title": "Step 1 · Sales", "body": "Launch Sales."},
+                {"title": "Step 2 · Coupons", "body": "Launch Coupons."},
+                {"title": "Step 3 · Discounts", "body": "Launch Discounts."},
+                {"title": "Step 4 · HASH", "body": "Launch HASH."},
+                {"title": "Step 5 · Balance Sheet", "body": "Launch Balance Sheet."},
                 {"title": "Step 6 · Milk Bottles", "body": "Export Milk Bottles."},
             ],
         )
@@ -144,7 +142,7 @@ class DepositHelpUITests(unittest.TestCase):
             if event[0] == "markdown" and event[1]
         )
 
-        self.assertIn("📘 Export & Upload Guide", expander_labels)
+        self.assertIn("📘 SOP - Export and Upload Guide", expander_labels)
         self.assertIn("Step 1 · Sales", expander_labels)
         self.assertIn("Step 6 · Milk Bottles", expander_labels)
         self.assertIn("View Daily Card Settlement Example", expander_labels)
@@ -167,6 +165,18 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertIn("returned-item Net Sales", rendered_text)
         self.assertIn("BS code 910", rendered_text)
         self.assertIn("Validate & Prepare IIF", rendered_text)
+        for filename in (
+            "MMDDYY Sales",
+            "MMDDYY Coupon",
+            "MMDDYY Discount",
+            "MMDDYY Hash",
+            "MMDDYY BS",
+            "MMDDYY milk bottles",
+        ):
+            self.assertIn(filename, rendered_text)
+        self.assertIn("M:\\export\\SMSExport\\", rendered_text)
+        self.assertEqual(rendered_text.count("Excel File (xls)"), 6)
+        self.assertEqual(rendered_text.count("Save/Export"), 6)
         self.assertNotIn("Move or Copy", rendered_text)
         self.assertNotIn("master workbook", rendered_text)
         self.assertNotIn("paste", rendered_text.lower())

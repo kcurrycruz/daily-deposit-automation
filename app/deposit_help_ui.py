@@ -1,19 +1,47 @@
 from pathlib import Path
 
 
+SMS_EXPORT_SAVE_DETAILS = {
+    "Step 1 · Sales": (5, "MMDDYY Sales", "092126 Sales"),
+    "Step 2 · Coupons": (5, "MMDDYY Coupon", "092126 Coupon"),
+    "Step 3 · Discounts": (3, "MMDDYY Discount", "092126 Discount"),
+    "Step 4 · HASH": (4, "MMDDYY Hash", "092126 Hash"),
+    "Step 5 · Balance Sheet": (3, "MMDDYY BS", "092126 BS"),
+    "Step 6 · Milk Bottles": (4, "MMDDYY milk bottles", "092126 milk bottles"),
+}
+
+
+def _sms_export_save_instructions(step_title: str) -> str | None:
+    details = SMS_EXPORT_SAVE_DETAILS.get(step_title)
+    if details is None:
+        return None
+
+    first_step, filename, example = details
+    return f"""
+{first_step}. Select the yellow **Save/Export** button on the report toolbar.
+{first_step + 1}. In the **Report save** window, enter:
+   - **File name:** `{filename}` (example: `{example}`)
+   - **Directory:** `M:\\export\\SMSExport\\`
+   - **File type:** **Excel File (xls)**
+{first_step + 2}. Select **OK**.
+""".strip()
+
+
 def render_need_help_label(ui) -> None:
     """Render the static main-page help label."""
     ui.markdown("### ❔ Need Help")
 
 
 def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
-    with ui.expander("📘 Export & Upload Guide", expanded=False):
+    with ui.expander("📘 SOP - Export and Upload Guide", expanded=False):
         ui.markdown(
             """
             ### Export the six SMS reports
             For one deposit date, export exactly **Sales, Coupons, Discounts, HASH, Balance Sheet,** and **Milk Bottles** from SMS. Upload all six exports together, then upload the separate **Daily Card Settlement Report**.
 
             **Date check:** every SMS export and the card settlement report must be for the same date. The app validates the dates before it prepares the IIF.
+
+            **Filename note:** use the naming formats shown in each step. The app identifies each report from its contents, so capitalization differences will not prevent detection, but consistent names make the files easier to organize and review.
             """
         )
 
@@ -21,6 +49,9 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
             expanded = index == 0
             with ui.expander(step["title"], expanded=expanded):
                 ui.markdown(step["body"])
+                save_instructions = _sms_export_save_instructions(step["title"])
+                if save_instructions is not None:
+                    ui.markdown(save_instructions)
 
                 if step["title"].startswith("Step 1 · Sales"):
                     step2a_export_image = root / "assets" / "step2a_sms_sales_export.png"

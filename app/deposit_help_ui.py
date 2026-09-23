@@ -3,11 +3,16 @@ from pathlib import Path
 
 SMS_EXPORT_SAVE_DETAILS = {
     "Step 1 · Sales": (5, "MMDDYY Sales", "092126 Sales"),
-    "Step 2 · Coupons": (5, "MMDDYY Coupon", "092126 Coupon"),
+    "Step 2 · Coupons": (5, "MMDDYY Coupons", "092126 Coupons"),
     "Step 3 · Discounts": (3, "MMDDYY Discount", "092126 Discount"),
     "Step 4 · HASH": (4, "MMDDYY Hash", "092126 Hash"),
     "Step 5 · Balance Sheet": (3, "MMDDYY BS", "092126 BS"),
     "Step 6 · Milk Bottles": (4, "MMDDYY milk bottles", "092126 milk bottles"),
+}
+
+SMS_REPORT_SAVE_IMAGES = {
+    "Step 1 · Sales": "sms_report_save_dialog.png",
+    "Step 2 · Coupons": "sms_coupon_report_save_dialog.png",
 }
 
 
@@ -55,41 +60,48 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
                     step["title"]
                 )
                 if save_instruction_parts is not None:
+                    save_step_number = SMS_EXPORT_SAVE_DETAILS[step["title"]][0]
                     save_button_instruction, save_dialog_instructions = (
                         save_instruction_parts
                     )
                     ui.markdown(save_button_instruction)
 
-                    if step["title"].startswith("Step 1 · Sales"):
-                        save_button_image = (
-                            root / "assets" / "sms_save_export_button.png"
+                    save_button_image = root / "assets" / "sms_save_export_button.png"
+                    if save_button_image.exists():
+                        ui.image(
+                            str(save_button_image),
+                            caption=(
+                                f"Step {save_step_number}: Select the yellow "
+                                "Save/Export button."
+                            ),
+                            use_container_width=True,
                         )
-                        if save_button_image.exists():
-                            ui.image(
-                                str(save_button_image),
-                                caption="Step 5: Select the yellow Save/Export button.",
-                                use_container_width=True,
-                            )
-                        else:
-                            ui.info("The Step 5 Save/Export reference image is unavailable.")
+                    else:
+                        ui.info(
+                            f"The Step {save_step_number} Save/Export reference "
+                            "image is unavailable."
+                        )
 
                     ui.markdown(save_dialog_instructions)
 
-                    if step["title"].startswith("Step 1 · Sales"):
-                        save_dialog_image = (
-                            root / "assets" / "sms_report_save_dialog.png"
-                        )
+                    save_dialog_filename = SMS_REPORT_SAVE_IMAGES.get(step["title"])
+                    if save_dialog_filename is not None:
+                        save_dialog_image = root / "assets" / save_dialog_filename
                         if save_dialog_image.exists():
                             ui.image(
                                 str(save_dialog_image),
                                 caption=(
-                                    "Step 7 reference: confirm the file name, export folder, "
+                                    f"Step {save_step_number + 2} reference: confirm the "
+                                    "file name, export folder, "
                                     "and Excel File (xls), then select OK."
                                 ),
                                 use_container_width=True,
                             )
                         else:
-                            ui.info("The Step 7 Report save reference image is unavailable.")
+                            ui.info(
+                                f"The Step {save_step_number + 2} Report save reference "
+                                "image is unavailable."
+                            )
 
                 if step["title"].startswith("Step 6 · Milk Bottles"):
                     milk_bottle_returns_example = root / "assets" / "milk_bottle_returns_example.png"

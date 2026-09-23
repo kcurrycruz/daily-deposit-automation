@@ -52,7 +52,7 @@ def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
         '<div class="hwfc-workbook-validation-title">'
         f'SMS Reports · {verified_count} of {role_count} verified'
         "</div>"
-        f'<div class="hwfc-workbook-checks">{checks}</div>'
+        f'<div class="hwfc-workbook-checks hwfc-sms-report-grid">{checks}</div>'
         f"{validation_message}"
         "</div>",
         unsafe_allow_html=True,

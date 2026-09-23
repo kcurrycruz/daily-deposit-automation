@@ -1119,6 +1119,10 @@ st.markdown(
         grid-template-columns: repeat(5, minmax(0, 1fr));
     }
 
+    .hwfc-sms-report-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
     .hwfc-workbook-check {
         background: rgba(49, 95, 58, .30);
         border: 1px solid rgba(120, 168, 91, .52);

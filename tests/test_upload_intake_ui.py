@@ -56,6 +56,25 @@ class UploadIntakeUITests(unittest.TestCase):
         self.assertEqual(ui.markup.count("hwfc-workbook-check is-verified"), 1)
         self.assertEqual(ui.markup.count("hwfc-workbook-check is-pending"), 5)
 
+    def test_sms_report_cards_use_their_own_balanced_grid(self):
+        from app.upload_intake_ui import render_sms_validation
+
+        class RecordingUI:
+            def __init__(self):
+                self.markup = ""
+
+            def markdown(self, body, **kwargs):
+                self.markup += body
+
+        ui = RecordingUI()
+        render_sms_validation(ui, reports={}, error=None)
+
+        self.assertIn(
+            'class="hwfc-workbook-checks hwfc-sms-report-grid"',
+            ui.markup,
+        )
+        self.assertEqual(ui.markup.count('class="hwfc-workbook-check is-pending"'), 6)
+
     def test_validation_card_escapes_report_names_and_shows_error(self):
         from app.upload_intake_ui import render_sms_validation
 

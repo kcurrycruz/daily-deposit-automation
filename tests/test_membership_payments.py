@@ -1450,7 +1450,7 @@ class MembershipPaymentTests(unittest.TestCase):
         )
         self.assertTrue(payload["reviewed"])
 
-    def test_closeout_form_source_includes_inhouse_editor_and_locked_total(self):
+    def test_closeout_form_source_includes_inhouse_editor_and_editable_actual(self):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
             encoding="utf-8"
         )
@@ -1460,8 +1460,8 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn('setdefault(memo_key, "End of Day")', source)
         self.assertIn('"Breakdown Total"', source)
         self.assertIn('"Remaining"', source)
-        self.assertIn('if field == "charge_house":', source)
-        self.assertIn("actual = inhouse_total", source)
+        self.assertIn("inhouse_actual_key", source)
+        self.assertIn('closeout_defaults["charge_house"]', source)
         self.assertIn('inhouse_charges=inhouse_charges', source)
 
     def test_closeout_form_requires_paper_review_confirmation(self):

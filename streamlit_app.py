@@ -3675,7 +3675,15 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 if activity_link_ready
                 else {}
             )
-            inhouse_target = float(closeout_baselines["charge_house"])
+            inhouse_actual_key = (
+                f"closeout_actual_charge_house_{closeout_workbook_key}"
+            )
+            inhouse_target = float(
+                st.session_state.get(
+                    inhouse_actual_key,
+                    closeout_defaults["charge_house"],
+                )
+            )
             inhouse_ids_key = f"closeout_inhouse_ids_{closeout_workbook_key}"
             inhouse_charges = []
             if inhouse_target > 0:
@@ -3716,10 +3724,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 baseline = float(closeout_baselines[field])
                 row_columns[0].write(label)
                 row_columns[1].write(f"${baseline:,.2f}")
-                if field == "charge_house":
-                    actual = inhouse_total
-                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
-                elif field == "vendor_coupons":
+                if field == "vendor_coupons":
                     actual = counted_coupon_total
                     row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
                 elif locked_activity_actuals.get(field) is not None:
@@ -3814,7 +3819,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
 
                 inhouse_remaining = round(inhouse_target - inhouse_total, 2)
                 inhouse_summary = st.columns(3)
-                inhouse_summary[0].caption("Charge (House) Target")
+                inhouse_summary[0].caption("Charge (House) Actual")
                 inhouse_summary[0].write(f"${inhouse_target:,.2f}")
                 inhouse_summary[1].caption("Breakdown Total")
                 inhouse_summary[1].write(f"${inhouse_total:,.2f}")

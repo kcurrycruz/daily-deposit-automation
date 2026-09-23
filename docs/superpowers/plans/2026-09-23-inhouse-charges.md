@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Memo defaults to the exact text `End of Day`.
-- The breakdown total must equal Charge (House) to the cent.
+- The breakdown total must equal the editable Closeout Charge (House) Actual to the cent.
 - QuickBooks accounts come from the existing searchable Chart of Accounts list.
 - Manual Closeout mode and all non-InHouse workflows remain unchanged.
 - `output/history/` must never be committed.
@@ -38,11 +38,11 @@
 - Consumes: `actuals["charge_house"]` and raw `inhouse_charges` rows.
 - Produces: `normalize_inhouse_charges(rows, expected_total) -> list[dict]` and canonical payload field `inhouse_charges`.
 
-- [ ] **Step 1: Write failing tests** for default-normalized rows, invalid fields, a one-cent mismatch, zero Charge (House), and canonical persistence.
-- [ ] **Step 2: Run the focused tests** and confirm they fail because `inhouse_charges` is not normalized.
-- [ ] **Step 3: Implement cent-safe normalization** with required account/memo, positive amount, forbidden delimiter checks, and exact total validation.
-- [ ] **Step 4: Thread `inhouse_charges` through `build_closeout_form_payload` and `normalize_closeout_payload`** without changing manual mode.
-- [ ] **Step 5: Run the focused tests** and confirm they pass.
+- [x] **Step 1: Write failing tests** for default-normalized rows, invalid fields, a one-cent mismatch, zero Charge (House), and canonical persistence.
+- [x] **Step 2: Run the focused tests** and confirm they fail because `inhouse_charges` is not normalized.
+- [x] **Step 3: Implement cent-safe normalization** with required account/memo, positive amount, forbidden delimiter checks, and exact total validation.
+- [x] **Step 4: Thread `inhouse_charges` through `build_closeout_form_payload` and `normalize_closeout_payload`** without changing manual mode.
+- [x] **Step 5: Run the focused tests** and confirm they pass.
 
 ### Task 2: Closeout form and restoration
 
@@ -56,12 +56,12 @@
 - Consumes: Charge (House) baseline and normalized saved rows.
 - Produces: repeatable account/memo/amount UI rows and `inhouse_charges` passed to `build_closeout_form_payload`.
 
-- [ ] **Step 1: Write failing state-restoration and source-contract tests** for row IDs, account, `End of Day` memo, amount, searchable account options, totals, and disabled review on mismatch.
-- [ ] **Step 2: Run the focused tests** and confirm the form and hydration keys are absent.
-- [ ] **Step 3: Render the InHouse editor** above Other Closeout Sheet activity, beginning with one row when Charge (House) is positive.
-- [ ] **Step 4: Lock Charge (House) Actual to the row total** and render Target, Breakdown Total, and Remaining feedback.
-- [ ] **Step 5: Restore saved rows when editing** and ensure add/remove actions retain the employee’s other form values.
-- [ ] **Step 6: Run the focused tests** and confirm they pass.
+- [x] **Step 1: Write failing state-restoration and source-contract tests** for row IDs, account, `End of Day` memo, amount, searchable account options, totals, and disabled review on mismatch.
+- [x] **Step 2: Run the focused tests** and confirm the form and hydration keys are absent.
+- [x] **Step 3: Render the InHouse editor** above Other Closeout Sheet activity, beginning with one row when Charge (House) is positive.
+- [x] **Step 4: Keep Charge (House) Actual editable and require the row total to match it**, then render Actual, Breakdown Total, and Remaining feedback.
+- [x] **Step 5: Restore saved rows when editing** and ensure add/remove actions retain the employee’s other form values.
+- [x] **Step 6: Run the focused tests** and confirm they pass.
 
 ### Task 3: IIF account-coded splits
 
@@ -73,11 +73,11 @@
 - Consumes: canonical `normalized_closeout["inhouse_charges"]`.
 - Produces: one IIF SPL per row with selected account, memo, amount, and no reviewed-workflow InHouse TBA placeholders.
 
-- [ ] **Step 1: Write failing IIF tests** for two accounts that sum to Charge (House), exact signs and memos, ordering, and absence of `InHouse:` placeholders.
-- [ ] **Step 2: Run the focused tests** and confirm the engine still emits TBA placeholders.
-- [ ] **Step 3: Replace the legacy reviewed-workflow InHouse lines** with canonical account-coded splits while preserving the Charge (House) Closeout adjustment.
-- [ ] **Step 4: Include InHouse rows in preview totals** so Review Closeout and final POS math use the same amounts as the final IIF.
-- [ ] **Step 5: Run the focused tests** and confirm they pass.
+- [x] **Step 1: Write failing IIF tests** for two accounts that sum to Charge (House), exact signs and memos, ordering, and absence of `InHouse:` placeholders.
+- [x] **Step 2: Run the focused tests** and confirm the engine still emits TBA placeholders.
+- [x] **Step 3: Replace the legacy reviewed-workflow InHouse lines** with canonical account-coded splits while preserving the Charge (House) Closeout adjustment.
+- [x] **Step 4: Include InHouse rows in preview totals** so Review Closeout and final POS math use the same amounts as the final IIF.
+- [x] **Step 5: Run the focused tests** and confirm they pass.
 
 ### Task 4: End-to-end verification
 
@@ -88,7 +88,7 @@
 - Consumes: Tasks 1–3.
 - Produces: verified Daily Deposit branch ready for user testing.
 
-- [ ] **Step 1: Run all Closeout, workflow, and IIF focused tests.**
-- [ ] **Step 2: Run `python -m unittest discover -s tests -q`.**
-- [ ] **Step 3: Run syntax compilation and `git diff --check`.**
-- [ ] **Step 4: Inspect the final diff** for unrelated files and confirm `output/history/` is excluded.
+- [x] **Step 1: Run all Closeout, workflow, and IIF focused tests.**
+- [x] **Step 2: Run `python -m unittest discover -s tests -q`.**
+- [x] **Step 3: Run syntax compilation and `git diff --check`.**
+- [x] **Step 4: Inspect the final diff** for unrelated files and confirm `output/history/` is excluded.

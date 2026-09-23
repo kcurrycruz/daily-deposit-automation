@@ -9,9 +9,9 @@ Replace the generic Charge (House) QuickBooks placeholder with an employee-enter
 - The Closeout Sheet step displays an **InHouse Charges** section whenever the Charge (House) system amount is greater than zero.
 - Each row contains, from left to right, a searchable QuickBooks account, a memo defaulted to `End of Day`, a positive amount, and a remove action.
 - The section starts with one row and supports adding and removing rows.
-- A summary shows the Charge (House) target, breakdown total, and remaining amount.
-- The Charge (House) Actual in the reconciliation table is locked to the breakdown total and labeled `(breakdown)`.
-- Review Closeout remains unavailable until the breakdown total exactly equals the Charge (House) system amount.
+- A summary shows the Charge (House) Actual, breakdown total, and remaining amount.
+- The employee keeps the existing editable Charge (House) Actual, which defaults from the system / BS amount.
+- Review Closeout remains unavailable until the breakdown total exactly equals the Charge (House) Actual.
 - When Charge (House) is zero, no breakdown rows are required and no InHouse IIF lines are produced.
 - Reopening the Closeout step restores every saved row.
 
@@ -20,7 +20,7 @@ Replace the generic Charge (House) QuickBooks placeholder with an employee-enter
 - Each breakdown row becomes its own deposit split using the selected account, entered memo, and positive IIF amount.
 - The previous `4444 · TBA Purchases` InHouse line and its five blank placeholder rows are omitted when the reviewed Closeout workflow is active.
 - The existing `Over/Short per Closeout Sheet - Charge (House)` calculation remains unchanged.
-- The sum of InHouse split amounts must equal the Closeout Charge (House) actual before an IIF can be reviewed or generated.
+- The sum of InHouse split amounts must equal the Closeout Charge (House) Actual before an IIF can be reviewed or generated. A difference between System / BS and Actual continues to post through the existing Closeout over/short adjustment.
 
 ## Validation
 

@@ -229,7 +229,7 @@ def render_prepare_iif_action(
         return False
     if download_details is not None:
         ui.download_button(
-            "Download QuickBooks IIF",
+            "⬇️ Download QuickBooks IIF",
             data=download_details["iif"]["data"],
             file_name=download_details["iif"]["file_name"],
             mime="text/plain",
@@ -237,7 +237,7 @@ def render_prepare_iif_action(
             use_container_width=True,
         )
         ui.download_button(
-            "Download SubDept Single Total Report",
+            "📊 Download SubDept Single Total Report",
             data=download_details["report"]["data"],
             file_name=download_details["report"]["file_name"],
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

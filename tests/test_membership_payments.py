@@ -1033,7 +1033,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIsNone(details)
         self.assertFalse(any(event[0] == "download" for event in ui.events))
 
-    def test_sms_generated_workbook_posts_one_combined_milk_bottle_return(self):
+    def test_sms_generated_workbook_posts_one_combined_milk_bottle_return_that_reduces_deposit(self):
         from dataclasses import replace
         from io import BytesIO
 
@@ -1150,7 +1150,7 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertEqual(len(milk_bottle_lines), 1)
         self.assertTrue(milk_bottle_lines[0][3].startswith("1311100"))
-        self.assertEqual(milk_bottle_lines[0][5], "-82.00")
+        self.assertEqual(milk_bottle_lines[0][5], "82.00")
         self.assertEqual(
             bottle_lines,
             {

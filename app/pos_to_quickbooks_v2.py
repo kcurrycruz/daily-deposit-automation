@@ -1506,6 +1506,32 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             for line in activity_lines[category]
         ]
 
+    if normalized_closeout is None:
+        inhouse_entries = [
+            (
+                "4444 · TBA Purchases",
+                "",
+                "InHouse:",
+                -charge_house_source if charge_house_source else None,
+            ),
+            *[("4444 · TBA Purchases", "", "") for _ in range(5)],
+        ]
+        inhouse_preview_rows = []
+    else:
+        inhouse_entries = [
+            (row["account"], "", row["memo"], -row["amount"])
+            for row in normalized_closeout["inhouse_charges"]
+        ]
+        inhouse_preview_rows = [
+            {
+                "account": row["account"],
+                "memo": row["memo"],
+                "amount": row["amount"],
+                "iif_amount": row["amount"],
+            }
+            for row in normalized_closeout["inhouse_charges"]
+        ]
+
     MANUAL_LINES = [
         ("4150100 · Sales Tax Payable", "New York State Sales Tax", "", bs("sales_tax")),
         ("1311100 · Inventory - Bottles Deposit", "", "Bottle Sales", bs("bottle_sales")),
@@ -1519,12 +1545,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
         ("1250000 · Coupons Receivable", "", "NCG Coupons", coupon_ncg_source),
         ("1250000 · Coupons Receivable", "", "MFG Coupons", coupon_mfg_source),
-        ("4444 · TBA Purchases", "", "InHouse:", -charge_house_source if charge_house_source else None),
-        ("4444 · TBA Purchases", "", ""),
-        ("4444 · TBA Purchases", "", ""),
-        ("4444 · TBA Purchases", "", ""),
-        ("4444 · TBA Purchases", "", ""),
-        ("4444 · TBA Purchases", "", ""),
+        *inhouse_entries,
         *activity_entries(
             "donation",
             ("8506000 · Outreach - Donations", "", "", -donation_source if donation_source else None),
@@ -1794,6 +1815,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         if closeout_preview_path is not None:
             preview = {
                 "standard_rows": closeout_rows,
+                "inhouse_rows": inhouse_preview_rows,
                 "misc_rows": misc_rows,
                 "provisional_total": final_balance["provisional_total"],
                 "final_total": final_balance["final_total"],

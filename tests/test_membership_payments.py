@@ -1505,6 +1505,9 @@ class MembershipPaymentTests(unittest.TestCase):
             "safe": {"type": "none", "amount": 0},
             "plants_purchase": 0,
             "custom_tba": [],
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 10}
+            ],
             "final_total": 1000,
             "approve_final_pos": False,
         }
@@ -1530,6 +1533,9 @@ class MembershipPaymentTests(unittest.TestCase):
             "safe": {"type": "none", "amount": 0},
             "plants_purchase": 0,
             "custom_tba": [],
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 10}
+            ],
             "final_total": 1000,
             "approve_final_pos": False,
         }
@@ -1558,6 +1564,9 @@ class MembershipPaymentTests(unittest.TestCase):
             "safe": {"type": "none", "amount": 0},
             "plants_purchase": 0,
             "custom_tba": [],
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 10}
+            ],
             "final_total": 1000,
             "approve_final_pos": False,
         }
@@ -3786,6 +3795,18 @@ except RuntimeError:
             "custom_tba": [
                 {"memo": "Other paper item", "amount": 5, "direction": "adds"}
             ],
+            "inhouse_charges": [
+                {
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day",
+                    "amount": 3,
+                },
+                {
+                    "account": "8504000 · Education",
+                    "memo": "Class materials",
+                    "amount": 5,
+                },
+            ],
             "final_total": 5000,
             "approve_final_pos": True,
         }
@@ -3814,7 +3835,8 @@ except RuntimeError:
         for detail_line in (
             "4160000 · Charitable Donations Payable\t\t-7.00\tCharity/Pass through Donations (Round up)",
             "8506000 · Outreach - Donations\t\t25.00\t",
-            "4444 · TBA Purchases\t\t8.00\tInHouse:",
+            "8320000 · Store Supplies\t\t3.00\tEnd of Day",
+            "8504000 · Education\t\t5.00\tClass materials",
             "4444 · TBA Purchases\t\t-35.00\tPAID IN:",
             "4444 · TBA Purchases\t\t50.00\tPAID OUT:",
         ):
@@ -3822,19 +3844,23 @@ except RuntimeError:
                 self.assertIn(detail_line, text)
         self.assertNotIn("Offline Credit Card:", text)
 
-        iif_lines = text.splitlines()
-        inhouse_position = next(
-            index
-            for index, line in enumerate(iif_lines)
-            if "\t4444 · TBA Purchases\t\t8.00\tInHouse:\t" in line
-        )
-        inhouse_breakdown_rows = [
-            line.split("\t")[3:8]
-            for line in iif_lines[inhouse_position + 1:inhouse_position + 6]
-        ]
+        self.assertNotIn("InHouse:", text)
         self.assertEqual(
-            inhouse_breakdown_rows,
-            [["4444 · TBA Purchases", "", "", "", ""]] * 5,
+            preview["inhouse_rows"],
+            [
+                {
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day",
+                    "amount": 3.0,
+                    "iif_amount": 3.0,
+                },
+                {
+                    "account": "8504000 · Education",
+                    "memo": "Class materials",
+                    "amount": 5.0,
+                    "iif_amount": 5.0,
+                },
+            ],
         )
 
         ordered_memos = [

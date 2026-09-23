@@ -107,25 +107,6 @@ def render_daily_workbook_sop(ui, *, root: Path, sop_steps: list[dict]) -> None:
                                 "image is unavailable."
                             )
 
-                if step["title"].startswith("Step 6 · Milk Bottles"):
-                    milk_bottle_returns_example = root / "assets" / "milk_bottle_returns_example.png"
-                    if milk_bottle_returns_example.exists():
-                        ui.caption(
-                            "Milk Bottles report in SMS. The app uses Net Sales from returned Milk Bottle items."
-                        )
-                        ui.image(
-                            str(milk_bottle_returns_example),
-                            caption=(
-                                "Milk Bottles: export the report after selecting the deposit date and report settings."
-                            ),
-                            use_container_width=True,
-                        )
-                    else:
-                        ui.info(
-                            "Milk Bottle Returns example image is not installed. "
-                            "Add assets/milk_bottle_returns_example.png to show it here."
-                        )
-
         ui.markdown(
             """
             ### Milk Bottles

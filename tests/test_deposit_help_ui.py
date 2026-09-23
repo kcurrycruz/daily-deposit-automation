@@ -162,7 +162,7 @@ class DepositHelpUITests(unittest.TestCase):
         ):
             self.assertTrue(any(path.endswith(filename) for path in image_paths))
         self.assertFalse(any(path.endswith("step2a_sms_sales_export.png") for path in image_paths))
-        self.assertTrue(any(path.endswith("milk_bottle_returns_example.png") for path in image_paths))
+        self.assertFalse(any(path.endswith("milk_bottle_returns_example.png") for path in image_paths))
         self.assertTrue(any(path.endswith("daily_card_settlement_example.png") for path in image_paths))
         self.assertFalse(any("paste" in path.lower() for path in image_paths))
         for label in (

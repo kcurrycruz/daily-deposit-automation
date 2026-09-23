@@ -32,6 +32,30 @@ class UploadIntakeUITests(unittest.TestCase):
             self.assertIn(label, ui.markup)
         self.assertIn("sales.xls", ui.markup)
 
+    def test_sms_report_cards_are_neutral_until_each_report_is_verified(self):
+        from app.upload_intake_ui import render_sms_validation
+
+        class RecordingUI:
+            def __init__(self):
+                self.markup = ""
+
+            def markdown(self, body, **kwargs):
+                self.markup += body
+
+        ui = RecordingUI()
+        render_sms_validation(
+            ui,
+            reports={"sales": SimpleNamespace(filename="sales.xls")},
+            error=None,
+        )
+
+        self.assertIn(
+            'class="hwfc-workbook-validation-card hwfc-sms-validation-card is-pending"',
+            ui.markup,
+        )
+        self.assertEqual(ui.markup.count("hwfc-workbook-check is-verified"), 1)
+        self.assertEqual(ui.markup.count("hwfc-workbook-check is-pending"), 5)
+
     def test_validation_card_escapes_report_names_and_shows_error(self):
         from app.upload_intake_ui import render_sms_validation
 

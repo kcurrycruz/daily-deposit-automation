@@ -30,7 +30,8 @@ def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
     role_count = len(SMS_ROLE_ORDER)
     verified_count = sum(role in reports for role in SMS_ROLE_ORDER)
     checks = "".join(
-        '<div class="hwfc-workbook-check">'
+        '<div class="hwfc-workbook-check '
+        f'{"is-verified" if role in reports else "is-pending"}">'
         f'<div class="hwfc-workbook-check-label">'
         f'{"✓" if role in reports else "•"} {html.escape(label)}</div>'
         f'<div class="hwfc-workbook-check-sheet">'
@@ -46,7 +47,8 @@ def render_sms_validation(ui, reports: dict, error: Exception | None) -> None:
         else ""
     )
     ui.markdown(
-        '<div class="hwfc-workbook-validation-card">'
+        '<div class="hwfc-workbook-validation-card hwfc-sms-validation-card '
+        f'{"is-verified" if verified_count == role_count else "is-pending"}">'
         '<div class="hwfc-workbook-validation-title">'
         f'SMS Reports · {verified_count} of {role_count} verified'
         "</div>"

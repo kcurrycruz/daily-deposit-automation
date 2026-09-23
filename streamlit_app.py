@@ -1140,6 +1140,21 @@ st.markdown(
         overflow-wrap: anywhere;
     }
 
+    .hwfc-sms-validation-card.is-pending {
+        background: #171C22;
+        border-color: #3C4652;
+    }
+
+    .hwfc-sms-validation-card .hwfc-workbook-check.is-pending {
+        background: #222830;
+        border-color: #46515D;
+    }
+
+    .hwfc-sms-validation-card .hwfc-workbook-check.is-pending
+    .hwfc-workbook-check-sheet {
+        color: #B9C0C8;
+    }
+
     @media (max-width: 920px) {
         .hwfc-workbook-checks {
             grid-template-columns: repeat(2, minmax(0, 1fr));

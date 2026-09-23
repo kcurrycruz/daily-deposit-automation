@@ -569,6 +569,13 @@ def build_closeout_form_payload(
         raise ValueError(
             "Confirm that you reviewed the amounts against the paper Closeout Sheet"
         )
+    inhouse_target = abs(
+        _money(baselines.get("charge_house"), "Charge (House) baseline")
+    )
+    normalized_inhouse = normalize_inhouse_charges(
+        [] if inhouse_charges is None else inhouse_charges,
+        inhouse_target,
+    )
     reconciliation = build_standard_reconciliation(baselines, actuals)
     ordered_actuals = {
         row["key"]: row["actual"]
@@ -583,9 +590,7 @@ def build_closeout_form_payload(
             "safe": {"type": safe_type, "amount": safe_amount},
             "plants_purchase": plants_purchase,
             "custom_tba": custom_tba,
-            "inhouse_charges": (
-                [] if inhouse_charges is None else inhouse_charges
-            ),
+            "inhouse_charges": normalized_inhouse,
             "final_total": final_total,
             "approve_final_pos": approve_final_pos,
         }

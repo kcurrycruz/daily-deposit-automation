@@ -1429,6 +1429,13 @@ class MembershipPaymentTests(unittest.TestCase):
             safe_amount=25,
             plants_purchase=40,
             custom_tba=[{"memo": "Other", "amount": 3, "direction": "adds"}],
+            inhouse_charges=[
+                {
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day",
+                    "amount": 10,
+                }
+            ],
             final_total=1000,
             approve_final_pos=False,
         )
@@ -1442,6 +1449,20 @@ class MembershipPaymentTests(unittest.TestCase):
             [{"memo": "Other", "amount": 3.0, "direction": "adds"}],
         )
         self.assertTrue(payload["reviewed"])
+
+    def test_closeout_form_source_includes_inhouse_editor_and_locked_total(self):
+        source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('st.markdown("#### InHouse Charges")', source)
+        self.assertIn('placeholder="Search account"', source)
+        self.assertIn('setdefault(memo_key, "End of Day")', source)
+        self.assertIn('"Breakdown Total"', source)
+        self.assertIn('"Remaining"', source)
+        self.assertIn('if field == "charge_house":', source)
+        self.assertIn("actual = inhouse_total", source)
+        self.assertIn('inhouse_charges=inhouse_charges', source)
 
     def test_closeout_form_requires_paper_review_confirmation(self):
         from app.closeout_reconciliation import (
@@ -1459,6 +1480,13 @@ class MembershipPaymentTests(unittest.TestCase):
                 safe_amount=0,
                 plants_purchase=0,
                 custom_tba=[],
+                inhouse_charges=[
+                    {
+                        "account": "8320000 · Store Supplies",
+                        "memo": "End of Day",
+                        "amount": 10,
+                    }
+                ],
                 final_total=1000,
                 approve_final_pos=False,
             )

@@ -684,6 +684,13 @@ RESULT: ⚠ MISMATCH — Check before importing!
                         "direction": "adds",
                     }
                 ],
+                "inhouse_charges": [
+                    {
+                        "account": "8320000 · Store Supplies",
+                        "memo": "End of Day",
+                        "amount": 13.0,
+                    }
+                ],
                 "final_total": 1000.0,
                 "approve_final_pos": True,
             },
@@ -721,6 +728,19 @@ RESULT: ⚠ MISMATCH — Check before importing!
         self.assertEqual(
             session_state[f"closeout_plants_{workbook_key}"], 12.34)
         self.assertEqual(session_state[f"closeout_custom_ids_{workbook_key}"], [0])
+        self.assertEqual(session_state[f"closeout_inhouse_ids_{workbook_key}"], [0])
+        self.assertEqual(
+            session_state[f"closeout_inhouse_account_{workbook_key}_0"],
+            "8320000 · Store Supplies",
+        )
+        self.assertEqual(
+            session_state[f"closeout_inhouse_memo_{workbook_key}_0"],
+            "End of Day",
+        )
+        self.assertEqual(
+            session_state[f"closeout_inhouse_amount_{workbook_key}_0"],
+            13.0,
+        )
         self.assertEqual(
             session_state[f"closeout_custom_memo_{workbook_key}_0"],
             "Printer repair",

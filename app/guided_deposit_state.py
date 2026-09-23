@@ -202,6 +202,19 @@ def hydrate_reopened_closeout_state(
             if custom_item["direction"] == "adds"
             else "Removes from deposit"
         )
+
+    inhouse_ids_key = f"closeout_inhouse_ids_{workbook_key}"
+    session_state[inhouse_ids_key] = list(range(len(payload["inhouse_charges"])))
+    for row_id, row in enumerate(payload["inhouse_charges"]):
+        session_state[f"closeout_inhouse_account_{workbook_key}_{row_id}"] = row[
+            "account"
+        ]
+        session_state[f"closeout_inhouse_memo_{workbook_key}_{row_id}"] = row[
+            "memo"
+        ]
+        session_state[f"closeout_inhouse_amount_{workbook_key}_{row_id}"] = row[
+            "amount"
+        ]
     return True
 
 

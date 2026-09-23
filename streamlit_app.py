@@ -3675,6 +3675,34 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 if activity_link_ready
                 else {}
             )
+            inhouse_target = float(closeout_baselines["charge_house"])
+            inhouse_ids_key = f"closeout_inhouse_ids_{closeout_workbook_key}"
+            inhouse_charges = []
+            if inhouse_target > 0:
+                if inhouse_ids_key not in st.session_state:
+                    st.session_state[inhouse_ids_key] = [uuid4().hex]
+                for row_id in st.session_state[inhouse_ids_key]:
+                    account_key = (
+                        f"closeout_inhouse_account_{closeout_workbook_key}_{row_id}"
+                    )
+                    memo_key = (
+                        f"closeout_inhouse_memo_{closeout_workbook_key}_{row_id}"
+                    )
+                    amount_key = (
+                        f"closeout_inhouse_amount_{closeout_workbook_key}_{row_id}"
+                    )
+                    st.session_state.setdefault(memo_key, "End of Day")
+                    inhouse_charges.append(
+                        {
+                            "account": st.session_state.get(account_key),
+                            "memo": st.session_state[memo_key],
+                            "amount": float(st.session_state.get(amount_key, 0.0)),
+                        }
+                    )
+            inhouse_total = round(
+                sum(float(row["amount"]) for row in inhouse_charges),
+                2,
+            )
             closeout_actuals = {}
             header_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
             for column, heading in zip(
@@ -3688,7 +3716,10 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 baseline = float(closeout_baselines[field])
                 row_columns[0].write(label)
                 row_columns[1].write(f"${baseline:,.2f}")
-                if field == "vendor_coupons":
+                if field == "charge_house":
+                    actual = inhouse_total
+                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
+                elif field == "vendor_coupons":
                     actual = counted_coupon_total
                     row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
                 elif locked_activity_actuals.get(field) is not None:
@@ -3710,6 +3741,92 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 row_columns[4].write("Match" if difference == 0 else "Review")
 
             reviewed_closeout = True
+
+            if inhouse_target > 0:
+                st.markdown("#### InHouse Charges")
+                st.caption(
+                    "Assign every house charge to its QuickBooks account. "
+                    "The breakdown must equal Charge (House) before review."
+                )
+                for row_number, row_id in enumerate(
+                    list(st.session_state[inhouse_ids_key]),
+                    start=1,
+                ):
+                    row_columns = st.columns([2.2, 2.0, 0.9, 0.35])
+                    account_key = (
+                        f"closeout_inhouse_account_{closeout_workbook_key}_{row_id}"
+                    )
+                    memo_key = (
+                        f"closeout_inhouse_memo_{closeout_workbook_key}_{row_id}"
+                    )
+                    amount_key = (
+                        f"closeout_inhouse_amount_{closeout_workbook_key}_{row_id}"
+                    )
+                    row_columns[0].selectbox(
+                        "QuickBooks Account",
+                        options=load_default_chart_of_accounts(),
+                        index=None,
+                        placeholder="Search account",
+                        key=account_key,
+                    )
+                    st.session_state.setdefault(memo_key, "End of Day")
+                    row_columns[1].text_input(
+                        "Memo",
+                        key=memo_key,
+                    )
+                    row_columns[2].number_input(
+                        "Amount",
+                        min_value=0.0,
+                        step=0.01,
+                        format="%.2f",
+                        key=amount_key,
+                    )
+                    if row_columns[3].button(
+                        "×",
+                        key=f"closeout_inhouse_remove_{closeout_workbook_key}_{row_id}",
+                        help=f"Remove InHouse charge {row_number}",
+                        disabled=len(st.session_state[inhouse_ids_key]) == 1,
+                    ):
+                        st.session_state[inhouse_ids_key] = [
+                            existing_id
+                            for existing_id in st.session_state[inhouse_ids_key]
+                            if existing_id != row_id
+                        ]
+                        for widget_key in (account_key, memo_key, amount_key):
+                            st.session_state.pop(widget_key, None)
+                        st.rerun()
+
+                if st.button(
+                    "+ Add InHouse charge",
+                    type="secondary",
+                    key=f"closeout_inhouse_add_{closeout_workbook_key}",
+                ):
+                    new_id = uuid4().hex
+                    st.session_state[inhouse_ids_key].append(new_id)
+                    st.session_state[
+                        f"closeout_inhouse_memo_{closeout_workbook_key}_{new_id}"
+                    ] = "End of Day"
+                    queue_continue_scroll(
+                        st.session_state,
+                        closeout_continue_scroll_key,
+                    )
+                    st.rerun()
+
+                inhouse_remaining = round(inhouse_target - inhouse_total, 2)
+                inhouse_summary = st.columns(3)
+                inhouse_summary[0].caption("Charge (House) Target")
+                inhouse_summary[0].write(f"${inhouse_target:,.2f}")
+                inhouse_summary[1].caption("Breakdown Total")
+                inhouse_summary[1].write(f"${inhouse_total:,.2f}")
+                inhouse_summary[2].caption("Remaining")
+                inhouse_summary[2].write(f"{inhouse_remaining:+,.2f}")
+                if inhouse_remaining == 0:
+                    st.success("InHouse Charges match Charge (House).", icon="✅")
+                else:
+                    st.warning(
+                        "InHouse Charges must match Charge (House) before review.",
+                        icon="⚠️",
+                    )
 
             st.markdown("#### Other Closeout Sheet activity")
             payroll_choice = st.selectbox(
@@ -3849,6 +3966,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     safe_amount=safe_amount,
                     plants_purchase=plants_purchase,
                     custom_tba=custom_tba,
+                    inhouse_charges=inhouse_charges,
                     final_total=final_closeout_total,
                     approve_final_pos=False,
                 )

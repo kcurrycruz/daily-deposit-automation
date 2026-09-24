@@ -327,6 +327,37 @@ RESULT: ⚠ MISMATCH — Check before importing!
             status_text = (fixture_root / "last_run_status.txt").read_text(
                 encoding="utf-8"
             )
+            closeout_iif_path = engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 9, 23),
+                refunded_discounts=details["refunded_discounts"],
+                pass_through_total=details["pass_through_total"],
+                hash_sales_total=-13.68,
+                hash_misc_lines=details["misc_lines"],
+                closeout_payload={
+                    "mode": "closeout",
+                    "reviewed": True,
+                    "actuals": {
+                        "cash": 0,
+                        "checks": 0,
+                        "donation": 0,
+                        "charge_house": 0,
+                        "offline_zon": 0,
+                        "vendor_coupons": 0,
+                        "paid_in": 0,
+                        "paid_out": 0,
+                    },
+                    "payroll": 0,
+                    "safe": {"type": "none", "amount": 0},
+                    "plants_purchase": 0,
+                    "custom_tba": [],
+                    "final_total": 13.68,
+                    "approve_final_pos": True,
+                },
+            )
+            closeout_iif_text = closeout_iif_path.read_text(encoding="utf-8")
         finally:
             engine.output_dir = old_output_dir
             engine.LOG_DIR = old_log_dir
@@ -342,6 +373,22 @@ RESULT: ⚠ MISMATCH — Check before importing!
         self.assertIn("4444 · TBA Purchases", iif_text)
         self.assertIn("HASH 40 · Postage", iif_text)
         self.assertIn("\t-0.69\tHASH 40 · Postage\t", iif_text)
+        transaction_lines = iif_text.splitlines()
+        end_transaction_index = transaction_lines.index("ENDTRNS")
+        final_split_line = next(
+            line
+            for line in reversed(transaction_lines[:end_transaction_index])
+            if line.startswith("SPL\t")
+        )
+        self.assertIn("HASH 40 · Postage", final_split_line)
+        closeout_transaction_lines = closeout_iif_text.splitlines()
+        closeout_end_index = closeout_transaction_lines.index("ENDTRNS")
+        closeout_final_split_line = next(
+            line
+            for line in reversed(closeout_transaction_lines[:closeout_end_index])
+            if line.startswith("SPL\t")
+        )
+        self.assertIn("HASH 40 · Postage", closeout_final_split_line)
         self.assertIn("HASH SALES: ✓ MATCH   $13.68", status_text)
         self.assertIn("✓ ALL CHECKS PASSED", status_text)
 

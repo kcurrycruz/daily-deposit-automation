@@ -1600,10 +1600,6 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4160500 · Gift Cards - Sold - Old/Vantiv", "", "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks", "", "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
-        *[
-            ("4444 · TBA Purchases", "", memo, amount)
-            for memo, amount in hash_misc_lines
-        ],
         ("1250000 · Coupons Receivable", "", "NCG Coupons", coupon_ncg_source),
         ("1250000 · Coupons Receivable", "", "MFG Coupons", coupon_mfg_source),
         *inhouse_entries,
@@ -1825,10 +1821,21 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                     "class_name": "",
                 }
             )
+        hash_tba_rows = [
+            {
+                "account": "4444 · TBA Purchases",
+                "name": "",
+                "memo": memo,
+                "iif_amount": -amount,
+                "class_name": "",
+            }
+            for memo, amount in hash_misc_lines
+        ]
         pending_tba_rows = (
             custom_tba_rows
             + existing_misc_tba_rows
             + offline_tba_rows
+            + hash_tba_rows
         )
         pending_tba_iif_total = sum(
             (
@@ -1897,6 +1904,17 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 encoding="utf-8",
             )
             temporary_preview_path.replace(preview_path)
+
+    # Keep unmatched HASH activity at the very bottom so it is easy to find
+    # while reviewing the QuickBooks import. The reviewed Closeout path adds
+    # these rows to pending_tba_rows above so its provisional total includes
+    # them before they are emitted in the same bottom position.
+    if normalized_closeout is None:
+        for memo, amount in hash_misc_lines:
+            iif_amt = -amount
+            spl_total += iif_amt
+            spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
+            log.info(f"    HASH TBA Purchases: {memo} = ${amount:.2f}")
 
     spl_total = round(spl_total, 2)
     trns_amt = round(-spl_total, 2)

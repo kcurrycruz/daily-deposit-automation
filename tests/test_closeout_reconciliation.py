@@ -700,6 +700,54 @@ class CloseoutAdjustmentTests(unittest.TestCase):
             {"mode": "manual"},
         )
 
+    def test_normalize_manual_mode_retains_canonical_inhouse_breakdown(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        payload = {
+            "mode": "manual",
+            "charge_house_actual": "8.004",
+            "inhouse_charges": [{
+                "account": " 8320000 · Store Supplies ",
+                "memo": " End of Day - BS ",
+                "amount": "8.004",
+            }],
+        }
+        normalized = normalize_closeout_payload(payload)
+
+        self.assertEqual(normalized, {
+            "mode": "manual",
+            "charge_house_actual": 8.0,
+            "inhouse_charges": [{
+                "account": "8320000 · Store Supplies",
+                "memo": "End of Day - BS",
+                "amount": 8.0,
+            }],
+        })
+        self.assertEqual(payload["inhouse_charges"][0]["amount"], "8.004")
+
+    def test_normalize_manual_mode_rejects_mismatched_inhouse_rows(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        row = {"account": "8320000 · Store Supplies", "memo": "End of Day - BS", "amount": 8}
+        for fields in (
+            {"charge_house_actual": 9, "inhouse_charges": [row]},
+            {"charge_house_actual": 8},
+            {"inhouse_charges": [row]},
+            {"charge_house_actual": -8, "inhouse_charges": [row]},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                normalize_closeout_payload({"mode": "manual", **fields})
+
+    def test_normalize_manual_mode_accepts_explicit_zero_inhouse_actual(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        self.assertEqual(
+            normalize_closeout_payload({
+                "mode": "manual", "charge_house_actual": 0, "inhouse_charges": []
+            }),
+            {"mode": "manual", "charge_house_actual": 0.0, "inhouse_charges": []},
+        )
+
     def test_closeout_payload_round_trips_to_distinct_json_files(self):
         from app.closeout_reconciliation import (
             load_closeout_payload_file,

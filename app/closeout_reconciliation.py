@@ -531,7 +531,18 @@ def normalize_closeout_payload(payload: dict) -> dict:
         raise ValueError("Closeout payload must be an object")
     mode = payload.get("mode")
     if mode == "manual":
-        return {"mode": "manual"}
+        if "charge_house_actual" not in payload and "inhouse_charges" not in payload:
+            return {"mode": "manual"}
+        actual = _nonnegative_money(
+            payload.get("charge_house_actual", 0), "Charge (House) actual"
+        )
+        return {
+            "mode": "manual",
+            "charge_house_actual": float(actual),
+            "inhouse_charges": normalize_inhouse_charges(
+                payload.get("inhouse_charges", []), actual
+            ),
+        }
     if mode != "closeout":
         raise ValueError("Closeout mode must be manual or closeout")
     if payload.get("reviewed") is not True:

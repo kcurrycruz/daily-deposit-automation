@@ -3927,6 +3927,86 @@ except RuntimeError:
 
         self.assertEqual(manual, legacy)
 
+    def test_manual_closeout_selection_persists_saved_inhouse_breakdown(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+        from app.deposit_workflow import STEP_CLOSEOUT, STEP_INHOUSE, complete_deposit_step
+        from app.guided_step_ui import saved_inhouse_for_closeout
+
+        source_path = Path(__file__).parents[1] / "streamlit_app.py"
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        manual_branch = next(
+            node for node in ast.walk(source_tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "closeout_choice"
+            and any(
+                isinstance(value, ast.Constant)
+                and value.value == "Finish manually in QuickBooks"
+                for value in node.test.comparators
+            )
+        )
+        rows = [{"account": "8320000 · Store Supplies", "memo": "End of Day - BS", "amount": 8.0}]
+        for required_steps, saved in (
+            ([STEP_INHOUSE, STEP_CLOSEOUT], {"actual": 8.0, "rows": rows}),
+            ([STEP_CLOSEOUT], {"actual": 0.0, "rows": []}),
+        ):
+            with self.subTest(required_steps=required_steps):
+                state = {"inhouse_saved_payload_book": saved}
+                namespace = {
+                    "st": SimpleNamespace(session_state=state, rerun=lambda: None),
+                    "inhouse_payload": saved_inhouse_for_closeout(state, "book", required_steps),
+                    "normalize_closeout_payload": normalize_closeout_payload,
+                    "activity_valid": True,
+                    "closeout_payload_key": "closeout_payload_book",
+                    "workflow_completion_key": "completions",
+                    "required_steps": required_steps,
+                    "step_completions": {STEP_INHOUSE: "app"} if STEP_INHOUSE in required_steps else {},
+                    "STEP_CLOSEOUT": STEP_CLOSEOUT,
+                    "complete_deposit_step": complete_deposit_step,
+                }
+                exec(compile(ast.Module(body=manual_branch.body, type_ignores=[]), str(source_path), "exec"), namespace)
+
+                self.assertEqual(state["closeout_payload_book"], {
+                    "mode": "manual",
+                    "charge_house_actual": saved["actual"],
+                    "inhouse_charges": saved["rows"],
+                })
+                self.assertEqual(state["completions"][STEP_CLOSEOUT], "quickbooks")
+
+    def test_generate_iif_manual_closeout_exports_inhouse_rows_without_placeholders(self):
+        text, preview = self._generate_closeout_fixture({
+            "mode": "manual",
+            "charge_house_actual": 8,
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day - BS", "amount": 3},
+                {"account": "8504000 · Education", "memo": "Demo / Training - KC", "amount": 5},
+            ],
+        })
+        splits = [line.split("\t") for line in text.splitlines() if line.startswith("SPL\t")]
+        inhouse = [row for row in splits if row[3] in {"8320000 · Store Supplies", "8504000 · Education"}]
+
+        self.assertEqual([(row[3], row[5], row[6]) for row in inhouse], [
+            ("8320000 · Store Supplies", "3.00", "End of Day - BS"),
+            ("8504000 · Education", "5.00", "Demo / Training - KC"),
+        ])
+        self.assertEqual(sum(float(row[5]) for row in inhouse), 8.0)
+        self.assertNotIn("InHouse:", text)
+        self.assertFalse(any(row[3] == "4444 · TBA Purchases" and not row[5] and not row[6] for row in splits))
+        self.assertIn("Over/Short per Closeout Sheet\t", text)
+        self.assertIn("Over/Short per POS (to = POS total)\t", text)
+        self.assertNotIn("Over/Short per Closeout Sheet - Charge (House)", text)
+        self.assertNotIn("Over/Short per Closeout Sheet - Cash", text)
+        self.assertIsNone(preview)
+
+    def test_generate_iif_manual_closeout_with_explicit_zero_inhouse_omits_placeholders(self):
+        text, _ = self._generate_closeout_fixture({
+            "mode": "manual", "charge_house_actual": 0, "inhouse_charges": []
+        })
+
+        self.assertNotIn("InHouse:", text)
+        self.assertNotIn("4444 · TBA Purchases\t\t\t\t", text)
+
     def test_generate_iif_writes_coupon_closeout_breakdown_and_signed_difference(self):
         from datetime import date
         from pathlib import Path

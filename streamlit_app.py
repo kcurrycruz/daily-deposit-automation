@@ -3769,7 +3769,11 @@ if uploaded and active_step == STEP_CLOSEOUT:
     if closeout_choice is None:
         st.caption("Select how you want to handle the Closeout Sheet before building the deposit.")
     elif closeout_choice == "Finish manually in QuickBooks":
-        closeout_payload = {"mode": "manual"}
+        closeout_payload = normalize_closeout_payload({
+            "mode": "manual",
+            "charge_house_actual": inhouse_payload["actual"],
+            "inhouse_charges": inhouse_payload["rows"],
+        })
         closeout_valid = activity_valid
         st.session_state[closeout_payload_key] = closeout_payload
         st.session_state[workflow_completion_key] = complete_deposit_step(

@@ -1171,6 +1171,11 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         candidate_closeout = normalize_closeout_payload(closeout_payload)
         if candidate_closeout["mode"] == "closeout":
             normalized_closeout = candidate_closeout
+    inhouse_rows = (
+        candidate_closeout.get("inhouse_charges")
+        if candidate_closeout is not None
+        else None
+    )
 
     activity_payload_supplied = activity_payload is not None
     normalized_activity = normalize_activity_payload(activity_payload)
@@ -1506,7 +1511,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             for line in activity_lines[category]
         ]
 
-    if normalized_closeout is None:
+    if inhouse_rows is None:
         inhouse_entries = [
             (
                 "4444 · TBA Purchases",
@@ -1520,7 +1525,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     else:
         inhouse_entries = [
             (row["account"], "", row["memo"], -row["amount"])
-            for row in normalized_closeout["inhouse_charges"]
+            for row in inhouse_rows
         ]
         inhouse_preview_rows = [
             {
@@ -1529,7 +1534,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 "amount": row["amount"],
                 "iif_amount": row["amount"],
             }
-            for row in normalized_closeout["inhouse_charges"]
+            for row in inhouse_rows
         ]
 
     MANUAL_LINES = [

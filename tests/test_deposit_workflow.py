@@ -741,6 +741,40 @@ RESULT: ⚠ MISMATCH — Check before importing!
         ) if row["key"] == "charge_house")
         self.assertEqual(-charge_row["adjustment_qb_effect"], 2.0)
 
+    def test_inhouse_resave_requires_new_manual_closeout_choice(self):
+        from app.guided_step_ui import prepare_closeout_after_inhouse_save
+
+        workbook_key = "book"
+        state = {
+            f"closeout_payload_{workbook_key}": {"mode": "manual"},
+            f"closeout_handling_{workbook_key}": "Finish manually in QuickBooks",
+            f"closeout_form_needs_hydration_{workbook_key}": True,
+            f"closeout_preview_{workbook_key}": {"stale": True},
+        }
+
+        prepare_closeout_after_inhouse_save(state, workbook_key)
+
+        self.assertEqual(state[f"closeout_payload_{workbook_key}"], {"mode": "manual"})
+        self.assertNotIn(f"closeout_handling_{workbook_key}", state)
+        self.assertNotIn(f"closeout_form_needs_hydration_{workbook_key}", state)
+        self.assertNotIn(f"closeout_preview_{workbook_key}", state)
+
+    def test_inhouse_resave_hydrates_prior_app_closeout_without_approval(self):
+        from app.guided_step_ui import prepare_closeout_after_inhouse_save
+
+        workbook_key = "book"
+        state = {
+            f"closeout_payload_{workbook_key}": {"mode": "closeout"},
+            f"closeout_handling_{workbook_key}": "Breakdown in app using Closeout Sheet",
+            f"closeout_approve_final_{workbook_key}": True,
+        }
+
+        prepare_closeout_after_inhouse_save(state, workbook_key)
+
+        self.assertTrue(state[f"closeout_form_needs_hydration_{workbook_key}"])
+        self.assertNotIn(f"closeout_handling_{workbook_key}", state)
+        self.assertNotIn(f"closeout_approve_final_{workbook_key}", state)
+
     def test_required_inhouse_handoff_rejects_missing_or_invalid_saved_payload(self):
         from app.guided_step_ui import saved_inhouse_for_closeout
 

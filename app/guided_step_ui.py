@@ -50,6 +50,19 @@ def seed_historical_inhouse_widgets(session_state, workbook_key: str) -> bool:
     return True
 
 
+def prepare_closeout_after_inhouse_save(session_state, workbook_key: str) -> None:
+    """Invalidate Closeout review and require a new manual handling choice."""
+    session_state.pop(f"closeout_preview_{workbook_key}", None)
+    session_state.pop(f"closeout_approve_final_{workbook_key}", None)
+    session_state.pop(f"closeout_handling_{workbook_key}", None)
+    hydration_key = f"closeout_form_needs_hydration_{workbook_key}"
+    prior_payload = session_state.get(f"closeout_payload_{workbook_key}")
+    if isinstance(prior_payload, dict) and prior_payload.get("mode") == "closeout":
+        session_state[hydration_key] = True
+    else:
+        session_state.pop(hydration_key, None)
+
+
 def queue_breakdown_scroll(session_state, choice_key: str, request_key: str) -> None:
     """Queue one form scroll when a handling choice enters app breakdown mode."""
     choice = str(session_state.get(choice_key) or "")

@@ -132,6 +132,7 @@ from app.guided_deposit_state import (
 from app.guided_step_ui import (
     activity_default_amount,
     closeout_review_blockers,
+    prepare_closeout_after_inhouse_save,
     queue_breakdown_scroll,
     queue_continue_scroll,
     render_card_settlement_verification,
@@ -3698,8 +3699,9 @@ if uploaded and active_step == STEP_INHOUSE:
         else:
             st.session_state.update(transition["saved_payload"])
             st.session_state[workflow_completion_key] = transition["completions"]
-            st.session_state.pop(closeout_preview_key, None)
-            st.session_state[closeout_hydration_key] = True
+            prepare_closeout_after_inhouse_save(
+                st.session_state, closeout_workbook_key
+            )
             queue_continue_scroll(
                 st.session_state, f"closeout_continue_scroll_{closeout_workbook_key}"
             )

@@ -1470,6 +1470,7 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertNotIn('key=f"closeout_inhouse_remove_', closeout_source)
         self.assertIn('inhouse_charges=inhouse_payload["rows"]', closeout_source)
         self.assertIn('row_columns[2].write(f"${actual:,.2f} (breakdown)")', closeout_source)
+        self.assertIn("prepare_closeout_after_inhouse_save(", source)
 
     def test_closeout_form_requires_paper_review_confirmation(self):
         from app.closeout_reconciliation import (

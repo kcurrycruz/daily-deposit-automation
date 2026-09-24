@@ -19,6 +19,7 @@ _DAILY_WIDGET_PREFIXES = (
     "membership_",
     "activity_",
     "coupon_",
+    "inhouse_",
     "closeout_",
 )
 _DAILY_UPLOAD_PREFIXES = ("sms_reports_", "card_settlement_")
@@ -28,6 +29,8 @@ _DAILY_ACTION_PREFIXES = (
     "remove_membership_",
     "remove_activity_",
     "delete_activity_",
+    "inhouse_add_",
+    "inhouse_remove_",
     "closeout_add_custom_",
     "closeout_remove_custom_",
     "review_closeout_",

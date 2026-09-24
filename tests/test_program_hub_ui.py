@@ -146,6 +146,43 @@ class ProgramHubStateTests(unittest.TestCase):
         state.pop("sms_reports_0")
         self.assertIs(preserved_daily_upload(state, "sms_reports_0"), uploaded_sms_reports)
 
+    def test_inhouse_editor_values_survive_hub_navigation_without_replaying_actions(self):
+        from app.program_hub_ui import (
+            DAILY_DEPOSITS,
+            activate_program,
+            preserve_daily_program_state,
+            restore_daily_program_state,
+            return_to_program_hub,
+        )
+
+        workbook_key = "book"
+        row_id = "row1"
+        widget_values = {
+            f"inhouse_actual_{workbook_key}": 8.0,
+            f"inhouse_ids_{workbook_key}": [row_id],
+            f"inhouse_account_{workbook_key}_{row_id}": "8320000 · Store Supplies",
+            f"inhouse_memo_type_{workbook_key}_{row_id}": "End of Day",
+            f"inhouse_memo_value_{workbook_key}_{row_id}": "KC",
+            f"inhouse_amount_{workbook_key}_{row_id}": 8.0,
+        }
+        action_keys = {
+            f"inhouse_add_{workbook_key}": True,
+            f"inhouse_remove_{workbook_key}_{row_id}": True,
+        }
+        state = {"active_finance_program": DAILY_DEPOSITS, **widget_values, **action_keys}
+
+        preserve_daily_program_state(state)
+        return_to_program_hub(state)
+        for key in (*widget_values, *action_keys):
+            state.pop(key)
+        self.assertTrue(activate_program(state, DAILY_DEPOSITS))
+        restore_daily_program_state(state)
+
+        for key, value in widget_values.items():
+            self.assertEqual(state[key], value)
+        for key in action_keys:
+            self.assertNotIn(key, state)
+
     def test_portal_round_trip_preserves_daily_deposit_page_stage(self):
         from app.deposit_page_flow import DEPOSIT_PAGE_STAGE_KEY, DEPOSIT_STEPS_STAGE
         from app.program_hub_ui import (

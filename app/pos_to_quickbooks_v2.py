@@ -652,7 +652,7 @@ def _hash_control_total(wb, report_date=None) -> float | None:
     return None
 
 
-def parse_hash_sheet(filepath: Path, report_date) -> tuple:
+def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
     import openpyxl
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws, found_tab = _dated_report_sheet(wb, report_date, "Hash")
@@ -670,7 +670,13 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     if ws is None:
         log.warning(f"  No HASH sheet found in {filepath.name}")
         wb.close()
-        return 0.0, 0.0, 0.0
+        return {
+            "refunded_discounts": 0.0,
+            "pass_through_total": 0.0,
+            "paid_in_total": 0.0,
+            "misc_lines": [],
+            "detail_total": 0.0,
+        }
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
     amount_col = None
@@ -696,10 +702,16 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
     refunded_discounts = 0.0
     pass_through_total = 0.0
     paid_in_total = 0.0
+    misc_lines = []
+    detail_total = 0.0
     target_codes = {23: "refunded", 32: "pass_through", 34: "paid_in"}
 
-    for excel_row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+    for excel_row_num, row in enumerate(
+        ws.iter_rows(min_row=amount_header_row + 1, values_only=True),
+        start=amount_header_row + 1,
+    ):
         code = None
+        code_index = None
         for idx in range(min(4, len(row))):
             value = row[idx]
             if value is None:
@@ -708,9 +720,9 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
                 candidate_code = int(float(value))
             except (TypeError, ValueError):
                 continue
-            if candidate_code in target_codes:
-                code = candidate_code
-                break
+            code = candidate_code
+            code_index = idx
+            break
         if code is None:
             continue
         if len(row) <= amount_col:
@@ -738,7 +750,8 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
         if amount is None:
             log.warning(f"    HASH row {excel_row_num} code {code}: could not read Amount")
             continue
-        row_type = target_codes[code]
+        detail_total = round(detail_total + amount, 2)
+        row_type = target_codes.get(code)
         if row_type == "refunded":
             refunded_discounts = round(refunded_discounts + amount, 2)
             log.info(f"    HASH code 23 Refunded Discounts: ${amount:,.2f}")
@@ -748,10 +761,47 @@ def parse_hash_sheet(filepath: Path, report_date) -> tuple:
         elif row_type == "paid_in":
             paid_in_total = round(paid_in_total + amount, 2)
             log.info(f"    HASH code 34 Paid-Ins: ${amount:,.2f}")
+        else:
+            description = next(
+                (
+                    str(value).strip()
+                    for idx, value in enumerate(row)
+                    if idx != code_index
+                    and isinstance(value, str)
+                    and value.strip()
+                    and str(value).strip().casefold() not in {"total", "printed :"}
+                ),
+                "Unmapped activity",
+            )
+            memo = f"HASH {code} · {description}"
+            misc_lines.append((memo, amount))
+            log.warning(
+                f"    HASH code {code} {description}: ${amount:,.2f} → "
+                "4444 · TBA Purchases"
+            )
 
-    log.info(f"  HASH values used: Refunded=${refunded_discounts:,.2f}, PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}")
+    log.info(
+        f"  HASH values used: Refunded=${refunded_discounts:,.2f}, "
+        f"PassThrough=${pass_through_total:,.2f}, PaidIn=${paid_in_total:,.2f}, "
+        f"Other=${sum(amount for _memo, amount in misc_lines):,.2f}"
+    )
     wb.close()
-    return refunded_discounts, pass_through_total, paid_in_total
+    return {
+        "refunded_discounts": refunded_discounts,
+        "pass_through_total": pass_through_total,
+        "paid_in_total": paid_in_total,
+        "misc_lines": misc_lines,
+        "detail_total": detail_total,
+    }
+
+
+def parse_hash_sheet(filepath: Path, report_date) -> tuple:
+    details = parse_hash_sheet_details(filepath, report_date)
+    return (
+        details["refunded_discounts"],
+        details["pass_through_total"],
+        details["paid_in_total"],
+    )
 
 
 def parse_excel_discounts(filepath: Path, report_date) -> dict:
@@ -1152,12 +1202,14 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float | None = None, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float | None = None, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None, hash_misc_lines: list = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
     deposit_acct = CONFIG["deposit_account"]
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
     if misc_tba_lines is None:
         misc_tba_lines = []
+    if hash_misc_lines is None:
+        hash_misc_lines = []
     if bs_data is None:
         bs_data = {}
     if settlement_data is None:
@@ -1548,6 +1600,10 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         ("4160500 · Gift Cards - Sold - Old/Vantiv", "", "Gift cards sold", bs("prepaid_increase") if bs("prepaid_increase") else None),
         ("1230400 · Due From Double Up Food Bucks", "", "Double Up Food Bucks Customer Spending", -bs("dufb") if bs("dufb") else None),
         ("4160510 · Gift Cards- Redeemed-Old/Vantiv", "", "Gift cards redeemed", -bs("prepaid_card") if bs("prepaid_card") else None),
+        *[
+            ("4444 · TBA Purchases", "", memo, amount)
+            for memo, amount in hash_misc_lines
+        ],
         ("1250000 · Coupons Receivable", "", "NCG Coupons", coupon_ncg_source),
         ("1250000 · Coupons Receivable", "", "MFG Coupons", coupon_mfg_source),
         *inhouse_entries,
@@ -1890,7 +1946,16 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         log.info("  ─────────────────────────────────────────")
         log.info("")
 
-    script_hash = round(abs(refunded_discounts + pass_through_total), 2)
+    hash_misc_total = round(sum(amount for _memo, amount in hash_misc_lines), 2)
+    script_hash = round(
+        abs(
+            refunded_discounts
+            + pass_through_total
+            + paid_in_total
+            + hash_misc_total
+        ),
+        2,
+    )
     hash_control_present = hash_sales_total is not None
     excel_hash = round(abs(hash_sales_total), 2) if hash_control_present else 0.0
     hash_diff = round(abs(excel_hash - script_hash), 2)
@@ -1899,6 +1964,10 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     log.info("  ─────────────────────────────────────────")
     log.info(f"  Refunded Discounts:  ${abs(refunded_discounts):>10,.2f}")
     log.info(f"  Pass Thru Donations: ${abs(pass_through_total):>10,.2f}")
+    if paid_in_total:
+        log.info(f"  Paid In:              ${paid_in_total:>10,.2f}")
+    for memo, amount in hash_misc_lines:
+        log.info(f"  {memo}: ${amount:>10,.2f}")
     log.info("  ─────────────────────────────────────────")
     log.info(f"  Script Total:        ${script_hash:>10,.2f}")
     log.info(f"  Hash Sales 6 Total:  ${excel_hash:>10,.2f}")
@@ -2143,6 +2212,7 @@ def main():
         hash_sales_total     = None
         refunded_discounts   = 0.0
         paid_in_total        = 0.0
+        hash_misc_lines      = []
         bs_data            = {}
         settlement_data    = {}
 
@@ -2174,10 +2244,11 @@ def main():
             pass_through_total = 0.0
             paid_in_total = 0.0
             for f in excel_files:
-                hash_refunded, hash_pass_through, hash_paid_in = parse_hash_sheet(f, yesterday)
-                refunded_discounts += hash_refunded
-                pass_through_total += hash_pass_through
-                paid_in_total += hash_paid_in
+                hash_details = parse_hash_sheet_details(f, yesterday)
+                refunded_discounts += hash_details["refunded_discounts"]
+                pass_through_total += hash_details["pass_through_total"]
+                paid_in_total += hash_details["paid_in_total"]
+                hash_misc_lines.extend(hash_details["misc_lines"])
         else:
             log.warning("  No Excel report found — falling back to SMS CSV files")
 
@@ -2247,6 +2318,7 @@ def main():
                 if args.closeout_preview_output and closeout_payload is not None else None
             ),
             activity_payload=activity_payload,
+            hash_misc_lines=hash_misc_lines,
         )
         try:
             xlsx_path = write_excel_summary(sales, discounts, cc, yesterday)

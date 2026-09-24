@@ -1001,7 +1001,7 @@ class MembershipPaymentTests(unittest.TestCase):
             "SubDept Single Total Report 9-14-26.xlsx",
         )
 
-    def test_failed_validation_never_exposes_paired_downloads(self):
+    def test_review_warning_keeps_balanced_iif_and_report_downloadable(self):
         from app.guided_step_ui import render_prepare_iif_action
         from app.ui_helpers import deposit_download_details
 
@@ -1017,11 +1017,11 @@ class MembershipPaymentTests(unittest.TestCase):
                 self.events.append(("download", label, kwargs))
 
         result = {
-            "iif_path": Path("failed.iif"),
-            "iif_bytes": b"unapproved IIF",
-            "reporting_workbook_bytes": b"internal workbook",
-            "reporting_workbook_name": "Internal Working Workbook.xlsx",
-            "validation": {"all_ok": False},
+            "iif_path": Path("deposit_20260923.iif"),
+            "iif_bytes": b"balanced IIF requiring review",
+            "reporting_workbook_bytes": b"completed workbook",
+            "reporting_workbook_name": "SubDept Single Total Report 9-23-26.xlsx",
+            "validation": {"all_ok": False, "iif_ok": True},
         }
 
         details = deposit_download_details(result)
@@ -1033,8 +1033,29 @@ class MembershipPaymentTests(unittest.TestCase):
             disabled=False,
         )
 
-        self.assertIsNone(details)
-        self.assertFalse(any(event[0] == "download" for event in ui.events))
+        self.assertIsNotNone(details)
+        self.assertEqual(
+            [event[1] for event in ui.events if event[0] == "download"],
+            [
+                "⬇️ Download QuickBooks IIF",
+                "📊 Download SubDept Single Total Report",
+            ],
+        )
+
+    def test_unbalanced_iif_never_exposes_paired_downloads(self):
+        from app.ui_helpers import deposit_download_details
+
+        self.assertIsNone(
+            deposit_download_details(
+                {
+                    "iif_path": Path("unbalanced.iif"),
+                    "iif_bytes": b"unbalanced IIF",
+                    "reporting_workbook_bytes": b"workbook",
+                    "reporting_workbook_name": "report.xlsx",
+                    "validation": {"all_ok": False, "iif_ok": False},
+                }
+            )
+        )
 
     def test_sms_generated_workbook_posts_one_combined_milk_bottle_return_that_reduces_deposit(self):
         from dataclasses import replace

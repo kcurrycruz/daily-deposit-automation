@@ -240,7 +240,7 @@ def complete_sms_run(
     *,
     reporting_workbook_bytes: bytes | None = None,
 ) -> dict:
-    """Attach the report download only after a fully validated IIF exists."""
+    """Attach the report when the generated IIF is structurally balanced."""
     result = dict(engine_result)
     result.pop("reporting_workbook_bytes", None)
     result.pop("reporting_workbook_name", None)
@@ -250,7 +250,7 @@ def complete_sms_run(
         and result["iif_bytes"]
         and result.get("iif_path") is not None
         and isinstance(validation, dict)
-        and validation.get("all_ok") is True
+        and validation.get("iif_ok", validation.get("all_ok")) is True
     ):
         return result
 

@@ -98,11 +98,14 @@ def plan_guide_html(rows: list[dict]) -> str:
 
 
 def deposit_download_details(result: dict | None) -> dict | None:
-    """Return both browser downloads only for a complete successful result."""
+    """Return generated downloads when the IIF is structurally balanced."""
     if not isinstance(result, dict):
         return None
     validation = result.get("validation")
-    if not isinstance(validation, dict) or validation.get("all_ok") is not True:
+    if not isinstance(validation, dict):
+        return None
+    iif_ok = validation.get("iif_ok", validation.get("all_ok"))
+    if iif_ok is not True:
         return None
     iif_data = result.get("iif_bytes")
     iif_path = result.get("iif_path")

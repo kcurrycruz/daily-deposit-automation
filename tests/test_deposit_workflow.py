@@ -279,6 +279,72 @@ RESULT: ⚠ MISMATCH — Check before importing!
         self.assertIn("HASH SALES: ✓ MATCH   $17.09", status_text)
         self.assertIn("✓ ALL CHECKS PASSED", status_text)
 
+    def test_unmapped_hash_activity_is_preserved_as_tba_and_matches_control(self):
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "092326 Hash"
+        sheet.append(["Sub-department Single Total"])
+        sheet.append(["Date:", "9/23/2026", "to", "9/23/2026"])
+        sheet.append(["S-Dept.", 0, "to", 999999])
+        sheet.append(["Tlz.:", 6, "to", 6])
+        sheet.append([None, None, "Sub-Department", None, None, None, None, "Qty", "Amount"])
+        sheet.append([None, 23, "Refunded Discounts", None, None, None, 2, -16.77])
+        sheet.append([None, 32, "PASS THROUGH DONATIONS", None, None, None, 2.4, 2.40])
+        sheet.append([None, 40, "Postage", None, None, None, 1, 0.69])
+        sheet.append([None, None, None, None, "Total", None, 5.4, None, -13.68])
+
+        fixture_root = Path(__file__).parent / f"_hash_postage_{uuid4().hex}"
+        fixture_root.mkdir()
+        workbook_path = fixture_root / "hash-postage.xlsx"
+        workbook.save(workbook_path)
+        old_output_dir = engine.output_dir
+        old_log_dir = engine.LOG_DIR
+        old_log_disabled = engine.log.disabled
+        engine.output_dir = fixture_root
+        engine.LOG_DIR = fixture_root
+        engine.log.disabled = True
+        try:
+            details = engine.parse_hash_sheet_details(
+                workbook_path,
+                date(2026, 9, 23),
+            )
+            iif_path = engine.generate_iif(
+                {},
+                {},
+                {},
+                date(2026, 9, 23),
+                refunded_discounts=details["refunded_discounts"],
+                pass_through_total=details["pass_through_total"],
+                paid_in_total=details["paid_in_total"],
+                hash_sales_total=-13.68,
+                hash_misc_lines=details["misc_lines"],
+            )
+            iif_text = iif_path.read_text(encoding="utf-8")
+            status_text = (fixture_root / "last_run_status.txt").read_text(
+                encoding="utf-8"
+            )
+        finally:
+            engine.output_dir = old_output_dir
+            engine.LOG_DIR = old_log_dir
+            engine.log.disabled = old_log_disabled
+            for generated_file in fixture_root.iterdir():
+                generated_file.unlink()
+            fixture_root.rmdir()
+
+        self.assertEqual(details["refunded_discounts"], -16.77)
+        self.assertEqual(details["pass_through_total"], 2.40)
+        self.assertEqual(details["paid_in_total"], 0.0)
+        self.assertEqual(details["misc_lines"], [("HASH 40 · Postage", 0.69)])
+        self.assertIn("4444 · TBA Purchases", iif_text)
+        self.assertIn("HASH 40 · Postage", iif_text)
+        self.assertIn("\t-0.69\tHASH 40 · Postage\t", iif_text)
+        self.assertIn("HASH SALES: ✓ MATCH   $13.68", status_text)
+        self.assertIn("✓ ALL CHECKS PASSED", status_text)
+
     def test_absent_hash_control_is_none(self):
         import openpyxl
 
@@ -305,6 +371,37 @@ RESULT: ⚠ MISMATCH — Check before importing!
 
         self.assertEqual(upload.name, "daily.xlsx")
         self.assertEqual(upload.getvalue(), b"workbook bytes")
+
+    def test_review_warning_keeps_completed_reporting_workbook_attached(self):
+        from types import SimpleNamespace
+
+        complete_sms_run = streamlit_definition(
+            "complete_sms_run",
+            {
+                "reporting_workbook_name": (
+                    lambda _deposit_date: "SubDept Single Total Report 9-23-26.xlsx"
+                ),
+            },
+        )
+
+        completed = complete_sms_run(
+            {
+                "iif_path": Path("deposit_20260923.iif"),
+                "iif_bytes": b"balanced iif requiring review",
+                "validation": {"all_ok": False, "iif_ok": True},
+            },
+            SimpleNamespace(deposit_date=date(2026, 9, 23)),
+            None,
+            reporting_workbook_bytes=b"completed report",
+        )
+
+        self.assertEqual(
+            completed["reporting_workbook_bytes"], b"completed report"
+        )
+        self.assertEqual(
+            completed["reporting_workbook_name"],
+            "SubDept Single Total Report 9-23-26.xlsx",
+        )
 
     def test_partial_sms_roles_are_visible_but_bundle_waits_for_all_six(self):
         reports = {report.filename: report for report in sms_exports_091426()}

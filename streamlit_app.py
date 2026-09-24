@@ -55,6 +55,7 @@ from app.closeout_reconciliation import read_charge_house_total
 from app.deposit_workflow import (
     STEP_CLOSEOUT,
     STEP_COUPONS,
+    STEP_INHOUSE,
     STEP_MEMBER_SHARES,
     active_deposit_step,
     complete_deposit_step,
@@ -124,6 +125,7 @@ from app.guided_deposit_state import (
     recover_completed_membership_state,
     resolve_activity_detection_workflow,
     save_activity_transition,
+    save_inhouse_transition,
     save_manual_member_share_transition,
     save_member_share_transition,
 )
@@ -137,7 +139,10 @@ from app.guided_step_ui import (
     render_deposit_step_panels,
     render_prepare_iif_action,
     render_upload_continue_action,
+    saved_inhouse_for_closeout,
+    seed_historical_inhouse_widgets,
 )
+from app.inhouse_charges import compose_inhouse_memo, normalize_inhouse_step_payload
 from app.upload_intake_ui import (
     missing_settlement_date_warning,
     render_upload_inputs,
@@ -2631,6 +2636,22 @@ if deposit_page_stage == DEPOSIT_STEPS_STAGE:
     workflow_blocked = workflow_state["blocked"]
     required_steps = workflow_state["required_steps"]
     step_completions = workflow_state["completions"]
+    if STEP_INHOUSE in required_steps:
+        seed_historical_inhouse_widgets(st.session_state, closeout_workbook_key)
+        try:
+            saved_inhouse_for_closeout(
+                st.session_state, closeout_workbook_key, required_steps
+            )
+        except ValueError:
+            if STEP_INHOUSE in step_completions or STEP_CLOSEOUT in step_completions:
+                step_completions = edit_deposit_step(
+                    required_steps, step_completions, STEP_INHOUSE
+                )
+        else:
+            if STEP_INHOUSE not in step_completions and STEP_CLOSEOUT in step_completions:
+                step_completions = edit_deposit_step(
+                    required_steps, step_completions, STEP_CLOSEOUT
+                )
     if workflow_detection_valid:
         st.session_state[workflow_requirements_key] = required_steps
         st.session_state[workflow_completion_key] = step_completions
@@ -3564,6 +3585,127 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
             st.warning(str(exc), icon="⚠️")
     active_step_panel.__exit__(None, None, None)
 
+if uploaded and active_step == STEP_INHOUSE:
+    active_step_panel = active_step_content.container()
+    active_step_panel.__enter__()
+    st.markdown("#### InHouse Charges")
+    st.caption("Assign each house charge to a QuickBooks account and memo.")
+    inhouse_actual_key = f"inhouse_actual_{closeout_workbook_key}"
+    inhouse_ids_key = f"inhouse_ids_{closeout_workbook_key}"
+    inhouse_saved_key = f"inhouse_saved_payload_{closeout_workbook_key}"
+    st.session_state.setdefault(inhouse_actual_key, float(charge_house_total))
+    if inhouse_ids_key not in st.session_state:
+        st.session_state[inhouse_ids_key] = [uuid4().hex] if charge_house_total > 0 else []
+
+    amount_columns = st.columns(2)
+    amount_columns[0].caption("System / BS")
+    amount_columns[0].write(f"${charge_house_total:,.2f}")
+    inhouse_actual = amount_columns[1].number_input(
+        "Charge (House) Actual",
+        min_value=0.0,
+        step=0.01,
+        format="%.2f",
+        key=inhouse_actual_key,
+    )
+
+    inhouse_rows = []
+    memo_errors = False
+    for row_number, row_id in enumerate(list(st.session_state[inhouse_ids_key]), start=1):
+        row_columns = st.columns([2.2, 1.3, 2.0, 0.9, 0.35])
+        account_key = f"inhouse_account_{closeout_workbook_key}_{row_id}"
+        memo_type_key = f"inhouse_memo_type_{closeout_workbook_key}_{row_id}"
+        memo_value_key = f"inhouse_memo_value_{closeout_workbook_key}_{row_id}"
+        amount_key = f"inhouse_amount_{closeout_workbook_key}_{row_id}"
+        account = row_columns[0].selectbox(
+            "QuickBooks Account",
+            options=load_default_chart_of_accounts(),
+            index=None,
+            placeholder="Search account",
+            key=account_key,
+        )
+        memo_type = row_columns[1].selectbox(
+            "Memo Type",
+            options=["End of Day", "Custom"],
+            key=memo_type_key,
+        )
+        memo_value = row_columns[2].text_input(
+            "Initials" if memo_type == "End of Day" else "Custom Memo",
+            key=memo_value_key,
+        )
+        amount = row_columns[3].number_input(
+            "Amount",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key=amount_key,
+        )
+        try:
+            memo = compose_inhouse_memo(memo_type, memo_value)
+        except ValueError as exc:
+            memo_errors = True
+            row_columns[2].error(str(exc))
+            memo = ""
+        inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
+        if row_columns[4].button(
+            "×",
+            key=f"inhouse_remove_{closeout_workbook_key}_{row_id}",
+            help=f"Remove InHouse charge {row_number}",
+        ):
+            st.session_state[inhouse_ids_key] = [
+                existing_id for existing_id in st.session_state[inhouse_ids_key]
+                if existing_id != row_id
+            ]
+            for widget_key in (account_key, memo_type_key, memo_value_key, amount_key):
+                st.session_state.pop(widget_key, None)
+            st.rerun()
+
+    if st.button(
+        "+ Add InHouse charge",
+        type="secondary",
+        key=f"inhouse_add_{closeout_workbook_key}",
+    ):
+        st.session_state[inhouse_ids_key].append(uuid4().hex)
+        queue_continue_scroll(
+            st.session_state, f"inhouse_continue_scroll_{closeout_workbook_key}"
+        )
+        st.rerun()
+
+    inhouse_total = round(sum(row["amount"] for row in inhouse_rows), 2)
+    summary_columns = st.columns(3)
+    summary_columns[0].caption("Charge (House) Actual")
+    summary_columns[0].write(f"${inhouse_actual:,.2f}")
+    summary_columns[1].caption("Breakdown Total")
+    summary_columns[1].write(f"${inhouse_total:,.2f}")
+    summary_columns[2].caption("Remaining")
+    summary_columns[2].write(f"{inhouse_actual - inhouse_total:+,.2f}")
+    render_breakdown_scroll_target(
+        st,
+        components.html,
+        st.session_state,
+        target_id="inhouse-save-and-continue",
+        request_key=f"inhouse_continue_scroll_{closeout_workbook_key}",
+    )
+    if st.button("Save InHouse Charges & Continue", type="primary", disabled=memo_errors):
+        try:
+            payload = normalize_inhouse_step_payload(
+                {"actual": inhouse_actual, "rows": inhouse_rows}
+            )
+            transition = save_inhouse_transition(
+                required_steps, step_completions, inhouse_saved_key, payload
+            )
+        except ValueError as exc:
+            st.error(str(exc), icon="🚫")
+        else:
+            st.session_state.update(transition["saved_payload"])
+            st.session_state[workflow_completion_key] = transition["completions"]
+            st.session_state.pop(closeout_preview_key, None)
+            st.session_state[closeout_hydration_key] = True
+            queue_continue_scroll(
+                st.session_state, f"closeout_continue_scroll_{closeout_workbook_key}"
+            )
+            st.rerun()
+    active_step_panel.__exit__(None, None, None)
+
 if uploaded and STEP_CLOSEOUT in step_completions:
     try:
         closeout_payload = normalize_closeout_payload(
@@ -3581,6 +3723,16 @@ if uploaded and STEP_CLOSEOUT in step_completions:
         closeout_valid = True
 
 if uploaded and active_step == STEP_CLOSEOUT:
+    try:
+        inhouse_payload = saved_inhouse_for_closeout(
+            st.session_state, closeout_workbook_key, required_steps
+        )
+    except ValueError as exc:
+        st.session_state[workflow_completion_key] = edit_deposit_step(
+            required_steps, step_completions, STEP_INHOUSE
+        )
+        st.error(str(exc), icon="🚫")
+        st.rerun()
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
     if st.session_state.pop(closeout_hydration_key, False):
@@ -3685,42 +3837,6 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 if activity_link_ready
                 else {}
             )
-            inhouse_actual_key = (
-                f"closeout_actual_charge_house_{closeout_workbook_key}"
-            )
-            inhouse_target = float(
-                st.session_state.get(
-                    inhouse_actual_key,
-                    closeout_defaults["charge_house"],
-                )
-            )
-            inhouse_ids_key = f"closeout_inhouse_ids_{closeout_workbook_key}"
-            inhouse_charges = []
-            if inhouse_target > 0:
-                if inhouse_ids_key not in st.session_state:
-                    st.session_state[inhouse_ids_key] = [uuid4().hex]
-                for row_id in st.session_state[inhouse_ids_key]:
-                    account_key = (
-                        f"closeout_inhouse_account_{closeout_workbook_key}_{row_id}"
-                    )
-                    memo_key = (
-                        f"closeout_inhouse_memo_{closeout_workbook_key}_{row_id}"
-                    )
-                    amount_key = (
-                        f"closeout_inhouse_amount_{closeout_workbook_key}_{row_id}"
-                    )
-                    st.session_state.setdefault(memo_key, "End of Day")
-                    inhouse_charges.append(
-                        {
-                            "account": st.session_state.get(account_key),
-                            "memo": st.session_state[memo_key],
-                            "amount": float(st.session_state.get(amount_key, 0.0)),
-                        }
-                    )
-            inhouse_total = round(
-                sum(float(row["amount"]) for row in inhouse_charges),
-                2,
-            )
             closeout_actuals = {}
             header_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
             for column, heading in zip(
@@ -3737,6 +3853,9 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 if field == "vendor_coupons":
                     actual = counted_coupon_total
                     row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
+                elif field == "charge_house":
+                    actual = inhouse_payload["actual"]
+                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
                 elif locked_activity_actuals.get(field) is not None:
                     actual = float(locked_activity_actuals[field])
                     row_columns[2].write(f"${actual:,.2f} (breakdown)")
@@ -3756,92 +3875,6 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 row_columns[4].write("Match" if difference == 0 else "Review")
 
             reviewed_closeout = True
-
-            if inhouse_target > 0:
-                st.markdown("#### InHouse Charges")
-                st.caption(
-                    "Assign every house charge to its QuickBooks account. "
-                    "The breakdown must equal Charge (House) before review."
-                )
-                for row_number, row_id in enumerate(
-                    list(st.session_state[inhouse_ids_key]),
-                    start=1,
-                ):
-                    row_columns = st.columns([2.2, 2.0, 0.9, 0.35])
-                    account_key = (
-                        f"closeout_inhouse_account_{closeout_workbook_key}_{row_id}"
-                    )
-                    memo_key = (
-                        f"closeout_inhouse_memo_{closeout_workbook_key}_{row_id}"
-                    )
-                    amount_key = (
-                        f"closeout_inhouse_amount_{closeout_workbook_key}_{row_id}"
-                    )
-                    row_columns[0].selectbox(
-                        "QuickBooks Account",
-                        options=load_default_chart_of_accounts(),
-                        index=None,
-                        placeholder="Search account",
-                        key=account_key,
-                    )
-                    st.session_state.setdefault(memo_key, "End of Day")
-                    row_columns[1].text_input(
-                        "Memo",
-                        key=memo_key,
-                    )
-                    row_columns[2].number_input(
-                        "Amount",
-                        min_value=0.0,
-                        step=0.01,
-                        format="%.2f",
-                        key=amount_key,
-                    )
-                    if row_columns[3].button(
-                        "×",
-                        key=f"closeout_inhouse_remove_{closeout_workbook_key}_{row_id}",
-                        help=f"Remove InHouse charge {row_number}",
-                        disabled=len(st.session_state[inhouse_ids_key]) == 1,
-                    ):
-                        st.session_state[inhouse_ids_key] = [
-                            existing_id
-                            for existing_id in st.session_state[inhouse_ids_key]
-                            if existing_id != row_id
-                        ]
-                        for widget_key in (account_key, memo_key, amount_key):
-                            st.session_state.pop(widget_key, None)
-                        st.rerun()
-
-                if st.button(
-                    "+ Add InHouse charge",
-                    type="secondary",
-                    key=f"closeout_inhouse_add_{closeout_workbook_key}",
-                ):
-                    new_id = uuid4().hex
-                    st.session_state[inhouse_ids_key].append(new_id)
-                    st.session_state[
-                        f"closeout_inhouse_memo_{closeout_workbook_key}_{new_id}"
-                    ] = "End of Day"
-                    queue_continue_scroll(
-                        st.session_state,
-                        closeout_continue_scroll_key,
-                    )
-                    st.rerun()
-
-                inhouse_remaining = round(inhouse_target - inhouse_total, 2)
-                inhouse_summary = st.columns(3)
-                inhouse_summary[0].caption("Charge (House) Actual")
-                inhouse_summary[0].write(f"${inhouse_target:,.2f}")
-                inhouse_summary[1].caption("Breakdown Total")
-                inhouse_summary[1].write(f"${inhouse_total:,.2f}")
-                inhouse_summary[2].caption("Remaining")
-                inhouse_summary[2].write(f"{inhouse_remaining:+,.2f}")
-                if inhouse_remaining == 0:
-                    st.success("InHouse Charges match Charge (House).", icon="✅")
-                else:
-                    st.warning(
-                        "InHouse Charges must match Charge (House) before review.",
-                        icon="⚠️",
-                    )
 
             st.markdown("#### Other Closeout Sheet activity")
             payroll_choice = st.selectbox(
@@ -3981,7 +4014,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     safe_amount=safe_amount,
                     plants_purchase=plants_purchase,
                     custom_tba=custom_tba,
-                    inhouse_charges=inhouse_charges,
+                    inhouse_charges=inhouse_payload["rows"],
                     final_total=final_closeout_total,
                     approve_final_pos=False,
                 )

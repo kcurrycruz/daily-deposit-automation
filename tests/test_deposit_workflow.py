@@ -703,6 +703,87 @@ RESULT: ⚠ MISMATCH — Check before importing!
             }
         })
 
+    def test_saved_inhouse_handoff_locks_actual_and_preserves_over_short(self):
+        from app.closeout_reconciliation import (
+            STANDARD_CLOSEOUT_ORDER,
+            build_closeout_form_payload,
+            build_standard_reconciliation,
+        )
+        from app.guided_step_ui import saved_inhouse_for_closeout
+
+        workbook_key = "workbook-123"
+        saved_rows = [{
+            "account": "8320000 · Store Supplies",
+            "memo": "End of Day - BS",
+            "amount": 8,
+        }]
+        session_state = {f"inhouse_saved_payload_{workbook_key}": {
+            "actual": 8, "rows": saved_rows,
+        }}
+        inhouse = saved_inhouse_for_closeout(
+            session_state, workbook_key, ("inhouse_charges", "closeout")
+        )
+        baselines = {key: 0 for key in STANDARD_CLOSEOUT_ORDER}
+        baselines["charge_house"] = 10
+        actuals = dict(baselines)
+        actuals["charge_house"] = inhouse["actual"]
+        payload = build_closeout_form_payload(
+            baselines=baselines, actuals=actuals, reviewed=True,
+            payroll=0, safe_type="none", safe_amount=0,
+            plants_purchase=0, custom_tba=[], final_total=100,
+            approve_final_pos=False, inhouse_charges=inhouse["rows"],
+        )
+
+        self.assertEqual(payload["actuals"]["charge_house"], 8.0)
+        self.assertEqual(payload["inhouse_charges"], saved_rows)
+        charge_row = next(row for row in build_standard_reconciliation(
+            baselines, payload["actuals"]
+        ) if row["key"] == "charge_house")
+        self.assertEqual(-charge_row["adjustment_qb_effect"], 2.0)
+
+    def test_required_inhouse_handoff_rejects_missing_or_invalid_saved_payload(self):
+        from app.guided_step_ui import saved_inhouse_for_closeout
+
+        with self.assertRaisesRegex(ValueError, "InHouse Charges need review"):
+            saved_inhouse_for_closeout({}, "book", ("inhouse_charges", "closeout"))
+        with self.assertRaisesRegex(ValueError, "InHouse Charges need review"):
+            saved_inhouse_for_closeout(
+                {"inhouse_saved_payload_book": {"actual": 8, "rows": []}},
+                "book", ("inhouse_charges", "closeout"),
+            )
+        self.assertEqual(saved_inhouse_for_closeout({}, "book", ("closeout",)), {
+            "actual": 0.0, "rows": [],
+        })
+
+    def test_historical_closeout_seeds_inhouse_widgets_once_without_completion(self):
+        from app.closeout_reconciliation import STANDARD_CLOSEOUT_ORDER
+        from app.guided_step_ui import seed_historical_inhouse_widgets
+
+        workbook_key = "book"
+        actuals = {key: 0 for key in STANDARD_CLOSEOUT_ORDER}
+        actuals["charge_house"] = 8
+        state = {f"closeout_payload_{workbook_key}": {
+            "mode": "closeout", "reviewed": True, "actuals": actuals,
+            "payroll": 0, "safe": {"type": "none", "amount": 0},
+            "plants_purchase": 0, "custom_tba": [],
+            "inhouse_charges": [{
+                "account": "8320000 · Store Supplies",
+                "memo": "End of Day", "amount": 8,
+            }],
+            "final_total": 100, "approve_final_pos": False,
+        }}
+        self.assertTrue(seed_historical_inhouse_widgets(state, workbook_key))
+        self.assertEqual(state[f"inhouse_actual_{workbook_key}"], 8.0)
+        row_id = state[f"inhouse_ids_{workbook_key}"][0]
+        self.assertEqual(state[f"inhouse_account_{workbook_key}_{row_id}"], "8320000 · Store Supplies")
+        self.assertEqual(state[f"inhouse_memo_type_{workbook_key}_{row_id}"], "End of Day")
+        self.assertEqual(state[f"inhouse_memo_value_{workbook_key}_{row_id}"], "")
+        self.assertEqual(state[f"inhouse_amount_{workbook_key}_{row_id}"], 8.0)
+        state[f"inhouse_memo_value_{workbook_key}_{row_id}"] = "KC"
+        self.assertFalse(seed_historical_inhouse_widgets(state, workbook_key))
+        self.assertEqual(state[f"inhouse_memo_value_{workbook_key}_{row_id}"], "KC")
+        self.assertNotIn(f"inhouse_saved_payload_{workbook_key}", state)
+
     def test_reopened_inhouse_restores_actual_and_each_memo_mode(self):
         from app.guided_deposit_state import _hydrate_reopened_app_step, reopen_step_for_edit
 

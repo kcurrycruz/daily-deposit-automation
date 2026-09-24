@@ -3,11 +3,51 @@ import json
 import re
 
 from app.ui_helpers import deposit_stepper_html
+from app.closeout_reconciliation import normalize_closeout_payload
+from app.deposit_workflow import STEP_INHOUSE
+from app.inhouse_charges import normalize_inhouse_step_payload, split_inhouse_memo
 
 
 def activity_default_amount(activity_key: str) -> float:
     """Return the editable starting amount for a new activity row."""
     return 100.0 if activity_key == "donation" else 0.0
+
+
+def saved_inhouse_for_closeout(session_state, workbook_key: str, required_steps) -> dict:
+    """Supply Closeout's locked InHouse Actual and charge rows."""
+    if STEP_INHOUSE not in required_steps:
+        return {"actual": 0.0, "rows": []}
+    try:
+        return normalize_inhouse_step_payload(
+            session_state[f"inhouse_saved_payload_{workbook_key}"]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"InHouse Charges need review: {exc}") from exc
+
+
+def seed_historical_inhouse_widgets(session_state, workbook_key: str) -> bool:
+    """Bring old Closeout rows into the new editor without completing it."""
+    ids_key = f"inhouse_ids_{workbook_key}"
+    if ids_key in session_state or f"inhouse_saved_payload_{workbook_key}" in session_state:
+        return False
+    try:
+        closeout = normalize_closeout_payload(
+            session_state[f"closeout_payload_{workbook_key}"]
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    if closeout["mode"] != "closeout" or not closeout["inhouse_charges"]:
+        return False
+    session_state[f"inhouse_actual_{workbook_key}"] = closeout["actuals"]["charge_house"]
+    row_ids = [f"legacy_{index}" for index in range(len(closeout["inhouse_charges"]))]
+    session_state[ids_key] = row_ids
+    for row_id, row in zip(row_ids, closeout["inhouse_charges"]):
+        memo_type, memo_value = split_inhouse_memo(row["memo"])
+        session_state[f"inhouse_account_{workbook_key}_{row_id}"] = row["account"]
+        session_state[f"inhouse_memo_type_{workbook_key}_{row_id}"] = memo_type
+        session_state[f"inhouse_memo_value_{workbook_key}_{row_id}"] = memo_value
+        session_state[f"inhouse_amount_{workbook_key}_{row_id}"] = row["amount"]
+    return True
 
 
 def queue_breakdown_scroll(session_state, choice_key: str, request_key: str) -> None:

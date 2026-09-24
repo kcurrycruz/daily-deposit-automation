@@ -1450,19 +1450,26 @@ class MembershipPaymentTests(unittest.TestCase):
         )
         self.assertTrue(payload["reviewed"])
 
-    def test_closeout_form_source_includes_inhouse_editor_and_editable_actual(self):
+    def test_inhouse_step_precedes_closeout_with_memo_fields_and_save_action(self):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
             encoding="utf-8"
         )
 
+        self.assertIn("active_step == STEP_INHOUSE", source)
+        self.assertIn('options=["End of Day", "Custom"]', source)
+        self.assertIn('"Initials"', source)
+        self.assertIn('"Custom Memo"', source)
+        self.assertIn('"Save InHouse Charges & Continue"', source)
+        self.assertLess(source.index("active_step == STEP_INHOUSE"), source.index("active_step == STEP_CLOSEOUT"))
         self.assertIn('st.markdown("#### InHouse Charges")', source)
         self.assertIn('placeholder="Search account"', source)
-        self.assertIn('setdefault(memo_key, "End of Day")', source)
         self.assertIn('"Breakdown Total"', source)
         self.assertIn('"Remaining"', source)
-        self.assertIn("inhouse_actual_key", source)
-        self.assertIn('closeout_defaults["charge_house"]', source)
-        self.assertIn('inhouse_charges=inhouse_charges', source)
+        closeout_source = source[source.index("if uploaded and active_step == STEP_CLOSEOUT"):]
+        self.assertNotIn('key=f"closeout_inhouse_add_', closeout_source)
+        self.assertNotIn('key=f"closeout_inhouse_remove_', closeout_source)
+        self.assertIn('inhouse_charges=inhouse_payload["rows"]', closeout_source)
+        self.assertIn('row_columns[2].write(f"${actual:,.2f} (breakdown)")', closeout_source)
 
     def test_closeout_form_requires_paper_review_confirmation(self):
         from app.closeout_reconciliation import (

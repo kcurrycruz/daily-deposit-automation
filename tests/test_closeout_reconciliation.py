@@ -58,6 +58,34 @@ def workbook_bytes(
 
 
 class CloseoutReconciliationTests(unittest.TestCase):
+    def test_read_charge_house_total_uses_only_requested_balance_sheet(self):
+        from app.closeout_reconciliation import read_charge_house_total
+
+        workbook = openpyxl.Workbook()
+        workbook.active.title = "BS"
+        workbook.active.append([906, None, None, None, -140.82])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        self.assertEqual(read_charge_house_total(output.getvalue(), "BS"), 140.82)
+
+    def test_read_charge_house_total_defaults_to_zero_when_code_is_absent(self):
+        from app.closeout_reconciliation import read_charge_house_total
+
+        self.assertEqual(
+            read_charge_house_total(workbook_bytes(bs_values={901: 12}), "Daily BS"),
+            0.0,
+        )
+
+    def test_read_charge_house_total_rejects_invalid_code_amount(self):
+        from app.closeout_reconciliation import read_charge_house_total
+
+        with self.assertRaisesRegex(ValueError, "Charge \\(House\\).*valid.*amount"):
+            read_charge_house_total(
+                workbook_bytes(bs_values={906: "not money"}), "Daily BS"
+            )
+
     def test_build_standard_reconciliation_returns_eight_rows_in_approved_order(self):
         from app.closeout_reconciliation import build_standard_reconciliation
 

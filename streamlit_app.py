@@ -51,6 +51,7 @@ from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
 )
+from app.closeout_reconciliation import read_charge_house_total
 from app.deposit_workflow import (
     STEP_CLOSEOUT,
     STEP_COUPONS,
@@ -2525,6 +2526,8 @@ membership_valid = True
 membership_mode = "automatic"
 coupon_bs_total = 0.0
 coupon_valid = True
+charge_house_total = 0.0
+charge_house_valid = True
 coupon_mode = "quickbooks"
 coupon_closeout_total = 0.0
 coupon_ncg_total = 0.0
@@ -2550,6 +2553,11 @@ if uploaded:
     except Exception as exc:
         coupon_valid = False
         st.error(f"Could not read Coupons Receivable from the Balance Sheet: {exc}", icon="🚫")
+    try:
+        charge_house_total = read_charge_house_total(upload_bytes, roles.get("bs"))
+    except Exception as exc:
+        charge_house_valid = False
+        st.error(f"Could not read Charge (House) from the Balance Sheet: {exc}", icon="🚫")
 
 if uploaded and membership_valid:
     subscription_status = subscription_action_status(subscription_total)
@@ -2592,6 +2600,7 @@ if uploaded:
             icon="⚠️",
         )
 
+workflow_detection_valid = activity_detection_valid and charge_house_valid
 required_steps = ()
 step_completions = {}
 active_step = None
@@ -2602,18 +2611,19 @@ guided_workflow_ready = False
 active_step_content = None
 if deposit_page_stage == DEPOSIT_STEPS_STAGE:
     detected_required_steps = None
-    if activity_detection_valid:
+    if workflow_detection_valid:
         detected_required_steps = required_deposit_steps(
             subscription_total,
             activity_source_totals,
             coupon_bs_total,
+            charge_house_total,
         )
     workflow_completion_key = f"deposit_step_completions_{closeout_workbook_key}"
     workflow_requirements_key = (
         f"deposit_required_steps_{closeout_workbook_key}"
     )
     workflow_state = resolve_activity_detection_workflow(
-        detection_valid=activity_detection_valid,
+        detection_valid=workflow_detection_valid,
         detected_required_steps=detected_required_steps,
         saved_required_steps=st.session_state.get(workflow_requirements_key),
         saved_completions=st.session_state.get(workflow_completion_key),
@@ -2621,7 +2631,7 @@ if deposit_page_stage == DEPOSIT_STEPS_STAGE:
     workflow_blocked = workflow_state["blocked"]
     required_steps = workflow_state["required_steps"]
     step_completions = workflow_state["completions"]
-    if activity_detection_valid:
+    if workflow_detection_valid:
         st.session_state[workflow_requirements_key] = required_steps
         st.session_state[workflow_completion_key] = step_completions
     elif not workflow_blocked:
@@ -2629,8 +2639,8 @@ if deposit_page_stage == DEPOSIT_STEPS_STAGE:
 
     if workflow_blocked:
         st.error(
-            "Today’s Deposit Steps are blocked until Donations, Paid Out, and Paid In "
-            "totals can be read successfully. Reload the workbook and try again.",
+            "Today’s Deposit Steps are blocked until Balance Sheet Charge (House) "
+            "and optional activity totals can be read successfully. Reload the workbook and try again.",
             icon="🚫",
         )
     else:
@@ -2661,7 +2671,7 @@ if deposit_page_stage == DEPOSIT_STEPS_STAGE:
         guided_workflow_ready = deposit_workflow_complete(
             required_steps,
             step_completions,
-        ) and activity_detection_valid
+        ) and workflow_detection_valid
         if guided_workflow_ready:
             st.success(
                 "All deposit steps are complete. Validate and prepare the QuickBooks IIF below.",
@@ -4177,7 +4187,7 @@ step_completions = normalize_step_completions(
 guided_workflow_ready = deposit_workflow_complete(
     required_steps,
     step_completions,
-) and activity_detection_valid
+) and workflow_detection_valid
 
 current_run_context = (
     sms_run_context(

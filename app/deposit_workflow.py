@@ -6,6 +6,7 @@ STEP_DONATION = "donation"
 STEP_PAID_IN = "paid_in"
 STEP_PAID_OUT = "paid_out"
 STEP_COUPONS = "coupons"
+STEP_INHOUSE = "inhouse_charges"
 STEP_CLOSEOUT = "closeout"
 
 STEP_LABELS = {
@@ -14,6 +15,7 @@ STEP_LABELS = {
     STEP_PAID_IN: "Paid In",
     STEP_PAID_OUT: "Paid Out",
     STEP_COUPONS: "Coupons Receivable",
+    STEP_INHOUSE: "InHouse Charges",
     STEP_CLOSEOUT: "Closeout Sheet",
 }
 
@@ -30,7 +32,7 @@ def _is_nonzero(value, label: str) -> bool:
     return amount != 0
 
 
-def required_deposit_steps(subscription_total: float, activity_source_totals: dict, coupon_bs_total: float) -> tuple[str, ...]:
+def required_deposit_steps(subscription_total: float, activity_source_totals: dict, coupon_bs_total: float, charge_house_total: float) -> tuple[str, ...]:
     if not isinstance(activity_source_totals, dict):
         raise ValueError("Activity source totals must be an object")
     steps = []
@@ -41,6 +43,8 @@ def required_deposit_steps(subscription_total: float, activity_source_totals: di
             steps.append(step)
     if _is_nonzero(coupon_bs_total, "Coupons Receivable"):
         steps.append(STEP_COUPONS)
+    if _is_nonzero(charge_house_total, "Charge (House)"):
+        steps.append(STEP_INHOUSE)
     return (*steps, STEP_CLOSEOUT)
 
 

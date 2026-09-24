@@ -19,6 +19,7 @@ from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
     normalize_closeout_payload,
 )
+from app.inhouse_charges import normalize_inhouse_step_payload, split_inhouse_memo
 from app.membership_payments import (
     build_membership_lines,
     membership_mode_from_choice,
@@ -104,6 +105,23 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
                 f"coupon_mfg_{workbook_key}": mfg_total,
             }
         )
+        return True
+
+    if step == "inhouse_charges":
+        saved_key = f"inhouse_saved_payload_{workbook_key}"
+        try:
+            payload = normalize_inhouse_step_payload(session_state[saved_key])
+        except (KeyError, TypeError, ValueError):
+            return False
+        session_state[f"inhouse_actual_{workbook_key}"] = payload["actual"]
+        row_ids = [f"restored_{index}" for index in range(len(payload["rows"]))]
+        session_state[f"inhouse_ids_{workbook_key}"] = row_ids
+        for row_id, row in zip(row_ids, payload["rows"]):
+            memo_type, memo_value = split_inhouse_memo(row["memo"])
+            session_state[f"inhouse_account_{workbook_key}_{row_id}"] = row["account"]
+            session_state[f"inhouse_memo_type_{workbook_key}_{row_id}"] = memo_type
+            session_state[f"inhouse_memo_value_{workbook_key}_{row_id}"] = memo_value
+            session_state[f"inhouse_amount_{workbook_key}_{row_id}"] = row["amount"]
         return True
 
     if step == "closeout":
@@ -353,6 +371,19 @@ def save_activity_transition(
     payload = validated_activity_save_payload(category, section)
     return _save_payload_transition(
         required_steps, completions, category, saved_key, payload
+    )
+
+
+def save_inhouse_transition(
+    required_steps,
+    completions,
+    saved_key: str,
+    payload: dict,
+) -> dict:
+    """Validate InHouse charges and save them with the step completion."""
+    normalized = normalize_inhouse_step_payload(payload)
+    return _save_payload_transition(
+        required_steps, completions, "inhouse_charges", saved_key, normalized
     )
 
 

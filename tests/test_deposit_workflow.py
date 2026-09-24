@@ -592,6 +592,7 @@ RESULT: ⚠ MISMATCH — Check before importing!
         try:
             from app.deposit_workflow import (
                 STEP_CLOSEOUT,
+                STEP_INHOUSE,
                 active_deposit_step,
                 complete_deposit_step,
                 deposit_step_rows,
@@ -606,24 +607,38 @@ RESULT: ⚠ MISMATCH — Check before importing!
 
     def test_required_steps_use_fixed_gap_free_business_order(self):
         api = self.workflow_api()
-        steps = api["required_deposit_steps"](8.45, {"donation": 25, "paid_in": 100, "paid_out": 40}, 18.49)
-        self.assertEqual(steps, ("member_shares", "donation", "paid_in", "paid_out", "coupons", "closeout"))
+        steps = api["required_deposit_steps"](8.45, {"donation": 25, "paid_in": 100, "paid_out": 40}, 18.49, 140.82)
+        self.assertEqual(steps, ("member_shares", "donation", "paid_in", "paid_out", "coupons", "inhouse_charges", "closeout"))
+
+    def test_inhouse_follows_coupons_when_only_those_steps_are_required(self):
+        api = self.workflow_api()
+        self.assertEqual(
+            api["required_deposit_steps"](0, {"donation": 0, "paid_in": 0, "paid_out": 0}, 18.49, 140.82),
+            ("coupons", "inhouse_charges", "closeout"),
+        )
+
+    def test_workflow_detection_reads_charge_house_and_blocks_on_failure(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn("charge_house_total = read_charge_house_total(", source)
+        self.assertIn("workflow_detection_valid = activity_detection_valid and charge_house_valid", source)
+        self.assertIn("detection_valid=workflow_detection_valid", source)
+        self.assertIn("Could not read Charge (House) from the Balance Sheet", source)
 
     def test_only_paid_in_still_ends_with_closeout(self):
         api = self.workflow_api()
-        self.assertEqual(api["required_deposit_steps"](0, {"donation": 0, "paid_in": 100, "paid_out": 0}, 0), ("paid_in", "closeout"))
+        self.assertEqual(api["required_deposit_steps"](0, {"donation": 0, "paid_in": 100, "paid_out": 0}, 0, 0), ("paid_in", "closeout"))
 
     def test_no_optional_activity_still_requires_closeout(self):
         api = self.workflow_api()
-        self.assertEqual(api["required_deposit_steps"](0, {"donation": 0, "paid_in": 0, "paid_out": 0}, 0), ("closeout",))
+        self.assertEqual(api["required_deposit_steps"](0, {"donation": 0, "paid_in": 0, "paid_out": 0}, 0, 0), ("closeout",))
 
     def test_every_optional_combination_preserves_business_order(self):
         from itertools import product
         api = self.workflow_api()
-        ordered = ("member_shares", "donation", "paid_in", "paid_out", "coupons")
+        ordered = ("member_shares", "donation", "paid_in", "paid_out", "coupons", "inhouse_charges")
         for enabled in product((False, True), repeat=len(ordered)):
             with self.subTest(enabled=enabled):
-                steps = api["required_deposit_steps"](1 if enabled[0] else 0, {"donation": 1 if enabled[1] else 0, "paid_in": 1 if enabled[2] else 0, "paid_out": 1 if enabled[3] else 0}, 1 if enabled[4] else 0)
+                steps = api["required_deposit_steps"](1 if enabled[0] else 0, {"donation": 1 if enabled[1] else 0, "paid_in": 1 if enabled[2] else 0, "paid_out": 1 if enabled[3] else 0}, 1 if enabled[4] else 0, 1 if enabled[5] else 0)
                 self.assertEqual(steps, tuple(step for step, is_enabled in zip(ordered, enabled) if is_enabled) + ("closeout",))
 
     def test_completion_methods_advance_to_first_incomplete_step(self):
@@ -657,6 +672,107 @@ RESULT: ⚠ MISMATCH — Check before importing!
         self.assertEqual(
             api["edit_deposit_step"](steps, completed, "closeout"),
             {"paid_in": "app", "paid_out": "quickbooks"},
+        )
+
+    def test_save_inhouse_transition_persists_canonical_payload_and_completion(self):
+        from app.guided_deposit_state import save_inhouse_transition
+
+        saved_key = "inhouse_saved_payload_workbook-123"
+        transition = save_inhouse_transition(
+            ("inhouse_charges", "closeout"),
+            {},
+            saved_key,
+            {
+                "actual": 8,
+                "rows": [{
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day - BS",
+                    "amount": 8,
+                }],
+            },
+        )
+        self.assertEqual(transition["completions"], {"inhouse_charges": "app"})
+        self.assertEqual(transition["saved_payload"], {
+            saved_key: {
+                "actual": 8.0,
+                "rows": [{
+                    "account": "8320000 · Store Supplies",
+                    "memo": "End of Day - BS",
+                    "amount": 8.0,
+                }],
+            }
+        })
+
+    def test_reopened_inhouse_restores_actual_and_each_memo_mode(self):
+        from app.guided_deposit_state import _hydrate_reopened_app_step, reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"inhouse_saved_payload_{workbook_key}": {
+                "actual": 18,
+                "rows": [
+                    {"account": "8320000 · Store Supplies", "memo": "End of Day - BS", "amount": 8},
+                    {"account": "8428000 · Office Supplies", "memo": "Board lunch", "amount": 6},
+                    {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 4},
+                ],
+            }
+        }
+        self.assertTrue(_hydrate_reopened_app_step(session_state, "inhouse_charges", workbook_key))
+        row_ids = session_state[f"inhouse_ids_{workbook_key}"]
+        self.assertEqual(row_ids, ["restored_0", "restored_1", "restored_2"])
+        self.assertEqual(session_state[f"inhouse_actual_{workbook_key}"], 18.0)
+        for row_id, account, memo_type, memo_value, amount in (
+            ("restored_0", "8320000 · Store Supplies", "End of Day", "BS", 8.0),
+            ("restored_1", "8428000 · Office Supplies", "Custom", "Board lunch", 6.0),
+            ("restored_2", "8320000 · Store Supplies", "End of Day", "", 4.0),
+        ):
+            self.assertEqual(session_state[f"inhouse_account_{workbook_key}_{row_id}"], account)
+            self.assertEqual(session_state[f"inhouse_memo_type_{workbook_key}_{row_id}"], memo_type)
+            self.assertEqual(session_state[f"inhouse_memo_value_{workbook_key}_{row_id}"], memo_value)
+            self.assertEqual(session_state[f"inhouse_amount_{workbook_key}_{row_id}"], amount)
+
+        reopened = reopen_step_for_edit(
+            session_state,
+            required_steps=("inhouse_charges", "closeout"),
+            completions={"inhouse_charges": "app", "closeout": "app"},
+            step="inhouse_charges",
+            workbook_key=workbook_key,
+        )
+        self.assertEqual(reopened, {})
+        self.assertEqual(session_state[f"inhouse_ids_{workbook_key}"], row_ids)
+
+    def test_malformed_saved_inhouse_payload_does_not_restore_or_complete(self):
+        from app.guided_deposit_state import _hydrate_reopened_app_step, reopen_step_for_edit
+
+        workbook_key = "workbook-123"
+        session_state = {
+            f"inhouse_saved_payload_{workbook_key}": {
+                "actual": 8,
+                "rows": [{"account": "8320000 · Store Supplies", "memo": "Board lunch", "amount": 7}],
+            }
+        }
+        self.assertFalse(_hydrate_reopened_app_step(session_state, "inhouse_charges", workbook_key))
+        self.assertNotIn(f"inhouse_actual_{workbook_key}", session_state)
+        self.assertEqual(
+            reopen_step_for_edit(
+                session_state,
+                required_steps=("inhouse_charges", "closeout"),
+                completions={"inhouse_charges": "app", "closeout": "app"},
+                step="inhouse_charges",
+                workbook_key=workbook_key,
+            ),
+            {},
+        )
+
+    def test_editing_inhouse_requires_closeout_review_again(self):
+        api = self.workflow_api()
+        self.assertEqual(
+            api["edit_deposit_step"](
+                ("coupons", "inhouse_charges", "closeout"),
+                {"coupons": "app", "inhouse_charges": "app", "closeout": "app"},
+                "inhouse_charges",
+            ),
+            {"coupons": "app"},
         )
 
     def test_reopened_closeout_hydrates_canonical_form_and_drops_preview(self):

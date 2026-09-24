@@ -255,6 +255,30 @@ def _code(value):
         return None
 
 
+def read_charge_house_total(workbook_bytes: bytes, bs_sheet_name: str) -> float:
+    """Read Charge (House) from the selected Balance Sheet without using HASH."""
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(
+        BytesIO(workbook_bytes), read_only=True, data_only=True
+    )
+    try:
+        if bs_sheet_name not in workbook.sheetnames:
+            raise ValueError(f"Balance Sheet tab '{bs_sheet_name}' was not found")
+        for row in workbook[bs_sheet_name].iter_rows(values_only=True):
+            if _code(row[0] if row else None) != 906:
+                continue
+            try:
+                return float(abs(_money(row[4], "Charge (House) amount")))
+            except IndexError:
+                raise ValueError(
+                    "Charge (House) amount must be a valid monetary amount"
+                ) from None
+        return 0.0
+    finally:
+        workbook.close()
+
+
 def read_closeout_baselines(
     workbook_bytes: bytes,
     bs_sheet_name: str,

@@ -86,7 +86,7 @@ On completion, save the canonical rows and Charge (House) Actual, then advance t
 ## Compatibility
 
 - The canonical closeout payload remains account, memo, and amount based, so existing IIF generation does not need a new memo schema.
-- Manual Closeout mode remains unchanged.
+- Manual Closeout remains available. When it is selected, the completed InHouse account splits still export to the IIF; only the remaining Closeout reconciliation stays manual.
 - Historical reviewed deposits containing valid InHouse rows remain readable.
 - Existing dynamic steps and their ordering remain unchanged except for insertion of InHouse Charges before Closeout Sheet when required.
 
@@ -101,5 +101,6 @@ Automated coverage will verify:
 - save/resume reconstruction of End of Day and Custom rows;
 - Actual/total matching and one-cent mismatch rejection;
 - Closeout handoff and over/short preservation;
+- IIF output retains completed InHouse splits when Closeout Sheet is finished manually;
 - final IIF account, memo, amount, and ordering;
 - unchanged manual workflow and full regression suite.

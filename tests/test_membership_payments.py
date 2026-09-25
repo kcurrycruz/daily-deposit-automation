@@ -1478,14 +1478,16 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertIn("active_step == STEP_INHOUSE", source)
         self.assertIn('options=["End of Day", "Custom"]', source)
+        self.assertIn('row_columns[1].selectbox(\n            "Memo"', source)
         self.assertIn('"Initials"', source)
         self.assertIn('"Custom Memo"', source)
         self.assertIn('"Save InHouse Charges & Continue"', source)
         self.assertLess(source.index("active_step == STEP_INHOUSE"), source.index("active_step == STEP_CLOSEOUT"))
         self.assertIn('st.markdown("#### InHouse Charges")', source)
         self.assertIn('placeholder="Search account"', source)
-        self.assertIn('"Breakdown Total"', source)
-        self.assertIn('"Remaining"', source)
+        self.assertIn('"Actual InHouse Charges"', source)
+        self.assertIn('"Difference from System / BS"', source)
+        self.assertNotIn('"Charge (House) Actual",\n        min_value=', source)
         closeout_source = source[source.index("if uploaded and active_step == STEP_CLOSEOUT"):]
         self.assertNotIn('key=f"closeout_inhouse_add_', closeout_source)
         self.assertNotIn('key=f"closeout_inhouse_remove_', closeout_source)

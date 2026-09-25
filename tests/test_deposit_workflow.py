@@ -1033,7 +1033,7 @@ RESULT: ⚠ MISMATCH — Check before importing!
         session_state = {
             f"inhouse_saved_payload_{workbook_key}": {
                 "actual": 8,
-                "rows": [{"account": "8320000 · Store Supplies", "memo": "Board lunch", "amount": 7}],
+                "rows": [{"account": "", "memo": "Board lunch", "amount": 7}],
             }
         }
         self.assertFalse(_hydrate_reopened_app_step(session_state, "inhouse_charges", workbook_key))

@@ -3591,31 +3591,25 @@ if uploaded and active_step == STEP_INHOUSE:
     active_step_panel.__enter__()
     st.markdown("#### InHouse Charges")
     st.caption("Assign each house charge to a QuickBooks account and memo.")
-    inhouse_actual_key = f"inhouse_actual_{closeout_workbook_key}"
     inhouse_ids_key = f"inhouse_ids_{closeout_workbook_key}"
     inhouse_saved_key = f"inhouse_saved_payload_{closeout_workbook_key}"
-    st.session_state.setdefault(inhouse_actual_key, float(charge_house_total))
     if inhouse_ids_key not in st.session_state:
         st.session_state[inhouse_ids_key] = [uuid4().hex] if charge_house_total > 0 else []
 
-    amount_columns = st.columns(2)
-    amount_columns[0].caption("System / BS")
-    amount_columns[0].write(f"${charge_house_total:,.2f}")
-    inhouse_actual = amount_columns[1].number_input(
-        "Charge (House) Actual",
-        min_value=0.0,
-        step=0.01,
-        format="%.2f",
-        key=inhouse_actual_key,
-    )
+    st.caption("System / BS")
+    st.write(f"${charge_house_total:,.2f}")
 
     inhouse_rows = []
     memo_errors = False
     for row_number, row_id in enumerate(list(st.session_state[inhouse_ids_key]), start=1):
-        row_columns = st.columns([2.2, 1.3, 2.0, 0.9, 0.35])
+        row_columns = st.columns(
+            [2.5, 1.4, 0.7, 0.9, 0.35],
+            vertical_alignment="bottom",
+        )
         account_key = f"inhouse_account_{closeout_workbook_key}_{row_id}"
         memo_type_key = f"inhouse_memo_type_{closeout_workbook_key}_{row_id}"
         memo_value_key = f"inhouse_memo_value_{closeout_workbook_key}_{row_id}"
+        prior_memo_type_key = f"inhouse_prior_memo_type_{closeout_workbook_key}_{row_id}"
         amount_key = f"inhouse_amount_{closeout_workbook_key}_{row_id}"
         account = row_columns[0].selectbox(
             "QuickBooks Account",
@@ -3625,14 +3619,22 @@ if uploaded and active_step == STEP_INHOUSE:
             key=account_key,
         )
         memo_type = row_columns[1].selectbox(
-            "Memo Type",
+            "Memo",
             options=["End of Day", "Custom"],
             key=memo_type_key,
         )
-        memo_value = row_columns[2].text_input(
-            "Initials" if memo_type == "End of Day" else "Custom Memo",
-            key=memo_value_key,
-        )
+        prior_memo_type = st.session_state.get(prior_memo_type_key, memo_type)
+        if prior_memo_type != memo_type:
+            st.session_state.pop(memo_value_key, None)
+        st.session_state[prior_memo_type_key] = memo_type
+        if memo_type == "End of Day":
+            memo_value = row_columns[2].text_input(
+                "Initials",
+                key=memo_value_key,
+                help="Optional. Leave blank to use End of Day.",
+            )
+        else:
+            memo_value = ""
         amount = row_columns[3].number_input(
             "Amount",
             min_value=0.0,
@@ -3640,11 +3642,19 @@ if uploaded and active_step == STEP_INHOUSE:
             format="%.2f",
             key=amount_key,
         )
+        if memo_type == "Custom":
+            custom_columns = st.columns([2.5, 1.4, 0.7, 0.9, 0.35])
+            memo_value = custom_columns[1].text_input(
+                "Custom Memo",
+                key=memo_value_key,
+            )
         try:
             memo = compose_inhouse_memo(memo_type, memo_value)
         except ValueError as exc:
             memo_errors = True
-            row_columns[2].error(str(exc))
+            (custom_columns[1] if memo_type == "Custom" else row_columns[2]).error(
+                str(exc)
+            )
             memo = ""
         inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
         if row_columns[4].button(
@@ -3656,7 +3666,13 @@ if uploaded and active_step == STEP_INHOUSE:
                 existing_id for existing_id in st.session_state[inhouse_ids_key]
                 if existing_id != row_id
             ]
-            for widget_key in (account_key, memo_type_key, memo_value_key, amount_key):
+            for widget_key in (
+                account_key,
+                memo_type_key,
+                memo_value_key,
+                prior_memo_type_key,
+                amount_key,
+            ):
                 st.session_state.pop(widget_key, None)
             st.rerun()
 
@@ -3672,13 +3688,22 @@ if uploaded and active_step == STEP_INHOUSE:
         st.rerun()
 
     inhouse_total = round(sum(row["amount"] for row in inhouse_rows), 2)
+    inhouse_difference = round(inhouse_total - float(charge_house_total), 2)
     summary_columns = st.columns(3)
-    summary_columns[0].caption("Charge (House) Actual")
-    summary_columns[0].write(f"${inhouse_actual:,.2f}")
-    summary_columns[1].caption("Breakdown Total")
+    summary_columns[0].caption("System / BS")
+    summary_columns[0].write(f"${charge_house_total:,.2f}")
+    summary_columns[1].caption("Actual InHouse Charges")
     summary_columns[1].write(f"${inhouse_total:,.2f}")
-    summary_columns[2].caption("Remaining")
-    summary_columns[2].write(f"{inhouse_actual - inhouse_total:+,.2f}")
+    summary_columns[2].caption("Difference from System / BS")
+    summary_columns[2].write(f"{inhouse_difference:+,.2f}")
+    if inhouse_difference == 0:
+        st.success("InHouse charges match the System / BS total.", icon="✅")
+    else:
+        st.warning(
+            f"InHouse charges differ from System / BS by {inhouse_difference:+,.2f}. "
+            "The difference will be shown in Closeout reconciliation.",
+            icon="⚠️",
+        )
     render_breakdown_scroll_target(
         st,
         components.html,
@@ -3688,9 +3713,7 @@ if uploaded and active_step == STEP_INHOUSE:
     )
     if st.button("Save InHouse Charges & Continue", type="primary", disabled=memo_errors):
         try:
-            payload = normalize_inhouse_step_payload(
-                {"actual": inhouse_actual, "rows": inhouse_rows}
-            )
+            payload = normalize_inhouse_step_payload({"rows": inhouse_rows})
             transition = save_inhouse_transition(
                 required_steps, step_completions, inhouse_saved_key, payload
             )

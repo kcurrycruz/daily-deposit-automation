@@ -157,6 +157,7 @@ from app.upload_intake_ui import (
 from app.ui_helpers import (
     deposit_download_details,
     deposit_download_status,
+    tba_quickbooks_rows,
     parse_engine_status_summary,
     plan_guide_html,
 )
@@ -4314,6 +4315,7 @@ run_clicked = render_prepare_iif_action(
     visible=bool(uploaded is not None and guided_workflow_ready),
     download_details=download_details,
     download_status=download_status,
+    tba_rows=tba_quickbooks_rows(current_result),
     disabled=(
         settlement_file is None
         or deposit_date is None

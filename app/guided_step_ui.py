@@ -279,6 +279,7 @@ def render_prepare_iif_action(
     visible: bool,
     download_details,
     download_status=None,
+    tba_rows=(),
     disabled: bool,
 ) -> bool:
     """Render the final action or paired downloads after workflow completion."""
@@ -307,6 +308,12 @@ def render_prepare_iif_action(
             type="primary",
             use_container_width=True,
         )
+        if tba_rows:
+            ui.info(
+                "TBA Purchases: look for these lines near the bottom of the "
+                "QuickBooks deposit and review them before posting."
+            )
+            ui.dataframe(tba_rows, use_container_width=True, hide_index=True)
         return False
     return ui.button(
         "🌿  Validate & Prepare IIF",

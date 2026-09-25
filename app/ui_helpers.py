@@ -172,3 +172,31 @@ def deposit_download_status(result: dict | None) -> dict | None:
             "before importing into QuickBooks."
         ),
     }
+
+
+def tba_quickbooks_rows(result: dict | None) -> list[dict[str, str]]:
+    """Show posted TBA splits using QuickBooks deposit amount signs."""
+    if not isinstance(result, dict):
+        return []
+    rows = []
+    for line in result.get("lines") or []:
+        account = str(line.account or "")
+        if (
+            line.line_type != "SPL"
+            or account.split("·", 1)[0].strip() != "4444"
+            or line.amount is None
+        ):
+            continue
+        quickbooks_amount = -float(line.amount)
+        formatted_amount = (
+            f"-${abs(quickbooks_amount):,.2f}"
+            if quickbooks_amount < 0
+            else f"${quickbooks_amount:,.2f}"
+        )
+        rows.append({
+            "Account": account,
+            "Memo": str(line.memo or ""),
+            "Class": str(line.qb_class or ""),
+            "Amount": formatted_amount,
+        })
+    return rows

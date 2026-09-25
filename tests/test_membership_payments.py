@@ -1482,10 +1482,15 @@ class MembershipPaymentTests(unittest.TestCase):
 
         self.assertIn("active_step == STEP_INHOUSE", source)
         self.assertIn('options=["End of Day", "Custom"]', source)
-        self.assertIn('memo_type = row_columns[1].selectbox(\n                "Memo"', source)
+        self.assertIn(
+            "with row_columns[1].popover(memo_label, use_container_width=True):",
+            source,
+        )
+        self.assertIn('memo_type = st.radio(\n                "Memo"', source)
         self.assertIn('"Initials"', source)
-        self.assertIn('custom_memo_columns[0].text_input(\n                "Memo"', source)
-        self.assertNotIn("custom_columns = st.columns", inhouse_source)
+        self.assertIn('memo_value = st.text_input(\n                    "Custom memo"', source)
+        self.assertNotIn("custom_memo_columns", inhouse_source)
+        self.assertNotIn("custom_mode_key", inhouse_source)
         self.assertIn('"Save InHouse Charges & Continue"', source)
         self.assertLess(source.index("active_step == STEP_INHOUSE"), source.index("active_step == STEP_CLOSEOUT"))
         self.assertIn('st.markdown("#### InHouse Charges")', source)

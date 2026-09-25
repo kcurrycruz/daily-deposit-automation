@@ -3609,7 +3609,6 @@ if uploaded and active_step == STEP_INHOUSE:
         account_key = f"inhouse_account_{closeout_workbook_key}_{row_id}"
         memo_type_key = f"inhouse_memo_type_{closeout_workbook_key}_{row_id}"
         memo_value_key = f"inhouse_memo_value_{closeout_workbook_key}_{row_id}"
-        custom_mode_key = f"inhouse_custom_mode_{closeout_workbook_key}_{row_id}"
         initials_key = f"inhouse_initials_{closeout_workbook_key}_{row_id}"
         amount_key = f"inhouse_amount_{closeout_workbook_key}_{row_id}"
         account = row_columns[0].selectbox(
@@ -3619,39 +3618,28 @@ if uploaded and active_step == STEP_INHOUSE:
             placeholder="Search account",
             key=account_key,
         )
-        if custom_mode_key not in st.session_state:
-            st.session_state[custom_mode_key] = (
-                st.session_state.get(memo_type_key) == "Custom"
-            )
-        if st.session_state[custom_mode_key]:
-            memo_type = "Custom"
-            custom_memo_columns = row_columns[1].columns(
-                [5, 1], vertical_alignment="bottom"
-            )
-            memo_value = custom_memo_columns[0].text_input(
-                "Memo",
-                key=memo_value_key,
-                placeholder="Enter custom memo",
-            )
-            if custom_memo_columns[1].button(
-                "↩",
-                key=f"inhouse_default_memo_{closeout_workbook_key}_{row_id}",
-                help="Return to End of Day memo",
-            ):
-                st.session_state[custom_mode_key] = False
-                st.session_state[memo_type_key] = "End of Day"
-                st.session_state.pop(memo_value_key, None)
-                st.rerun()
-        else:
-            memo_type = row_columns[1].selectbox(
+        selected_memo_type = st.session_state.get(memo_type_key, "End of Day")
+        memo_label = (
+            "Memo: Custom"
+            if selected_memo_type == "Custom"
+            else "Memo: End of Day"
+        )
+        with row_columns[1].popover(memo_label, use_container_width=True):
+            memo_type = st.radio(
                 "Memo",
                 options=["End of Day", "Custom"],
+                horizontal=True,
                 key=memo_type_key,
             )
             memo_value = ""
             if memo_type == "Custom":
-                st.session_state[custom_mode_key] = True
-                st.rerun()
+                memo_value = st.text_input(
+                    "Custom memo",
+                    key=memo_value_key,
+                    placeholder="Enter custom memo",
+                )
+                if not str(memo_value or "").strip():
+                    st.caption("Enter a custom memo to continue.")
         initials = row_columns[2].text_input(
             "Initials",
             key=initials_key,
@@ -3666,9 +3654,8 @@ if uploaded and active_step == STEP_INHOUSE:
         )
         try:
             memo = compose_inhouse_memo(memo_type, memo_value, initials)
-        except ValueError as exc:
+        except ValueError:
             memo_errors = True
-            row_columns[1].error(str(exc))
             memo = ""
         inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
         if row_columns[4].button(
@@ -3684,7 +3671,6 @@ if uploaded and active_step == STEP_INHOUSE:
                 account_key,
                 memo_type_key,
                 memo_value_key,
-                custom_mode_key,
                 initials_key,
                 amount_key,
             ):

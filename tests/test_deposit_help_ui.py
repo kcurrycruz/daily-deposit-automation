@@ -116,6 +116,13 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertIn('saved_draft_file = st.file_uploader(', header)
         self.assertNotIn('with st.expander("Resume a saved draft"):', source)
 
+    def test_resume_draft_upload_is_centered_without_restyling_other_uploads(self):
+        source = self.app_source()
+        selector = '[class*="st-key-resume_draft_"] div[data-testid="stFileUploaderDropzone"]'
+        self.assertIn(selector, source)
+        rule = source[source.index(selector):source.index("}", source.index(selector))]
+        self.assertIn("align-items: center", rule)
+
     def test_need_help_is_a_static_label(self):
         from app.deposit_help_ui import render_need_help_label
 

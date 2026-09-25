@@ -952,6 +952,14 @@ st.markdown(
         padding: 4px 12px;
     }
 
+    [class*="st-key-resume_draft_"] div[data-testid="stFileUploaderDropzone"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
     div[data-testid="stDateInput"] > div,
     div[data-testid="stFileUploader"] section {
         border-radius: 12px;

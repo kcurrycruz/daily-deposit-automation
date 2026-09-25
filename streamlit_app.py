@@ -178,6 +178,12 @@ from app.daily_reporting_workbook import (
 )
 from app.sms_deposit_data import build_sms_deposit_data
 from app.sms_exports import parse_sms_export, validate_sms_exports
+from app.deposit_draft import (
+    create_deposit_draft,
+    read_deposit_draft,
+    restore_deposit_draft,
+    validate_draft_settlement,
+)
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -2278,6 +2284,47 @@ if requested_page_stage == UPLOAD_STAGE:
         unsafe_allow_html=True,
     )
 
+    with st.expander("Resume a saved draft"):
+        st.caption("Upload a Daily Deposit Draft ZIP to continue where you left off.")
+        saved_draft_file = st.file_uploader(
+            "Saved draft",
+            type=["zip"],
+            key=f"resume_draft_{st.session_state['file_uploader_key']}",
+            label_visibility="collapsed",
+        )
+        if st.button(
+            "Resume Draft",
+            disabled=saved_draft_file is None,
+            use_container_width=True,
+        ):
+            try:
+                draft = read_deposit_draft(saved_draft_file.getvalue())
+                inspection = inspect_sms_uploads(draft.sms_uploads)
+                if inspection["bundle"] is None:
+                    raise ValueError(
+                        "Saved SMS reports could not be verified: "
+                        f"{inspection['error']}"
+                    )
+                if inspection["bundle"].deposit_date != draft.deposit_date:
+                    raise ValueError("Saved report date does not match the draft date")
+                validate_draft_settlement(draft.settlement_upload, draft.deposit_date)
+                next_uploader_key = st.session_state["file_uploader_key"] + 1
+                new_workbook_key = membership_editor_key(
+                    sms_source_bundle_identity(inspection["source_bytes"]),
+                    next_uploader_key,
+                )
+            except (ValueError, TypeError) as exc:
+                st.error(f"Could not resume this draft: {exc}")
+            else:
+                reset_current_work()
+                restore_deposit_draft(
+                    st.session_state,
+                    draft,
+                    uploader_key=next_uploader_key,
+                    workbook_key=new_workbook_key,
+                )
+                st.rerun()
+
 roles = {}
 date_info = {
     "detected_date": None,
@@ -2514,8 +2561,8 @@ if requested_page_stage == DEPOSIT_STEPS_STAGE:
         '<div class="hwfc-deposit-workspace-marker"></div>',
         unsafe_allow_html=True,
     )
-    deposit_title_col, deposit_restart_col = st.columns(
-        [0.80, 0.20],
+    deposit_title_col, deposit_draft_col, deposit_restart_col = st.columns(
+        [0.64, 0.18, 0.18],
         vertical_alignment="center",
     )
     with deposit_title_col:
@@ -2523,6 +2570,8 @@ if requested_page_stage == DEPOSIT_STEPS_STAGE:
             '<div class="hwfc-deposit-workspace-header">Today’s Deposit Steps</div>',
             unsafe_allow_html=True,
         )
+    with deposit_draft_col:
+        deposit_draft_slot = st.empty()
     with deposit_restart_col:
         if st.button(
             "↻ Start Over",
@@ -4310,6 +4359,37 @@ operations_status = build_operations_status(
     sms_reports=sms_reports,
     sms_valid=workbook_status_valid,
 )
+if (
+    deposit_page_stage == DEPOSIT_STEPS_STAGE
+    and closeout_workbook_key is not None
+    and sms_files is not None
+    and settlement_file is not None
+    and deposit_date is not None
+):
+    try:
+        draft_bytes = create_deposit_draft(
+            sms_files,
+            settlement_file,
+            st.session_state,
+            workbook_key=closeout_workbook_key,
+            deposit_date=deposit_date,
+        )
+    except ValueError as exc:
+        deposit_draft_slot.caption(f"Draft unavailable: {exc}")
+    else:
+        with deposit_draft_slot:
+            st.download_button(
+                "💾 Save Draft",
+                data=draft_bytes,
+                file_name=(
+                    f"Daily Deposit Draft {deposit_date.month}-{deposit_date.day}-"
+                    f"{deposit_date.year % 100:02d}.zip"
+                ),
+                mime="application/zip",
+                use_container_width=True,
+                help="Contains the uploaded financial reports and your unfinished entries. Save it in your Finance folder.",
+                key=f"save_deposit_draft_{closeout_workbook_key}",
+            )
 run_clicked = render_prepare_iif_action(
     st,
     visible=bool(uploaded is not None and guided_workflow_ready),

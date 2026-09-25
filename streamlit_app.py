@@ -2255,9 +2255,52 @@ if requested_page_stage == UPLOAD_STAGE:
         unsafe_allow_html=True,
     )
 
-    action_left, action_right = st.columns([0.80, 0.20])
+    action_left, action_resume, action_right = st.columns(
+        [0.60, 0.20, 0.20], vertical_alignment="center"
+    )
     with action_left:
         render_need_help_label(st)
+    with action_resume:
+        with st.popover("Resume Draft", use_container_width=True):
+            st.caption("Upload a Daily Deposit Draft ZIP to continue where you left off.")
+            saved_draft_file = st.file_uploader(
+                "Saved draft",
+                type=["zip"],
+                key=f"resume_draft_{st.session_state['file_uploader_key']}",
+                label_visibility="collapsed",
+            )
+            if st.button(
+                "Resume Draft",
+                disabled=saved_draft_file is None,
+                use_container_width=True,
+            ):
+                try:
+                    draft = read_deposit_draft(saved_draft_file.getvalue())
+                    inspection = inspect_sms_uploads(draft.sms_uploads)
+                    if inspection["bundle"] is None:
+                        raise ValueError(
+                            "Saved SMS reports could not be verified: "
+                            f"{inspection['error']}"
+                        )
+                    if inspection["bundle"].deposit_date != draft.deposit_date:
+                        raise ValueError("Saved report date does not match the draft date")
+                    validate_draft_settlement(draft.settlement_upload, draft.deposit_date)
+                    next_uploader_key = st.session_state["file_uploader_key"] + 1
+                    new_workbook_key = membership_editor_key(
+                        sms_source_bundle_identity(inspection["source_bytes"]),
+                        next_uploader_key,
+                    )
+                except (ValueError, TypeError) as exc:
+                    st.error(f"Could not resume this draft: {exc}")
+                else:
+                    reset_current_work()
+                    restore_deposit_draft(
+                        st.session_state,
+                        draft,
+                        uploader_key=next_uploader_key,
+                        workbook_key=new_workbook_key,
+                    )
+                    st.rerun()
     with action_right:
         if st.button(
             "↻ Start Over",
@@ -2283,47 +2326,6 @@ if requested_page_stage == UPLOAD_STAGE:
         """,
         unsafe_allow_html=True,
     )
-
-    with st.expander("Resume a saved draft"):
-        st.caption("Upload a Daily Deposit Draft ZIP to continue where you left off.")
-        saved_draft_file = st.file_uploader(
-            "Saved draft",
-            type=["zip"],
-            key=f"resume_draft_{st.session_state['file_uploader_key']}",
-            label_visibility="collapsed",
-        )
-        if st.button(
-            "Resume Draft",
-            disabled=saved_draft_file is None,
-            use_container_width=True,
-        ):
-            try:
-                draft = read_deposit_draft(saved_draft_file.getvalue())
-                inspection = inspect_sms_uploads(draft.sms_uploads)
-                if inspection["bundle"] is None:
-                    raise ValueError(
-                        "Saved SMS reports could not be verified: "
-                        f"{inspection['error']}"
-                    )
-                if inspection["bundle"].deposit_date != draft.deposit_date:
-                    raise ValueError("Saved report date does not match the draft date")
-                validate_draft_settlement(draft.settlement_upload, draft.deposit_date)
-                next_uploader_key = st.session_state["file_uploader_key"] + 1
-                new_workbook_key = membership_editor_key(
-                    sms_source_bundle_identity(inspection["source_bytes"]),
-                    next_uploader_key,
-                )
-            except (ValueError, TypeError) as exc:
-                st.error(f"Could not resume this draft: {exc}")
-            else:
-                reset_current_work()
-                restore_deposit_draft(
-                    st.session_state,
-                    draft,
-                    uploader_key=next_uploader_key,
-                    workbook_key=new_workbook_key,
-                )
-                st.rerun()
 
 roles = {}
 date_info = {

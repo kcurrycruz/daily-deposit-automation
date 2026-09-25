@@ -103,6 +103,19 @@ class DepositHelpUITests(unittest.TestCase):
         self.assertLess(sop_position, step_bar_position)
         self.assertLess(tips_position, step_bar_position)
 
+    def test_resume_draft_opens_beside_and_left_of_start_over(self):
+        source = self.app_source()
+        header = source[
+            source.index("    action_left,"):
+            source.index("render_daily_workbook_sop(st")
+        ]
+
+        self.assertIn("action_left, action_resume, action_right = st.columns(", header)
+        self.assertLess(header.index("with action_resume:"), header.index("with action_right:"))
+        self.assertIn('with st.popover("Resume Draft", use_container_width=True):', header)
+        self.assertIn('saved_draft_file = st.file_uploader(', header)
+        self.assertNotIn('with st.expander("Resume a saved draft"):', source)
+
     def test_need_help_is_a_static_label(self):
         from app.deposit_help_ui import render_need_help_label
 

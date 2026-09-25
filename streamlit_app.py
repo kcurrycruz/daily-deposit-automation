@@ -156,6 +156,7 @@ from app.upload_intake_ui import (
 )
 from app.ui_helpers import (
     deposit_download_details,
+    deposit_download_status,
     parse_engine_status_summary,
     plan_guide_html,
 )
@@ -4296,6 +4297,7 @@ current_result = (
     else None
 )
 download_details = deposit_download_details(current_result)
+download_status = deposit_download_status(current_result)
 operations_status = build_operations_status(
     deposit_date=deposit_date,
     daily_uploaded=uploaded is not None,
@@ -4311,6 +4313,7 @@ run_clicked = render_prepare_iif_action(
     st,
     visible=bool(uploaded is not None and guided_workflow_ready),
     download_details=download_details,
+    download_status=download_status,
     disabled=(
         settlement_file is None
         or deposit_date is None

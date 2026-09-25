@@ -131,3 +131,44 @@ def deposit_download_details(result: dict | None) -> dict | None:
             "data": report_data,
         },
     }
+
+
+def deposit_download_status(result: dict | None) -> dict | None:
+    """Describe final-download readiness without exposing engine details."""
+    if not isinstance(result, dict):
+        return None
+    validation = result.get("validation")
+    if not isinstance(validation, dict):
+        return {
+            "kind": "error",
+            "message": "Downloads are not ready because validation is incomplete.",
+        }
+    iif_ok = validation.get("iif_ok", validation.get("all_ok"))
+    if iif_ok is not True:
+        return {
+            "kind": "error",
+            "message": (
+                "Downloads are not ready because the QuickBooks IIF is not "
+                "balanced. Review the validation results below."
+            ),
+        }
+    if deposit_download_details(result) is None:
+        return {
+            "kind": "error",
+            "message": (
+                "Downloads are not ready because one or more files could not be "
+                "generated. Select Validate & Prepare IIF again."
+            ),
+        }
+    if validation.get("all_ok") is True:
+        return {
+            "kind": "success",
+            "message": "Both files are ready to download.",
+        }
+    return {
+        "kind": "warning",
+        "message": (
+            "Both files are ready. Review the highlighted warnings "
+            "before importing into QuickBooks."
+        ),
+    }

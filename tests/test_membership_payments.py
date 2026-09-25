@@ -958,6 +958,75 @@ class MembershipPaymentTests(unittest.TestCase):
             },
         )
 
+    def test_final_download_status_is_simple_and_keeps_review_files_available(self):
+        from app.ui_helpers import deposit_download_status
+
+        self.assertEqual(
+            deposit_download_status(
+                {
+                    "validation": {"all_ok": True, "iif_ok": True},
+                    "iif_path": Path("deposit.iif"),
+                    "iif_bytes": b"IIF",
+                    "reporting_workbook_name": "SubDept Report.xlsx",
+                    "reporting_workbook_bytes": b"XLSX",
+                }
+            ),
+            {
+                "kind": "success",
+                "message": "Both files are ready to download.",
+            },
+        )
+        self.assertEqual(
+            deposit_download_status(
+                {
+                    "validation": {"all_ok": False, "iif_ok": True},
+                    "iif_path": Path("deposit.iif"),
+                    "iif_bytes": b"IIF",
+                    "reporting_workbook_name": "SubDept Report.xlsx",
+                    "reporting_workbook_bytes": b"XLSX",
+                }
+            ),
+            {
+                "kind": "warning",
+                "message": (
+                    "Both files are ready. Review the highlighted warnings "
+                    "before importing into QuickBooks."
+                ),
+            },
+        )
+
+    def test_final_download_status_does_not_claim_missing_files_are_ready(self):
+        from app.ui_helpers import deposit_download_status
+
+        self.assertEqual(
+            deposit_download_status(
+                {"validation": {"all_ok": True, "iif_ok": True}}
+            ),
+            {
+                "kind": "error",
+                "message": (
+                    "Downloads are not ready because one or more files could not "
+                    "be generated. Select Validate & Prepare IIF again."
+                ),
+            },
+        )
+
+    def test_final_download_status_explains_why_downloads_are_blocked(self):
+        from app.ui_helpers import deposit_download_status
+
+        self.assertEqual(
+            deposit_download_status(
+                {"validation": {"all_ok": False, "iif_ok": False}}
+            ),
+            {
+                "kind": "error",
+                "message": (
+                    "Downloads are not ready because the QuickBooks IIF is not "
+                    "balanced. Review the validation results below."
+                ),
+            },
+        )
+
     def test_completed_action_renders_paired_downloads_together(self):
         from app.guided_step_ui import render_prepare_iif_action
 
@@ -965,11 +1034,23 @@ class MembershipPaymentTests(unittest.TestCase):
             def __init__(self):
                 self.events = []
 
+            def markdown(self, value):
+                self.events.append(("markdown", value))
+
+            def success(self, value, **kwargs):
+                self.events.append(("success", value, kwargs))
+
+            def warning(self, value, **kwargs):
+                self.events.append(("warning", value, kwargs))
+
+            def error(self, value, **kwargs):
+                self.events.append(("error", value, kwargs))
+
             def button(self, *args, **kwargs):
                 raise AssertionError("Prepare button rendered for a completed run")
 
             def download_button(self, label, **kwargs):
-                self.events.append((label, kwargs))
+                self.events.append(("download", label, kwargs))
 
         ui = RecordingUI()
         details = {
@@ -984,22 +1065,73 @@ class MembershipPaymentTests(unittest.TestCase):
             ui,
             visible=True,
             download_details=details,
+            download_status={
+                "kind": "success",
+                "message": "Both files are ready to download.",
+            },
             disabled=False,
         )
 
         self.assertFalse(clicked)
+        download_events = [event for event in ui.events if event[0] == "download"]
         self.assertEqual(
-            [label for label, _kwargs in ui.events],
+            [event[1] for event in download_events],
             [
                 "⬇️ Download QuickBooks IIF",
                 "📊 Download SubDept Single Total Report",
             ],
         )
-        self.assertEqual(ui.events[0][1]["file_name"], "deposit_20260914.iif")
         self.assertEqual(
-            ui.events[1][1]["file_name"],
+            download_events[0][2]["file_name"], "deposit_20260914.iif"
+        )
+        self.assertEqual(
+            download_events[1][2]["file_name"],
             "SubDept Single Total Report 9-14-26.xlsx",
         )
+
+        self.assertTrue(any(event[0] == "markdown" for event in ui.events))
+        self.assertTrue(any(event[0] == "success" for event in ui.events))
+        self.assertTrue(
+            all(
+                kwargs["type"] == "primary" and kwargs["use_container_width"]
+                for _kind, _label, kwargs in download_events
+            )
+        )
+
+    def test_blocked_final_downloads_show_reason_without_download_buttons(self):
+        from app.guided_step_ui import render_prepare_iif_action
+
+        class RecordingUI:
+            def __init__(self):
+                self.events = []
+
+            def markdown(self, value):
+                self.events.append(("markdown", value))
+
+            def error(self, value, **kwargs):
+                self.events.append(("error", value, kwargs))
+
+            def button(self, *args, **kwargs):
+                raise AssertionError("Prepare button rendered for a completed run")
+
+            def download_button(self, *args, **kwargs):
+                raise AssertionError("Blocked result exposed downloads")
+
+        ui = RecordingUI()
+        clicked = render_prepare_iif_action(
+            ui,
+            visible=True,
+            download_details=None,
+            download_status={
+                "kind": "error",
+                "message": "Downloads are not ready because the IIF is not balanced.",
+            },
+            disabled=False,
+        )
+
+        self.assertFalse(clicked)
+        self.assertEqual(ui.events[0], ("markdown", "### Final Downloads"))
+        self.assertEqual(ui.events[1][0], "error")
 
     def test_review_warning_keeps_balanced_iif_and_report_downloadable(self):
         from app.guided_step_ui import render_prepare_iif_action

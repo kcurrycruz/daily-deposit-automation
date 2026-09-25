@@ -278,11 +278,18 @@ def render_prepare_iif_action(
     *,
     visible: bool,
     download_details,
+    download_status=None,
     disabled: bool,
 ) -> bool:
     """Render the final action or paired downloads after workflow completion."""
     if not visible:
         return False
+    if download_status is not None:
+        ui.markdown("### Final Downloads")
+        status_renderer = getattr(ui, download_status["kind"])
+        status_renderer(download_status["message"])
+        if download_details is None:
+            return False
     if download_details is not None:
         ui.download_button(
             "⬇️ Download QuickBooks IIF",
@@ -297,6 +304,7 @@ def render_prepare_iif_action(
             data=download_details["report"]["data"],
             file_name=download_details["report"]["file_name"],
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
             use_container_width=True,
         )
         return False

@@ -2,6 +2,18 @@ import unittest
 
 
 class InhouseMemoTests(unittest.TestCase):
+    def test_iif_memo_adds_inhouse_prefix_exactly_once(self):
+        from app.inhouse_charges import format_inhouse_iif_memo
+
+        self.assertEqual(
+            format_inhouse_iif_memo("End of Day - KAB"),
+            "InHouse: End of Day - KAB",
+        )
+        self.assertEqual(
+            format_inhouse_iif_memo("InHouse: New Hire - DH"),
+            "InHouse: New Hire - DH",
+        )
+
     def test_end_of_day_memo_trims_and_uppercases_initials(self):
         from app.inhouse_charges import compose_inhouse_memo
 

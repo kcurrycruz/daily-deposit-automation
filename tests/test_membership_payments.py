@@ -3876,8 +3876,8 @@ except RuntimeError:
         for detail_line in (
             "4160000 · Charitable Donations Payable\t\t-7.00\tCharity/Pass through Donations (Round up)",
             "8506000 · Outreach - Donations\t\t25.00\t",
-            "8320000 · Store Supplies\t\t3.00\tEnd of Day",
-            "8504000 · Education\t\t5.00\tClass materials",
+            "8320000 · Store Supplies\t\t3.00\tInHouse: End of Day",
+            "8504000 · Education\t\t5.00\tInHouse: Class materials",
             "4444 · TBA Purchases\t\t-35.00\tPAID IN:",
             "4444 · TBA Purchases\t\t50.00\tPAID OUT:",
         ):
@@ -3885,19 +3885,18 @@ except RuntimeError:
                 self.assertIn(detail_line, text)
         self.assertNotIn("Offline Credit Card:", text)
 
-        self.assertNotIn("InHouse:", text)
         self.assertEqual(
             preview["inhouse_rows"],
             [
                 {
                     "account": "8320000 · Store Supplies",
-                    "memo": "End of Day",
+                    "memo": "InHouse: End of Day",
                     "amount": 3.0,
                     "iif_amount": 3.0,
                 },
                 {
                     "account": "8504000 · Education",
-                    "memo": "Class materials",
+                    "memo": "InHouse: Class materials",
                     "amount": 5.0,
                     "iif_amount": 5.0,
                 },
@@ -4020,11 +4019,10 @@ except RuntimeError:
         inhouse = [row for row in splits if row[3] in {"8320000 · Store Supplies", "8504000 · Education"}]
 
         self.assertEqual([(row[3], row[5], row[6]) for row in inhouse], [
-            ("8320000 · Store Supplies", "3.00", "End of Day - BS"),
-            ("8504000 · Education", "5.00", "Demo / Training - KC"),
+            ("8320000 · Store Supplies", "3.00", "InHouse: End of Day - BS"),
+            ("8504000 · Education", "5.00", "InHouse: Demo / Training - KC"),
         ])
         self.assertEqual(sum(float(row[5]) for row in inhouse), 8.0)
-        self.assertNotIn("InHouse:", text)
         self.assertFalse(any(row[3] == "4444 · TBA Purchases" and not row[5] and not row[6] for row in splits))
         self.assertIn("Over/Short per Closeout Sheet\t", text)
         self.assertIn("Over/Short per POS (to = POS total)\t", text)

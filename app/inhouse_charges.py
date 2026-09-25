@@ -2,13 +2,29 @@
 
 from decimal import Decimal, InvalidOperation
 
-from .closeout_reconciliation import normalize_inhouse_charges
+try:
+    from .closeout_reconciliation import normalize_inhouse_charges
+except ImportError:
+    from closeout_reconciliation import normalize_inhouse_charges
 
 
 END_OF_DAY = "End of Day"
 CUSTOM = "Custom"
 MEMO_TYPES = (END_OF_DAY, CUSTOM)
 END_OF_DAY_PREFIX = "End of Day - "
+INHOUSE_IIF_PREFIX = "InHouse:"
+
+
+def format_inhouse_iif_memo(memo: str) -> str:
+    """Add the QuickBooks InHouse marker without duplicating it."""
+    cleaned = str(memo or "").strip()
+    if cleaned.casefold().startswith(INHOUSE_IIF_PREFIX.casefold()):
+        cleaned = cleaned[len(INHOUSE_IIF_PREFIX):].lstrip()
+    return (
+        f"{INHOUSE_IIF_PREFIX} {cleaned}"
+        if cleaned
+        else INHOUSE_IIF_PREFIX
+    )
 
 
 def compose_inhouse_memo(

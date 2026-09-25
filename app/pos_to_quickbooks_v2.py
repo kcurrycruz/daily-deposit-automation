@@ -24,6 +24,7 @@ try:
     )
     from .membership_payments import build_membership_lines, load_membership_payments_file
     from .coupon_reconciliation import reconcile_coupon_receivable
+    from .inhouse_charges import format_inhouse_iif_memo
     from .closeout_reconciliation import (
         build_misc_adjustments,
         build_standard_reconciliation,
@@ -41,6 +42,7 @@ except ImportError:
     )
     from membership_payments import build_membership_lines, load_membership_payments_file
     from coupon_reconciliation import reconcile_coupon_receivable
+    from inhouse_charges import format_inhouse_iif_memo
     from closeout_reconciliation import (
         build_misc_adjustments,
         build_standard_reconciliation,
@@ -1600,13 +1602,18 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         inhouse_preview_rows = []
     else:
         inhouse_entries = [
-            (row["account"], "", row["memo"], -row["amount"])
+            (
+                row["account"],
+                "",
+                format_inhouse_iif_memo(row["memo"]),
+                -row["amount"],
+            )
             for row in inhouse_rows
         ]
         inhouse_preview_rows = [
             {
                 "account": row["account"],
-                "memo": row["memo"],
+                "memo": format_inhouse_iif_memo(row["memo"]),
                 "amount": row["amount"],
                 "iif_amount": row["amount"],
             }

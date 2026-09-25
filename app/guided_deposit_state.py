@@ -121,6 +121,9 @@ def _hydrate_reopened_app_step(session_state, step: str, workbook_key: str) -> b
             session_state[f"inhouse_account_{workbook_key}_{row_id}"] = row["account"]
             session_state[f"inhouse_memo_type_{workbook_key}_{row_id}"] = memo_type
             session_state[f"inhouse_memo_value_{workbook_key}_{row_id}"] = memo_value
+            session_state[f"inhouse_initials_{workbook_key}_{row_id}"] = (
+                memo_value if memo_type == "End of Day" else ""
+            )
             session_state[f"inhouse_amount_{workbook_key}_{row_id}"] = row["amount"]
         return True
 

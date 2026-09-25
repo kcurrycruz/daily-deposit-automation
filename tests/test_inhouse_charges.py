@@ -5,17 +5,28 @@ class InhouseMemoTests(unittest.TestCase):
     def test_end_of_day_memo_trims_and_uppercases_initials(self):
         from app.inhouse_charges import compose_inhouse_memo
 
-        self.assertEqual(compose_inhouse_memo("End of Day", " bs "), "End of Day - BS")
+        self.assertEqual(
+            compose_inhouse_memo("End of Day", initials=" bs "),
+            "End of Day - BS",
+        )
 
     def test_end_of_day_memo_does_not_require_initials(self):
         from app.inhouse_charges import compose_inhouse_memo
 
-        self.assertEqual(compose_inhouse_memo("End of Day", " "), "End of Day")
+        self.assertEqual(compose_inhouse_memo("End of Day", initials=" "), "End of Day")
 
     def test_custom_memo_trims_without_changing_case(self):
         from app.inhouse_charges import compose_inhouse_memo
 
         self.assertEqual(compose_inhouse_memo("Custom", "  Board lunch  "), "Board lunch")
+
+    def test_custom_memo_appends_optional_uppercase_initials(self):
+        from app.inhouse_charges import compose_inhouse_memo
+
+        self.assertEqual(
+            compose_inhouse_memo("Custom", "Board lunch", " bs "),
+            "Board lunch - BS",
+        )
 
     def test_blank_custom_or_unknown_memo_input_is_rejected(self):
         from app.inhouse_charges import compose_inhouse_memo

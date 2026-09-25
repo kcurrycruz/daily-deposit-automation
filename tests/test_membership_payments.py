@@ -1475,12 +1475,17 @@ class MembershipPaymentTests(unittest.TestCase):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
             encoding="utf-8"
         )
+        inhouse_source = source[
+            source.index("if uploaded and active_step == STEP_INHOUSE"):
+            source.index("if uploaded and active_step == STEP_CLOSEOUT")
+        ]
 
         self.assertIn("active_step == STEP_INHOUSE", source)
         self.assertIn('options=["End of Day", "Custom"]', source)
-        self.assertIn('row_columns[1].selectbox(\n            "Memo"', source)
+        self.assertIn('memo_type = row_columns[1].selectbox(\n                "Memo"', source)
         self.assertIn('"Initials"', source)
-        self.assertIn('"Custom Memo"', source)
+        self.assertIn('custom_memo_columns[0].text_input(\n                "Memo"', source)
+        self.assertNotIn("custom_columns = st.columns", inhouse_source)
         self.assertIn('"Save InHouse Charges & Continue"', source)
         self.assertLess(source.index("active_step == STEP_INHOUSE"), source.index("active_step == STEP_CLOSEOUT"))
         self.assertIn('st.markdown("#### InHouse Charges")', source)

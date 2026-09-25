@@ -3609,7 +3609,8 @@ if uploaded and active_step == STEP_INHOUSE:
         account_key = f"inhouse_account_{closeout_workbook_key}_{row_id}"
         memo_type_key = f"inhouse_memo_type_{closeout_workbook_key}_{row_id}"
         memo_value_key = f"inhouse_memo_value_{closeout_workbook_key}_{row_id}"
-        prior_memo_type_key = f"inhouse_prior_memo_type_{closeout_workbook_key}_{row_id}"
+        custom_mode_key = f"inhouse_custom_mode_{closeout_workbook_key}_{row_id}"
+        initials_key = f"inhouse_initials_{closeout_workbook_key}_{row_id}"
         amount_key = f"inhouse_amount_{closeout_workbook_key}_{row_id}"
         account = row_columns[0].selectbox(
             "QuickBooks Account",
@@ -3618,23 +3619,44 @@ if uploaded and active_step == STEP_INHOUSE:
             placeholder="Search account",
             key=account_key,
         )
-        memo_type = row_columns[1].selectbox(
-            "Memo",
-            options=["End of Day", "Custom"],
-            key=memo_type_key,
-        )
-        prior_memo_type = st.session_state.get(prior_memo_type_key, memo_type)
-        if prior_memo_type != memo_type:
-            st.session_state.pop(memo_value_key, None)
-        st.session_state[prior_memo_type_key] = memo_type
-        if memo_type == "End of Day":
-            memo_value = row_columns[2].text_input(
-                "Initials",
-                key=memo_value_key,
-                help="Optional. Leave blank to use End of Day.",
+        if custom_mode_key not in st.session_state:
+            st.session_state[custom_mode_key] = (
+                st.session_state.get(memo_type_key) == "Custom"
             )
+        if st.session_state[custom_mode_key]:
+            memo_type = "Custom"
+            custom_memo_columns = row_columns[1].columns(
+                [5, 1], vertical_alignment="bottom"
+            )
+            memo_value = custom_memo_columns[0].text_input(
+                "Memo",
+                key=memo_value_key,
+                placeholder="Enter custom memo",
+            )
+            if custom_memo_columns[1].button(
+                "↩",
+                key=f"inhouse_default_memo_{closeout_workbook_key}_{row_id}",
+                help="Return to End of Day memo",
+            ):
+                st.session_state[custom_mode_key] = False
+                st.session_state[memo_type_key] = "End of Day"
+                st.session_state.pop(memo_value_key, None)
+                st.rerun()
         else:
+            memo_type = row_columns[1].selectbox(
+                "Memo",
+                options=["End of Day", "Custom"],
+                key=memo_type_key,
+            )
             memo_value = ""
+            if memo_type == "Custom":
+                st.session_state[custom_mode_key] = True
+                st.rerun()
+        initials = row_columns[2].text_input(
+            "Initials",
+            key=initials_key,
+            help="Optional. Added to the end of the memo.",
+        )
         amount = row_columns[3].number_input(
             "Amount",
             min_value=0.0,
@@ -3642,19 +3664,11 @@ if uploaded and active_step == STEP_INHOUSE:
             format="%.2f",
             key=amount_key,
         )
-        if memo_type == "Custom":
-            custom_columns = st.columns([2.5, 1.4, 0.7, 0.9, 0.35])
-            memo_value = custom_columns[1].text_input(
-                "Custom Memo",
-                key=memo_value_key,
-            )
         try:
-            memo = compose_inhouse_memo(memo_type, memo_value)
+            memo = compose_inhouse_memo(memo_type, memo_value, initials)
         except ValueError as exc:
             memo_errors = True
-            (custom_columns[1] if memo_type == "Custom" else row_columns[2]).error(
-                str(exc)
-            )
+            row_columns[1].error(str(exc))
             memo = ""
         inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
         if row_columns[4].button(
@@ -3670,7 +3684,8 @@ if uploaded and active_step == STEP_INHOUSE:
                 account_key,
                 memo_type_key,
                 memo_value_key,
-                prior_memo_type_key,
+                custom_mode_key,
+                initials_key,
                 amount_key,
             ):
                 st.session_state.pop(widget_key, None)

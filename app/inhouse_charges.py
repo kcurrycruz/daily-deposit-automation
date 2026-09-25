@@ -11,15 +11,26 @@ MEMO_TYPES = (END_OF_DAY, CUSTOM)
 END_OF_DAY_PREFIX = "End of Day - "
 
 
-def compose_inhouse_memo(memo_type: str, value: str) -> str:
+def compose_inhouse_memo(
+    memo_type: str,
+    value: str = "",
+    initials: str = "",
+) -> str:
     if memo_type not in MEMO_TYPES:
         raise ValueError("Choose End of Day or Custom for the InHouse memo")
-    cleaned = str(value or "").strip()
+    cleaned_value = str(value or "").strip()
+    cleaned_initials = str(initials or "").strip().upper()
     if memo_type == END_OF_DAY:
-        return END_OF_DAY_PREFIX + cleaned.upper() if cleaned else END_OF_DAY
-    if not cleaned:
+        # Keep the previous two-argument call compatible with saved sessions.
+        suffix = cleaned_initials or cleaned_value.upper()
+        return END_OF_DAY_PREFIX + suffix if suffix else END_OF_DAY
+    if not cleaned_value:
         raise ValueError("Custom memo is required")
-    return cleaned
+    return (
+        f"{cleaned_value} - {cleaned_initials}"
+        if cleaned_initials
+        else cleaned_value
+    )
 
 
 def split_inhouse_memo(memo: str) -> tuple[str, str]:

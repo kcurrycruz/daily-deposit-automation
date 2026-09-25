@@ -174,6 +174,32 @@ RESULT: ⚠ MISMATCH — Check before importing!
 
         self.assertEqual(parsed[-1], 10.89)
 
+    def test_generated_hash_summary_is_not_reimported_as_tba_activity(self):
+        from app import pos_to_quickbooks_v2 as engine
+
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        data = build_sms_deposit_data(bundle)
+        workbook_bytes = build_reporting_workbook(
+            Path("assets/SubDept Single Total Report Template.xlsx"),
+            bundle,
+            data,
+        )
+        fixture_path = Path(__file__).parent / f"_hash_summary_{uuid4().hex}.xlsx"
+        fixture_path.write_bytes(workbook_bytes)
+        try:
+            details = engine.parse_hash_sheet_details(
+                fixture_path,
+                bundle.deposit_date,
+            )
+        finally:
+            fixture_path.unlink()
+
+        self.assertEqual(details["refunded_discounts"], 4.89)
+        self.assertEqual(details["pass_through_total"], 6.00)
+        self.assertEqual(details["paid_in_total"], 12.00)
+        self.assertEqual(details["misc_lines"], [])
+        self.assertEqual(details["detail_total"], 22.89)
+
     def test_present_zero_hash_control_matches_zero_activity(self):
         from app import pos_to_quickbooks_v2 as engine
 

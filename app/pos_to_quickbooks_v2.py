@@ -680,25 +680,53 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
 
     log.info(f"  Reading HASH sheet: '{found_tab}'")
     amount_col = None
+    code_col = None
     amount_header_row = None
     for row_num, row in enumerate(ws.iter_rows(min_row=1, max_row=min(ws.max_row, 20), values_only=True), start=1):
+        normalized_headers = {}
         for idx, value in enumerate(row):
             if value is None:
                 continue
             label = str(value).strip().casefold()
+            normalized_headers[idx] = re.sub(r"[^a-z0-9]+", "", label)
             if label == "amount" or label.startswith("amount "):
                 amount_col = idx
                 amount_header_row = row_num
-                break
         if amount_col is not None:
+            code_col = next(
+                (
+                    idx
+                    for idx, label in normalized_headers.items()
+                    if label in {"sdept", "code"}
+                ),
+                None,
+            )
+            if code_col is None:
+                description_col = next(
+                    (
+                        idx
+                        for idx, label in normalized_headers.items()
+                        if label in {"subdepartment", "subdept"}
+                    ),
+                    None,
+                )
+                if description_col is not None and description_col > 0:
+                    code_col = description_col - 1
             break
 
     if amount_col is None:
         log.warning("  HASH Amount column not found — HASH values cannot be imported safely.")
         wb.close()
         raise ValueError("HASH Amount column not found; the IIF was not created.")
+    if code_col is None:
+        log.warning("  HASH code column not found — HASH values cannot be imported safely.")
+        wb.close()
+        raise ValueError("HASH code column not found; the IIF was not created.")
 
-    log.info(f"  HASH Amount header found at row {amount_header_row}, column {amount_col + 1}")
+    log.info(
+        f"  HASH headers found at row {amount_header_row}: "
+        f"code column {code_col + 1}, Amount column {amount_col + 1}"
+    )
     refunded_discounts = 0.0
     pass_through_total = 0.0
     paid_in_total = 0.0
@@ -710,21 +738,17 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
         ws.iter_rows(min_row=amount_header_row + 1, values_only=True),
         start=amount_header_row + 1,
     ):
-        code = None
-        code_index = None
-        for idx in range(min(4, len(row))):
-            value = row[idx]
-            if value is None:
-                continue
-            try:
-                candidate_code = int(float(value))
-            except (TypeError, ValueError):
-                continue
-            code = candidate_code
-            code_index = idx
-            break
-        if code is None:
+        if len(row) <= code_col:
             continue
+        raw_code = row[code_col]
+        try:
+            numeric_code = float(raw_code)
+        except (TypeError, ValueError):
+            continue
+        if not numeric_code.is_integer():
+            continue
+        code = int(numeric_code)
+        code_index = code_col
         if len(row) <= amount_col:
             log.warning(f"    HASH row {excel_row_num} code {code}: Amount column missing")
             continue

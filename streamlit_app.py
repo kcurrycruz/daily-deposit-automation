@@ -143,7 +143,11 @@ from app.guided_step_ui import (
     saved_inhouse_for_closeout,
     seed_historical_inhouse_widgets,
 )
-from app.inhouse_charges import compose_inhouse_memo, normalize_inhouse_step_payload
+from app.inhouse_charges import (
+    compose_inhouse_memo,
+    describe_inhouse_memo_draft,
+    normalize_inhouse_step_payload,
+)
 from app.upload_intake_ui import (
     missing_settlement_date_warning,
     render_upload_inputs,
@@ -3600,7 +3604,7 @@ if uploaded and active_step == STEP_INHOUSE:
     st.write(f"${charge_house_total:,.2f}")
 
     inhouse_rows = []
-    memo_errors = False
+    memo_error_messages = []
     for row_number, row_id in enumerate(list(st.session_state[inhouse_ids_key]), start=1):
         row_columns = st.columns(
             [2.5, 1.4, 0.7, 0.9, 0.35],
@@ -3619,10 +3623,11 @@ if uploaded and active_step == STEP_INHOUSE:
             key=account_key,
         )
         selected_memo_type = st.session_state.get(memo_type_key, "End of Day")
-        memo_label = (
-            "Memo: Custom"
-            if selected_memo_type == "Custom"
-            else "Memo: End of Day"
+        selected_memo_value = st.session_state.get(memo_value_key, "")
+        memo_label, memo_draft_error = describe_inhouse_memo_draft(
+            selected_memo_type,
+            selected_memo_value,
+            row_number,
         )
         with row_columns[1].popover(memo_label, use_container_width=True):
             memo_type = st.radio(
@@ -3655,7 +3660,8 @@ if uploaded and active_step == STEP_INHOUSE:
         try:
             memo = compose_inhouse_memo(memo_type, memo_value, initials)
         except ValueError:
-            memo_errors = True
+            if memo_draft_error:
+                memo_error_messages.append(memo_draft_error)
             memo = ""
         inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
         if row_columns[4].button(
@@ -3676,6 +3682,12 @@ if uploaded and active_step == STEP_INHOUSE:
             ):
                 st.session_state.pop(widget_key, None)
             st.rerun()
+
+    if memo_error_messages:
+        st.error(
+            "Cannot continue yet. " + " ".join(memo_error_messages),
+            icon="🚫",
+        )
 
     if st.button(
         "+ Add InHouse charge",
@@ -3712,24 +3724,25 @@ if uploaded and active_step == STEP_INHOUSE:
         target_id="inhouse-save-and-continue",
         request_key=f"inhouse_continue_scroll_{closeout_workbook_key}",
     )
-    if st.button("Save InHouse Charges & Continue", type="primary", disabled=memo_errors):
-        try:
-            payload = normalize_inhouse_step_payload({"rows": inhouse_rows})
-            transition = save_inhouse_transition(
-                required_steps, step_completions, inhouse_saved_key, payload
-            )
-        except ValueError as exc:
-            st.error(str(exc), icon="🚫")
-        else:
-            st.session_state.update(transition["saved_payload"])
-            st.session_state[workflow_completion_key] = transition["completions"]
-            prepare_closeout_after_inhouse_save(
-                st.session_state, closeout_workbook_key
-            )
-            queue_continue_scroll(
-                st.session_state, f"closeout_continue_scroll_{closeout_workbook_key}"
-            )
-            st.rerun()
+    if st.button("Save InHouse Charges & Continue", type="primary"):
+        if not memo_error_messages:
+            try:
+                payload = normalize_inhouse_step_payload({"rows": inhouse_rows})
+                transition = save_inhouse_transition(
+                    required_steps, step_completions, inhouse_saved_key, payload
+                )
+            except ValueError as exc:
+                st.error(f"Cannot continue yet. {exc}", icon="🚫")
+            else:
+                st.session_state.update(transition["saved_payload"])
+                st.session_state[workflow_completion_key] = transition["completions"]
+                prepare_closeout_after_inhouse_save(
+                    st.session_state, closeout_workbook_key
+                )
+                queue_continue_scroll(
+                    st.session_state, f"closeout_continue_scroll_{closeout_workbook_key}"
+                )
+                st.rerun()
     active_step_panel.__exit__(None, None, None)
 
 if uploaded and STEP_CLOSEOUT in step_completions:

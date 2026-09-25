@@ -15,6 +15,24 @@ END_OF_DAY_PREFIX = "End of Day - "
 INHOUSE_IIF_PREFIX = "InHouse:"
 
 
+def describe_inhouse_memo_draft(
+    memo_type: str,
+    value: str = "",
+    row_number: int = 1,
+) -> tuple[str, str]:
+    """Return the closed-control label and any user-facing draft error."""
+    cleaned_value = str(value or "").strip()
+    if memo_type == CUSTOM:
+        if not cleaned_value:
+            return (
+                "Memo: Required",
+                f"InHouse charge {row_number} uses Custom memo. "
+                "Enter the custom memo to continue.",
+            )
+        return f"Memo: {cleaned_value}", ""
+    return "Memo: End of Day", ""
+
+
 def format_inhouse_iif_memo(memo: str) -> str:
     """Add the QuickBooks InHouse marker without duplicating it."""
     cleaned = str(memo or "").strip()

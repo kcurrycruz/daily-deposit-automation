@@ -2,6 +2,25 @@ import unittest
 
 
 class InhouseMemoTests(unittest.TestCase):
+    def test_custom_memo_draft_explains_why_row_cannot_continue(self):
+        from app.inhouse_charges import describe_inhouse_memo_draft
+
+        self.assertEqual(
+            describe_inhouse_memo_draft("Custom", "", 4),
+            (
+                "Memo: Required",
+                "InHouse charge 4 uses Custom memo. Enter the custom memo to continue.",
+            ),
+        )
+
+    def test_completed_custom_memo_is_visible_when_popover_is_closed(self):
+        from app.inhouse_charges import describe_inhouse_memo_draft
+
+        self.assertEqual(
+            describe_inhouse_memo_draft("Custom", "  Board lunch  ", 2),
+            ("Memo: Board lunch", ""),
+        )
+
     def test_iif_memo_adds_inhouse_prefix_exactly_once(self):
         from app.inhouse_charges import format_inhouse_iif_memo
 

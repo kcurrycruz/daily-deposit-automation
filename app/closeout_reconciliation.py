@@ -161,9 +161,9 @@ def normalize_inhouse_charges(rows, expected_total) -> list[dict]:
             raise ValueError("InHouse row must be an object")
         account = _required_iif_text(row.get("account"), "InHouse account")
         memo = _required_iif_text(row.get("memo"), "InHouse memo")
-        amount = _nonnegative_money(row.get("amount"), "InHouse amount")
-        if amount <= 0:
-            raise ValueError("InHouse amount must be greater than zero")
+        amount = _money(row.get("amount"), "InHouse amount")
+        if amount == 0:
+            raise ValueError("InHouse amount must not be zero")
         normalized.append(
             {"account": account, "memo": memo, "amount": float(amount)}
         )

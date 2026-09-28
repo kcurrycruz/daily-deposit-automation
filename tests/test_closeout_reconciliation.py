@@ -613,6 +613,20 @@ class CloseoutAdjustmentTests(unittest.TestCase):
             ],
         )
 
+    def test_normalize_closeout_payload_accepts_inhouse_credit(self):
+        from app.closeout_reconciliation import normalize_closeout_payload
+
+        actuals = {key: 10 for key in STANDARD_ORDER}
+        actuals["charge_house"] = 15
+        payload = self.closeout_payload(actuals=actuals, inhouse_charges=[
+            {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 20},
+            {"account": "8504000 · Education", "memo": "Credit", "amount": -5},
+        ])
+
+        normalized = normalize_closeout_payload(payload)
+        self.assertEqual(normalized["actuals"]["charge_house"], 15.0)
+        self.assertEqual([row["amount"] for row in normalized["inhouse_charges"]], [20.0, -5.0])
+
     def test_normalize_closeout_payload_rejects_invalid_inhouse_breakdowns(self):
         from app.closeout_reconciliation import normalize_closeout_payload
 
@@ -633,7 +647,7 @@ class CloseoutAdjustmentTests(unittest.TestCase):
             ),
             (
                 [{"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 0}],
-                "must be greater than zero",
+                "must not be zero",
             ),
         ]
         for rows, message in cases:

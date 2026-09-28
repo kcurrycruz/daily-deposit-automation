@@ -3713,10 +3713,10 @@ if uploaded and active_step == STEP_INHOUSE:
         )
         amount = row_columns[3].number_input(
             "Amount",
-            min_value=0.0,
             step=0.01,
             format="%.2f",
             key=amount_key,
+            help="Enter a negative amount for a credit.",
         )
         try:
             memo = compose_inhouse_memo(memo_type, memo_value, initials)

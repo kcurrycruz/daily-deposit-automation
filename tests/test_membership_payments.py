@@ -4162,6 +4162,49 @@ except RuntimeError:
         self.assertNotIn("Over/Short per Closeout Sheet - Cash", text)
         self.assertIsNone(preview)
 
+    def test_generate_iif_manual_closeout_exports_negative_inhouse_credit(self):
+        text, _ = self._generate_closeout_fixture({
+            "mode": "manual",
+            "charge_house_actual": 15,
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 20},
+                {"account": "8504000 · Education", "memo": "Credit", "amount": -5},
+            ],
+        })
+        splits = [line.split("\t") for line in text.splitlines() if line.startswith("SPL\t")]
+        inhouse = [row for row in splits if row[3] in {"8320000 · Store Supplies", "8504000 · Education"}]
+
+        self.assertEqual([(row[3], row[5], row[6]) for row in inhouse], [
+            ("8320000 · Store Supplies", "20.00", "InHouse: End of Day"),
+            ("8504000 · Education", "-5.00", "InHouse: Credit"),
+        ])
+        self.assertEqual(sum(float(row[5]) for row in inhouse), 15.0)
+
+    def test_generate_iif_closeout_exports_negative_inhouse_credit(self):
+        text, preview = self._generate_closeout_fixture({
+            "mode": "closeout",
+            "reviewed": True,
+            "actuals": {
+                "cash": 110,
+                "checks": 45,
+                "donation": 25,
+                "charge_house": 15,
+                "offline_zon": 0,
+                "vendor_coupons": 188.25,
+                "paid_out": 50,
+                "paid_in": 35,
+            },
+            "inhouse_charges": [
+                {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 20},
+                {"account": "8504000 · Education", "memo": "Credit", "amount": -5},
+            ],
+            "final_total": 5000,
+            "approve_final_pos": True,
+        })
+        self.assertIn("8320000 · Store Supplies\t\t20.00\tInHouse: End of Day", text)
+        self.assertIn("8504000 · Education\t\t-5.00\tInHouse: Credit", text)
+        self.assertEqual([row["iif_amount"] for row in preview["inhouse_rows"]], [20.0, -5.0])
+
     def test_generate_iif_manual_closeout_with_explicit_zero_inhouse_omits_placeholders(self):
         text, _ = self._generate_closeout_fixture({
             "mode": "manual", "charge_house_actual": 0, "inhouse_charges": []

@@ -76,13 +76,13 @@ def split_inhouse_memo(memo: str) -> tuple[str, str]:
     return CUSTOM, cleaned
 
 
-def _nonnegative_money(value, label: str) -> Decimal:
+def _money(value, label: str) -> Decimal:
     try:
         amount = Decimal(str(value)).quantize(Decimal("0.01"))
     except (InvalidOperation, TypeError, ValueError):
         raise ValueError(f"{label} must be a valid amount") from None
-    if not amount.is_finite() or amount < 0:
-        raise ValueError(f"{label} must be a nonnegative amount")
+    if not amount.is_finite():
+        raise ValueError(f"{label} must be a valid amount")
     return amount
 
 
@@ -98,7 +98,7 @@ def normalize_inhouse_step_payload(payload: dict) -> dict:
     for row in raw_rows:
         if not isinstance(row, dict):
             raise ValueError("InHouse row must be an object")
-        actual += _nonnegative_money(row.get("amount"), "InHouse amount")
+        actual += _money(row.get("amount"), "InHouse amount")
     actual = actual.quantize(Decimal("0.01"))
     rows = normalize_inhouse_charges(raw_rows, actual)
     return {"actual": float(actual), "rows": rows}

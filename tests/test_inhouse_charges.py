@@ -88,6 +88,17 @@ class InhousePayloadTests(unittest.TestCase):
         self.assertEqual(payload["actual"], 140.82)
         self.assertEqual(sum(row["amount"] for row in payload["rows"]), 140.82)
 
+    def test_step_payload_nets_negative_credit_against_positive_charge(self):
+        from app.inhouse_charges import normalize_inhouse_step_payload
+
+        payload = normalize_inhouse_step_payload({"rows": [
+            {"account": "8320000 · Store Supplies", "memo": "End of Day", "amount": 20},
+            {"account": "8504000 · Education", "memo": "Credit", "amount": -5},
+        ]})
+
+        self.assertEqual(payload["actual"], 15.0)
+        self.assertEqual([row["amount"] for row in payload["rows"]], [20.0, -5.0])
+
     def test_step_payload_requires_at_least_one_charge(self):
         from app.inhouse_charges import normalize_inhouse_step_payload
 

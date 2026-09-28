@@ -1,6 +1,7 @@
 import html
 import json
 import re
+from datetime import datetime
 
 from app.ui_helpers import deposit_stepper_html
 from app.closeout_reconciliation import normalize_closeout_payload
@@ -281,6 +282,8 @@ def render_prepare_iif_action(
     download_status=None,
     tba_rows=(),
     disabled: bool,
+    previous_run: dict | None = None,
+    confirmation_key: str | None = None,
 ) -> bool:
     """Render the final action or paired downloads after workflow completion."""
     if not visible:
@@ -315,9 +318,28 @@ def render_prepare_iif_action(
             )
             ui.dataframe(tba_rows, use_container_width=True, hide_index=True)
         return False
-    return ui.button(
+    confirmed = True
+    if previous_run is not None:
+        try:
+            run_time = datetime.fromisoformat(str(previous_run.get("run_at", "")))
+            when = run_time.strftime("%m/%d/%Y at %I:%M %p")
+        except ValueError:
+            when = "an earlier run"
+        total = previous_run.get("deposit_total")
+        total_note = f" Its deposit total was ${float(total):,.2f}." if total is not None else ""
+        ui.warning(
+            f"An IIF for this deposit date was previously generated on {when}."
+            f"{total_note} Check QuickBooks before preparing another IIF.",
+            icon="⚠️",
+        )
+        confirmed = ui.checkbox(
+            "I checked QuickBooks and want to prepare another IIF for this date.",
+            key=confirmation_key,
+        )
+    clicked = ui.button(
         "🌿  Validate & Prepare IIF",
         type="primary",
         use_container_width=True,
-        disabled=disabled,
+        disabled=disabled or not confirmed,
     )
+    return clicked and confirmed

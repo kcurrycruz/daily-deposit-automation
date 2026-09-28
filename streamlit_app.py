@@ -85,6 +85,7 @@ from app.operations_status_ui import (
     sms_run_context,
 )
 from app.run_history_ui import (
+    latest_prior_iif_run,
     render_daily_sidebar,
     render_sidebar_collapse_request,
 )
@@ -1668,6 +1669,8 @@ def archive_run(uploaded_files, settlement_file, result: dict, report_date: date
         "date_mismatch": bool(date_info.get("has_mismatch", False)),
         "sheet_roles": {k: v for k, v in roles.items() if v},
     }
+    if v.get("deposit_total") is not None:
+        record["deposit_total"] = round(abs(float(v["deposit_total"])), 2)
     if reporting_path is not None:
         record["reporting_workbook_filename"] = reporting_name
         record["archived_reporting_workbook"] = str(reporting_path)
@@ -4400,12 +4403,23 @@ if (
                 help="Contains the uploaded financial reports and your unfinished entries. Save it in your Finance folder.",
                 key=f"save_deposit_draft_{closeout_workbook_key}",
             )
+previous_iif_run = (
+    latest_prior_iif_run(load_run_history(), deposit_date)
+    if deposit_date is not None and current_run_context is not None
+    and current_result is None
+    else None
+)
 run_clicked = render_prepare_iif_action(
     st,
     visible=bool(uploaded is not None and guided_workflow_ready),
     download_details=download_details,
     download_status=download_status,
     tba_rows=tba_quickbooks_rows(current_result),
+    previous_run=previous_iif_run,
+    confirmation_key=(
+        f"repeat_iif_{previous_iif_run['id']}_{current_run_context}"
+        if previous_iif_run is not None else None
+    ),
     disabled=(
         settlement_file is None
         or deposit_date is None

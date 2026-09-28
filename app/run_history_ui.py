@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import html
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from app.program_hub_ui import (
     SIDEBAR_COLLAPSE_REQUEST_KEY,
     render_all_programs_action,
 )
+
+
+def latest_prior_iif_run(records: list[dict], deposit_date: date) -> dict | None:
+    """Find the most recent archived IIF for the selected deposit date."""
+    matches = [
+        record for record in records
+        if isinstance(record, dict)
+        and record.get("report_date") == deposit_date.isoformat()
+        and record.get("archived_iif")
+    ]
+    return max(matches, key=lambda record: str(record.get("run_at") or ""), default=None)
 
 
 def render_sidebar_collapse_request(component_html, state) -> bool:

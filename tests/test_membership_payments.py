@@ -328,6 +328,51 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertEqual(ui.events[0][0], "button")
         self.assertEqual(ui.events[0][1][0], "🌿  Validate & Prepare IIF")
 
+    def test_repeat_deposit_requires_explicit_confirmation_before_preparing_iif(self):
+        from app.guided_step_ui import render_prepare_iif_action
+
+        class RecordingUI:
+            def __init__(self, confirmed):
+                self.confirmed = confirmed
+                self.events = []
+
+            def warning(self, message, **kwargs):
+                self.events.append(("warning", message))
+
+            def checkbox(self, label, **kwargs):
+                self.events.append(("checkbox", label, kwargs))
+                return self.confirmed
+
+            def button(self, label, **kwargs):
+                self.events.append(("button", label, kwargs))
+                return True
+
+        previous = {
+            "id": "prior-run",
+            "report_date": "2026-09-14",
+            "run_at": "2026-09-14T14:30:00",
+            "deposit_total": 7531.06,
+        }
+        for confirmed in (False, True):
+            with self.subTest(confirmed=confirmed):
+                ui = RecordingUI(confirmed)
+                clicked = render_prepare_iif_action(
+                    ui,
+                    visible=True,
+                    download_details=None,
+                    disabled=False,
+                    previous_run=previous,
+                    confirmation_key="repeat-2026-09-14-prior-run-context",
+                )
+
+                self.assertEqual(clicked, confirmed)
+                self.assertIn("$7,531.06", ui.events[0][1])
+                self.assertIn("generated", ui.events[0][1].lower())
+                self.assertNotIn("imported", ui.events[0][1].lower())
+                self.assertEqual(ui.events[1][0], "checkbox")
+                self.assertEqual(ui.events[1][2]["key"], "repeat-2026-09-14-prior-run-context")
+                self.assertEqual(ui.events[2][2]["disabled"], not confirmed)
+
     def test_verified_card_settlement_is_shown_on_upload_page_before_continue(self):
         source = (Path(__file__).parents[1] / "streamlit_app.py").read_text(
             encoding="utf-8"

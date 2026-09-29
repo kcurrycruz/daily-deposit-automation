@@ -1034,7 +1034,8 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         "amex": 0.0, "discover": 0.0, "debit": 0.0, "ebt_cash": 0.0,
         "ebt_food": 0.0, "dufb": 0.0, "cash": 0.0, "check": 0.0,
         "vendor_coupon": 0.0, "charge": 0.0, "prepaid_card": 0.0,
-        "donation": 0.0, "subscription": 0.0, "paid_out": 0.0,
+        "donation": 0.0, "subscription": 0.0, "share_payment_sales": 0.0,
+        "paid_out": 0.0,
         "offline_credit_card": 0.0,
     }
 
@@ -1084,6 +1085,7 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 914: paid_out_revenue = to_float(amt)
         if code in (1114, 1314): paid_out_tender = round(paid_out_tender + to_float(amt), 2)
         if code == 1122: bs["donation"] = to_float(amt)
+        if code == 110: bs["share_payment_sales"] = round(bs["share_payment_sales"] + to_float(amt), 2)
         if code == 3420: bs["subscription"] = to_float(amt)
 
     bs["prepaid_card"] = round(
@@ -1093,6 +1095,9 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
     )
     bs["paid_out"] = (
         paid_out_revenue if paid_out_revenue is not None else paid_out_tender
+    )
+    bs["subscription"] = round(
+        bs["subscription"] + bs["share_payment_sales"], 2
     )
     if bs["paid_out"]:
         log.info(f"    Paid Out: ${bs['paid_out']:,.2f} — reduces the QuickBooks deposit")
@@ -1256,6 +1261,29 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
         settlement_data = {}
     if membership_payments is None:
         membership_payments = []
+
+    share_payment_sales = Decimal(str(bs_data.get("share_payment_sales", 0.0)))
+    share_payment_misc = [
+        amount
+        for memo, amount in misc_tba_lines
+        if str(memo).strip().casefold() == "share payment"
+    ]
+    iif_misc_tba_lines = misc_tba_lines
+    if share_payment_sales:
+        reported_share_sales = sum(
+            (Decimal(str(amount)) for amount in share_payment_misc), Decimal("0.00")
+        )
+        if reported_share_sales.quantize(Decimal("0.01")) != share_payment_sales.quantize(Decimal("0.01")):
+            raise ValueError(
+                "Share Payment sales do not match Balance Sheet SHARE PAYMENTS "
+                f"(code 110): sales ${reported_share_sales:,.2f}, "
+                f"Balance Sheet ${share_payment_sales:,.2f}."
+            )
+        iif_misc_tba_lines = [
+            (memo, amount)
+            for memo, amount in misc_tba_lines
+            if str(memo).strip().casefold() != "share payment"
+        ]
 
     candidate_closeout = None
     normalized_closeout = None
@@ -1770,8 +1798,8 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 )
             )
 
-    if normalized_closeout is None and misc_tba_lines:
-        for memo, amount in misc_tba_lines:
+    if normalized_closeout is None and iif_misc_tba_lines:
+        for memo, amount in iif_misc_tba_lines:
             iif_amt = -amount
             spl_total += iif_amt
             spls.append(spl(date_str, "4444 · TBA Purchases", "", iif_amt, memo))
@@ -1853,7 +1881,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 "iif_amount": -amount,
                 "class_name": "",
             }
-            for memo, amount in misc_tba_lines
+            for memo, amount in iif_misc_tba_lines
         ]
         offline_tba_rows = []
         if offline_credit_card:

@@ -4441,6 +4441,83 @@ except RuntimeError:
         self.assertEqual(parsed["prepaid_card"], 587.67)
         self.assertEqual(parsed["paid_out"], 32.04)
 
+    def test_parse_bs_adds_share_payments_code_110_to_subscription(self):
+        from tempfile import TemporaryDirectory
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as temp_dir:
+            workbook_path = Path(temp_dir) / "092826 BS.xlsx"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "092826 BS"
+            sheet.append([110, "SHARE PAYMENTS", None, None, 16.90])
+            sheet.append([3420, "Subscription revenue", None, None, 42.25])
+            workbook.save(workbook_path)
+            workbook.close()
+
+            parsed = engine.parse_bs_sheet(workbook_path, date(2026, 9, 28))
+
+        self.assertEqual(parsed["subscription"], 59.15)
+        self.assertEqual(parsed["share_payment_sales"], 16.90)
+
+    def test_iif_posts_misclassified_share_payment_only_as_member_shares(self):
+        from tempfile import TemporaryDirectory
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as temp_dir:
+            previous_output_dir = engine.output_dir
+            previous_log_dir = engine.LOG_DIR
+            previous_log_disabled = engine.log.disabled
+            engine.output_dir = Path(temp_dir)
+            engine.LOG_DIR = Path(temp_dir)
+            engine.log.disabled = True
+            try:
+                iif_path = engine.generate_iif(
+                    {}, {}, {}, date(2026, 9, 28),
+                    misc_tba_lines=[("Share Payment", 16.90)],
+                    bs_data={"subscription": 59.15, "share_payment_sales": 16.90},
+                    membership_mode="manual",
+                )
+                iif_lines = iif_path.read_text(encoding="utf-8").splitlines()
+            finally:
+                engine.output_dir = previous_output_dir
+                engine.LOG_DIR = previous_log_dir
+                engine.log.disabled = previous_log_disabled
+
+        self.assertTrue(
+            any("Member Shares - Paid" in line and "\t-59.15\t" in line for line in iif_lines)
+        )
+        self.assertFalse(any("\tShare Payment\t" in line for line in iif_lines))
+
+    def test_iif_rejects_share_payment_sales_that_disagree_with_bs_110(self):
+        from tempfile import TemporaryDirectory
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as temp_dir:
+            previous_output_dir = engine.output_dir
+            previous_log_dir = engine.LOG_DIR
+            previous_log_disabled = engine.log.disabled
+            engine.output_dir = Path(temp_dir)
+            engine.LOG_DIR = Path(temp_dir)
+            engine.log.disabled = True
+            try:
+                with self.assertRaisesRegex(ValueError, "Share Payment sales do not match"):
+                    engine.generate_iif(
+                        {}, {}, {}, date(2026, 9, 28),
+                        misc_tba_lines=[("Share Payment", 15.00)],
+                        bs_data={"subscription": 59.15, "share_payment_sales": 16.90},
+                        membership_mode="manual",
+                    )
+            finally:
+                engine.output_dir = previous_output_dir
+                engine.LOG_DIR = previous_log_dir
+                engine.log.disabled = previous_log_disabled
+
     def test_generate_iif_keeps_multiple_members_and_new_plan_offsets_separate(self):
         from datetime import date
         from pathlib import Path
@@ -4606,6 +4683,24 @@ except RuntimeError:
         workbook.save(content)
 
         self.assertEqual(read_subscription_total(content.getvalue(), "082426 BS"), 28.45)
+
+    def test_subscription_total_adds_misclassified_share_payments_code_110(self):
+        from io import BytesIO
+
+        import openpyxl
+
+        from app.membership_payments import read_subscription_total
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "092826 BS"
+        sheet.append([110, "SHARE PAYMENTS", None, None, 16.90])
+        sheet.append([3420, "Subscription Revenue", None, None, 42.25])
+        content = BytesIO()
+        workbook.save(content)
+        workbook.close()
+
+        self.assertEqual(read_subscription_total(content.getvalue(), "092826 BS"), 59.15)
 
     def test_subscription_total_rejects_missing_or_malformed_balance_sheet_data(self):
         from io import BytesIO

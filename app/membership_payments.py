@@ -395,22 +395,23 @@ def read_subscription_total(workbook_bytes: bytes, bs_sheet_name: str | None = N
                 raise ValueError("Balance Sheet tab was not found")
             sheet = workbook[sheet_name]
 
+        total = Decimal("0.00")
         for row in sheet.iter_rows(values_only=True):
             try:
                 code = int(float(row[0]))
             except (TypeError, ValueError):
                 continue
-            if code == 3420:
+            if code in (110, 3420):
                 try:
                     amount = Decimal(str(row[4]))
                     if not amount.is_finite():
                         raise InvalidOperation
-                    return float(abs(amount).quantize(Decimal("0.01")))
+                    total += abs(amount).quantize(Decimal("0.01"))
                 except (IndexError, InvalidOperation, TypeError, ValueError):
                     raise ValueError(
-                        "Subscription Revenue (BS code 3420) does not contain a valid amount"
+                        f"Member shares (BS code {code}) does not contain a valid amount"
                     ) from None
-        return 0.0
+        return float(total)
     finally:
         workbook.close()
 

@@ -58,9 +58,13 @@ _BS_CODE_KEYS = {
     906: "charge",
     908: "vendor_coupon",
     1122: "donation",
+}
+_BS_SUMMED_CODES = {
+    110: "subscription",
+    930: "visa_mc",
+    931: "visa_mc",
     3420: "subscription",
 }
-_BS_SUMMED_CODES = {930: "visa_mc", 931: "visa_mc"}
 _BS_DEFAULT_KEYS = set(_BS_CODE_KEYS.values()) | set(_BS_SUMMED_CODES.values()) | {
     "sales_tax",
     "offline_credit_card",

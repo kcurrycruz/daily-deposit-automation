@@ -158,6 +158,24 @@ class SmsDepositDataTests(unittest.TestCase):
 
         self.assertEqual(data.bs_data["paid_out"], Decimal("32.04"))
 
+    def test_share_payments_code_110_adds_to_subscription_revenue(self):
+        reports = list(sms_exports_091426())
+        bs_index = next(i for i, report in enumerate(reports) if report.role == "bs")
+        bs = reports[bs_index]
+        reports[bs_index] = SmsExport(
+            role=bs.role,
+            filename=bs.filename,
+            report_date=bs.report_date,
+            rows=bs.rows + (
+                (110, "SHARE PAYMENTS", 16.90),
+                (3420, "Subscription revenue", 42.25),
+            ),
+        )
+
+        data = build_sms_deposit_data(build_sms_export_bundle(reports))
+
+        self.assertEqual(data.bs_data["subscription"], Decimal("59.15"))
+
     def test_hash_uses_printed_amount_total_when_paid_in_adds_a_right_hand_value(self):
         reports = list(sms_exports_091426())
         hash_index = next(

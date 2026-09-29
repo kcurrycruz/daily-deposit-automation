@@ -4416,6 +4416,31 @@ except RuntimeError:
 
         self.assertEqual(parsed["offline_credit_card"], -44.07)
 
+    def test_parse_bs_uses_revenue_totals_for_drawer_paid_out_and_gift_cards(self):
+        from tempfile import TemporaryDirectory
+
+        import openpyxl
+
+        from app import pos_to_quickbooks_v2 as engine
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as temp_dir:
+            workbook_path = Path(temp_dir) / "092626 BS.xlsx"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "092626 BS"
+            sheet.append([980, "Rev. Prepaid card/voucher", None, None, 537.67])
+            sheet.append([917, "Rev. Gift card used", None, None, 50.00])
+            sheet.append([1317, "Dwr Gift card used", None, None, 50.00])
+            sheet.append([914, "Rev. Paid out", None, None, 32.04])
+            sheet.append([1314, "Dwr Paid out", None, None, 32.04])
+            workbook.save(workbook_path)
+            workbook.close()
+
+            parsed = engine.parse_bs_sheet(workbook_path, date(2026, 9, 26))
+
+        self.assertEqual(parsed["prepaid_card"], 587.67)
+        self.assertEqual(parsed["paid_out"], 32.04)
+
     def test_generate_iif_keeps_multiple_members_and_new_plan_offsets_separate(self):
         from datetime import date
         from pathlib import Path

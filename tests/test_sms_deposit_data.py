@@ -121,6 +121,43 @@ class SmsDepositDataTests(unittest.TestCase):
         self.assertEqual(data.hash_refunded, Decimal("4.89"))
         self.assertEqual(data.hash_pass_through, Decimal("6.00"))
 
+    def test_drawer_gift_card_redemption_adds_revenue_once_to_prepaid_card(self):
+        reports = list(sms_exports_091426())
+        bs_index = next(i for i, report in enumerate(reports) if report.role == "bs")
+        bs = reports[bs_index]
+        reports[bs_index] = SmsExport(
+            role=bs.role,
+            filename=bs.filename,
+            report_date=bs.report_date,
+            rows=bs.rows + (
+                (980, "Rev. Prepaid card/voucher", 537.67),
+                (917, "Rev. Gift card used", 50.00),
+                (1317, "Dwr Gift card used", 50.00),
+            ),
+        )
+
+        data = build_sms_deposit_data(build_sms_export_bundle(reports))
+
+        self.assertEqual(data.bs_data["prepaid_card"], Decimal("587.67"))
+
+    def test_drawer_paid_out_uses_revenue_total_once(self):
+        reports = list(sms_exports_091426())
+        bs_index = next(i for i, report in enumerate(reports) if report.role == "bs")
+        bs = reports[bs_index]
+        reports[bs_index] = SmsExport(
+            role=bs.role,
+            filename=bs.filename,
+            report_date=bs.report_date,
+            rows=bs.rows + (
+                (914, "Rev. Paid out", 32.04),
+                (1314, "Dwr Paid out", 32.04),
+            ),
+        )
+
+        data = build_sms_deposit_data(build_sms_export_bundle(reports))
+
+        self.assertEqual(data.bs_data["paid_out"], Decimal("32.04"))
+
     def test_hash_uses_printed_amount_total_when_paid_in_adds_a_right_hand_value(self):
         reports = list(sms_exports_091426())
         hash_index = next(

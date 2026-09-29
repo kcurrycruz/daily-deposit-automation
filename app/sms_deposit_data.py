@@ -57,14 +57,14 @@ _BS_CODE_KEYS = {
     980: "prepaid_card",
     906: "charge",
     908: "vendor_coupon",
-    1114: "paid_out",
     1122: "donation",
     3420: "subscription",
 }
-_BS_SUMMED_CODES = {930: "visa_mc", 931: "visa_mc", 1117: "prepaid_card"}
+_BS_SUMMED_CODES = {930: "visa_mc", 931: "visa_mc"}
 _BS_DEFAULT_KEYS = set(_BS_CODE_KEYS.values()) | set(_BS_SUMMED_CODES.values()) | {
     "sales_tax",
     "offline_credit_card",
+    "paid_out",
 }
 
 
@@ -208,6 +208,10 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
 def _balance_sheet_amounts(report: SmsExport) -> dict[str, Decimal]:
     header_index, columns = _balance_sheet_columns(report.rows)
     data = {key: _ZERO for key in _BS_DEFAULT_KEYS}
+    gift_card_revenue = None
+    gift_card_tender = _ZERO
+    paid_out_revenue = None
+    paid_out_tender = _ZERO
     for row in report.rows[header_index + 1 :]:
         code = _integer(_cell(row, columns["code"]))
         amount = _maybe_money(_cell(row, columns["amount"]))
@@ -218,10 +222,25 @@ def _balance_sheet_amounts(report: SmsExport) -> dict[str, Decimal]:
         elif code in _BS_SUMMED_CODES:
             key = _BS_SUMMED_CODES[code]
             data[key] = _money(data[key] + amount)
+        elif code == 917:
+            gift_card_revenue = amount
+        elif code in (1117, 1317):
+            gift_card_tender = _money(gift_card_tender + amount)
+        elif code == 914:
+            paid_out_revenue = amount
+        elif code in (1114, 1314):
+            paid_out_tender = _money(paid_out_tender + amount)
         elif code == 934:
             data["offline_credit_card"] = -abs(amount)
         elif code == 1334:
             data["offline_credit_card"] = -abs(amount)
+    data["prepaid_card"] = _money(
+        data["prepaid_card"]
+        + (gift_card_revenue if gift_card_revenue is not None else gift_card_tender)
+    )
+    data["paid_out"] = (
+        paid_out_revenue if paid_out_revenue is not None else paid_out_tender
+    )
     return data
 
 

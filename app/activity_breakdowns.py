@@ -124,15 +124,24 @@ def read_activity_source_totals(
     try:
         if bs_sheet_name in workbook.sheetnames:
             balance_sheet = workbook[bs_sheet_name]
-            fields = {1122: "donation", 1114: "paid_out"}
+            paid_out_revenue = None
+            paid_out_tender = 0.0
             for row in balance_sheet.iter_rows(values_only=True):
                 code = _source_code(row[0] if row else None)
-                category = fields.get(code)
-                if category is None:
+                if code not in (1122, 914, 1114, 1314):
                     continue
                 amount = _source_amount(row[4] if len(row) > 4 else None)
-                if amount is not None:
-                    totals[category] = amount
+                if amount is None:
+                    continue
+                if code == 1122:
+                    totals["donation"] = amount
+                elif code == 914:
+                    paid_out_revenue = amount
+                else:
+                    paid_out_tender += amount
+            totals["paid_out"] = (
+                paid_out_revenue if paid_out_revenue is not None else paid_out_tender
+            )
 
         if hash_sheet_name in workbook.sheetnames:
             hash_sheet = workbook[hash_sheet_name]

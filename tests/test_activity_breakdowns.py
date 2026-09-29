@@ -654,6 +654,24 @@ class ActivityBreakdownTests(unittest.TestCase):
             {"donation": 200.0, "paid_out": 50.0, "paid_in": 125.0},
         )
 
+    def test_activity_source_reader_detects_drawer_paid_out_once(self):
+        import openpyxl
+
+        api = self.activity_api()
+        workbook = openpyxl.Workbook()
+        balance_sheet = workbook.active
+        balance_sheet.title = "BS"
+        balance_sheet.append([914, "Rev. Paid out", None, None, 32.04])
+        balance_sheet.append([1314, "Dwr Paid out", None, None, 32.04])
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+
+        self.assertEqual(
+            api["read_sources"](output.getvalue(), "BS", None)["paid_out"],
+            32.04,
+        )
+
     def test_activity_source_reader_uses_hash_paid_in_fallback_amount(self):
         import openpyxl
 

@@ -3190,7 +3190,7 @@ if active_step == STEP_MEMBER_SHARES and membership_mode == "automatic" and memb
 
 activity_labels = {
     "donation": ("Donations", "Balance Sheet Donation (code 1122)"),
-    "paid_out": ("Paid Out", "Balance Sheet Paid Out (code 1114)"),
+    "paid_out": ("Paid Out", "Balance Sheet Paid Out (code 914)"),
     "paid_in": ("Paid In", "HASH Paid-Ins (code 34)"),
 }
 activity_save_labels = {

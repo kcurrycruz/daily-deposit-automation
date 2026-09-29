@@ -1038,6 +1038,10 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         "offline_credit_card": 0.0,
     }
 
+    gift_card_revenue = None
+    gift_card_tender = 0.0
+    paid_out_revenue = None
+    paid_out_tender = 0.0
     for row in ws.iter_rows(values_only=True):
         code = row[0]
         amt = row[4] if len(row) > 4 else None
@@ -1073,15 +1077,25 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if code == 1334:
             bs["offline_credit_card"] = -abs(to_float(amt))
         if code == 980: bs["prepaid_card"] = to_float(amt)
-        if code == 1117: bs["prepaid_card"] = round(bs["prepaid_card"] + to_float(amt), 2)
+        if code == 917: gift_card_revenue = to_float(amt)
+        if code in (1117, 1317): gift_card_tender = round(gift_card_tender + to_float(amt), 2)
         if code == 906: bs["charge"] = to_float(amt)
         if code == 908: bs["vendor_coupon"] = to_float(amt)
-        if code == 1114:
-            bs["paid_out"] = to_float(amt)
-            log.info(f"    Paid Out (1114 PkUp Paid out): ${bs['paid_out']:,.2f} — reduces the QuickBooks deposit")
+        if code == 914: paid_out_revenue = to_float(amt)
+        if code in (1114, 1314): paid_out_tender = round(paid_out_tender + to_float(amt), 2)
         if code == 1122: bs["donation"] = to_float(amt)
         if code == 3420: bs["subscription"] = to_float(amt)
 
+    bs["prepaid_card"] = round(
+        bs["prepaid_card"]
+        + (gift_card_revenue if gift_card_revenue is not None else gift_card_tender),
+        2,
+    )
+    bs["paid_out"] = (
+        paid_out_revenue if paid_out_revenue is not None else paid_out_tender
+    )
+    if bs["paid_out"]:
+        log.info(f"    Paid Out: ${bs['paid_out']:,.2f} — reduces the QuickBooks deposit")
     log.info(f"  BS: Tax=${bs['sales_tax']:,.2f} BottleSales=${bs['bottle_sales']:,.2f} Fee=${bs['milk_bottle_fee']:,.2f} Charity=${bs['charity']:,.2f} Visa/MC=${bs['visa_mc']:,.2f} AMEX=${bs['amex']:,.2f} Discover=${bs['discover']:,.2f} Debit=${bs['debit']:,.2f}")
     wb.close()
     return bs

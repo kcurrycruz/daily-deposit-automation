@@ -296,6 +296,17 @@ class CloseoutReconciliationTests(unittest.TestCase):
         self.assertEqual(result["paid_out"], 47.06)
         self.assertEqual(result["paid_in"], 30.00)
 
+    def test_read_closeout_baselines_detects_drawer_paid_out_once(self):
+        from app.closeout_reconciliation import read_closeout_baselines
+
+        result = read_closeout_baselines(
+            workbook_bytes(bs_values={914: 32.04, 1314: 32.04}),
+            "Daily BS",
+            "Daily HASH",
+        )
+
+        self.assertEqual(result["paid_out"], 32.04)
+
 
     def test_default_closeout_actuals_preserve_baselines_except_counted_coupons_and_offline_zon(
         self,

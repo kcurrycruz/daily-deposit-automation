@@ -31,7 +31,6 @@ _BS_CODE_TO_FIELD = {
     934: "offline_zon",
     1334: "offline_zon",
     908: "vendor_coupons",
-    1114: "paid_out",
 }
 
 
@@ -299,10 +298,12 @@ def read_closeout_baselines(
 
         baselines = {field: 0.0 for field in STANDARD_CLOSEOUT_ORDER}
         balance_sheet = workbook[bs_sheet_name]
+        paid_out_revenue = None
+        paid_out_tender = 0.0
         for row in balance_sheet.iter_rows(values_only=True):
             code = _code(row[0] if row else None)
             field = _BS_CODE_TO_FIELD.get(code)
-            if field is None:
+            if field is None and code not in (914, 1114, 1314):
                 continue
             try:
                 amount = abs(_money(row[4], f"BS code {code} amount"))
@@ -310,7 +311,15 @@ def read_closeout_baselines(
                 raise ValueError(
                     f"BS code {code} does not contain a valid monetary amount"
                 ) from None
-            baselines[field] = float(amount)
+            if code == 914:
+                paid_out_revenue = float(amount)
+            elif code in (1114, 1314):
+                paid_out_tender += float(amount)
+            else:
+                baselines[field] = float(amount)
+        baselines["paid_out"] = (
+            paid_out_revenue if paid_out_revenue is not None else paid_out_tender
+        )
 
         hash_sheet = workbook[hash_sheet_name]
         amount_column = None

@@ -1,6 +1,20 @@
 import unittest
 from pathlib import Path
 import re
+from html.parser import HTMLParser
+
+
+class CardMarkupParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.elements = []
+        self.copy = []
+
+    def handle_starttag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs)))
+
+    def handle_data(self, data):
+        self.copy.append(data)
 
 
 class RecordingColumn:
@@ -217,6 +231,39 @@ class ProgramHubStateTests(unittest.TestCase):
 
 
 class ProgramHubRendererTests(unittest.TestCase):
+    def test_card_art_is_decorative_and_program_heading_remains_readable(self):
+        from app.program_hub_ui import PROGRAMS, program_card_html
+
+        for program in PROGRAMS:
+            with self.subTest(program=program.key):
+                parsed = CardMarkupParser()
+                parsed.feed(program_card_html(program))
+                artwork = [attrs for tag, attrs in parsed.elements if tag == "svg"]
+                self.assertEqual(len(artwork), 1)
+                self.assertEqual(artwork[0].get("aria-hidden"), "true")
+                self.assertEqual(artwork[0].get("focusable"), "false")
+                self.assertIn(program.title, "".join(parsed.copy))
+                self.assertIn(program.description, "".join(parsed.copy))
+
+    def test_available_status_is_visible_without_labeling_planned_card_ready(self):
+        from app.program_hub_ui import PROGRAMS, program_card_html
+
+        for program in PROGRAMS:
+            parsed = CardMarkupParser()
+            parsed.feed(program_card_html(program))
+            copy = "".join(parsed.copy)
+            if program.enabled:
+                self.assertIn("Ready to open", copy)
+            else:
+                self.assertIn("Planned", copy)
+                self.assertNotIn("Ready to open", copy)
+
+    def test_clicking_ap_returns_ap_without_changing_the_daily_route(self):
+        from app.program_hub_ui import AP_STATEMENTS, render_program_hub
+
+        ui = RecordingProgramHubUi({"open_program_ap_statements"})
+        self.assertEqual(render_program_hub(ui), AP_STATEMENTS)
+
     def test_renders_header_prompt_titles_and_program_action_states(self):
         from app.program_hub_ui import render_program_hub
 
@@ -390,9 +437,11 @@ class ProgramHubEntryPointTests(unittest.TestCase):
 class ProgramHubStyleContractTests(unittest.TestCase):
     @staticmethod
     def app_source():
-        return (
-            Path(__file__).resolve().parents[1] / "streamlit_app.py"
-        ).read_text(encoding="utf-8")
+        from app.program_hub_ui import render_program_hub
+
+        ui = RecordingProgramHubUi()
+        render_program_hub(ui)
+        return next(body for _, body, _ in ui.markdown_calls if body.startswith("<style>"))
 
     def test_hub_css_defines_scoped_hero_prompt_and_card_states(self):
         app_source = self.app_source()
@@ -409,7 +458,7 @@ class ProgramHubStyleContractTests(unittest.TestCase):
     def test_mobile_hub_cards_remove_fixed_minimum_height(self):
         app_source = self.app_source()
         mobile_block = re.search(
-            r"@media \(max-width: 720px\) \{(?P<body>.*?)\n    \}",
+            r"@media \(max-width: 640px\) \{(?P<body>.*?)\n\}",
             app_source,
             re.DOTALL,
         )
@@ -420,19 +469,12 @@ class ProgramHubStyleContractTests(unittest.TestCase):
             r"\.hwfc-program-card\s*\{\s*min-height:\s*0;",
         )
 
-    def test_hub_css_uses_established_theme_variables(self):
-        app_source = self.app_source()
-        hub_css_start = app_source.index(".hwfc-hub-hero")
-        hub_css = app_source[hub_css_start:app_source.index("</style>", hub_css_start)]
+    def test_return_control_does_not_inject_the_landing_palette_into_workspaces(self):
+        from app.program_hub_ui import render_all_programs_action
 
-        for theme_value in (
-            "var(--hwfc-paper)",
-            "var(--hwfc-border)",
-            "var(--hwfc-muted)",
-            "var(--hwfc-leaf)",
-            "var(--hwfc-forest)",
-        ):
-            self.assertIn(theme_value, hub_css)
+        ui = RecordingProgramHubUi()
+        render_all_programs_action(ui)
+        self.assertEqual(ui.markdown_calls, [])
 
     def test_program_actions_are_full_width_with_only_daily_deposits_enabled(self):
         from app.program_hub_ui import DAILY_DEPOSITS, render_program_hub

@@ -1,0 +1,258 @@
+/* Landing-page-only palette. Daily and AP keep their existing themes. */
+.stApp:has(.hwfc-hub-hero) {
+    background:
+        radial-gradient(ellipse at 5% 8%, #dbe6d2 0, transparent 42%),
+        radial-gradient(ellipse at 96% 90%, #d4e6df 0, transparent 45%),
+        radial-gradient(ellipse at 92% 8%, #eee2c8 0, transparent 40%),
+        #f4f1e8;
+    color: #243d2c;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stHeader"] {
+    background: transparent !important;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stAppViewContainer"] {
+    background: transparent !important;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stVerticalBlockBorderWrapper"] {
+    background: transparent !important;
+    color: inherit !important;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stHeader"] button,
+.stApp:has(.hwfc-hub-hero) [data-testid="stHeader"] button span {
+    color: #31563a;
+}
+.stApp:has(.hwfc-hub-hero) .block-container {
+    max-width: 1140px;
+    margin: 4.5rem auto 3rem;
+    padding: 30px 42px 24px;
+    background: rgba(255, 253, 246, .66);
+    border: 1px solid rgba(255, 255, 255, .92);
+    border-radius: 32px;
+    box-shadow: 0 28px 70px rgba(55, 75, 51, .12), inset 0 1px 0 #fff;
+    backdrop-filter: blur(22px);
+}
+.hwfc-hub-hero {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    color: #243d2c;
+    margin: 0;
+    padding: 0;
+}
+.hwfc-hub-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #d5dfd0;
+}
+.hwfc-hub-emblem {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    color: #315f3a;
+    background: #e2ead9;
+    border: 1px solid #cad8c0;
+    border-radius: 16px 16px 16px 5px;
+}
+.hwfc-hub-emblem svg { width: 36px; height: 36px; }
+.hwfc-hub-kicker {
+    color: #31563a;
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .13em;
+}
+.hwfc-hub-brand-note { color: #5c6b57; font-size: .82rem; margin-top: 3px; }
+.hwfc-hub-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 26px 0 6px;
+}
+.stApp:has(.hwfc-hub-hero) h1.hwfc-hub-title {
+    color: #25452e;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(2.25rem, 4.4vw, 3.65rem);
+    font-weight: 500;
+    line-height: 1.08;
+    letter-spacing: -.035em;
+    padding: 0;
+    margin: 0;
+}
+.hwfc-hub-subtitle { color: #596550; font-size: .97rem; margin: 14px 0 0; }
+.hwfc-hub-leaf { width: 102px; flex: 0 0 102px; color: #879b72; }
+.hwfc-hub-leaf svg { width: 100%; }
+.hwfc-hub-prompt {
+    margin: 8px 0 4px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.hwfc-hub-prompt h2 {
+    color: #2a422f;
+    font-size: 1.15rem;
+    font-weight: 650;
+    letter-spacing: -.02em;
+    margin: 0;
+    padding: 0;
+}
+.hwfc-hub-prompt p { color: #5c6856; font-size: .86rem; }
+.stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.hwfc-program-card) {
+    padding: 24px;
+    border-radius: 23px;
+    border: 1px solid rgba(255,255,255,.95);
+    background: linear-gradient(145deg, #f4f8ec, #e3ecd6);
+    box-shadow: 0 12px 26px rgba(58,75,47,.065), inset 0 1px 0 #fff;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.tone-honey) {
+    background: linear-gradient(145deg, #faf6e8, #efe4cc);
+}
+.stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.tone-mist) {
+    background: linear-gradient(145deg, #edf6f1, #dcebe6);
+}
+.stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.is-available):hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 30px rgba(58,75,47,.12);
+}
+.hwfc-program-card {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    min-height: 216px;
+    padding: 0;
+}
+.hwfc-program-card.is-available { border: 0; box-shadow: none; }
+.hwfc-program-card.is-coming-soon { opacity: 1; }
+.hwfc-program-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 23px;
+}
+.hwfc-program-icon {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    background: rgba(255,255,255,.74);
+    border: 1px solid rgba(255,255,255,.92);
+    border-radius: 17px;
+    box-shadow: 0 4px 12px rgba(59,77,44,.04);
+    color: #386345;
+    flex: 0 0 54px;
+}
+.hwfc-program-icon svg { width: 34px; height: 34px; }
+.hwfc-program-icon.tone-honey { color: #82622b; }
+.hwfc-program-icon.tone-mist { color: #376a60; }
+.hwfc-program-status {
+    color: #3c5a35;
+    background: rgba(255,255,255,.56);
+    border: 1px solid rgba(104,135,86,.22);
+    border-radius: 999px;
+    padding: 5px 8px;
+    font-size: .65rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+.is-coming-soon .hwfc-program-status { color: #6e572c; border-color: #d3c3a2; }
+.stApp:has(.hwfc-hub-hero) h2.hwfc-program-card-title {
+    color: #273d2d;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.64rem;
+    font-weight: 500;
+    line-height: 1.15;
+    min-height: 60px;
+    letter-spacing: -.025em;
+    margin: 0 0 9px;
+    padding: 0;
+}
+.hwfc-program-card-copy {
+    color: #53624e;
+    font-size: .86rem;
+    line-height: 1.65;
+    min-height: 0;
+    margin: 0;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button {
+    border: 1px solid #315f3a;
+    border-radius: 12px;
+    background: #315f3a;
+    color: #fffdf6;
+    min-height: 44px;
+    transition: background .18s ease;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button p {
+    color: inherit;
+    font-size: .82rem;
+    font-weight: 650;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button:hover:not(:disabled) {
+    background: #254b2d;
+    border-color: #254b2d;
+    color: #fffdf6;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button:focus-visible {
+    outline: 3px solid #896524;
+    outline-offset: 4px;
+    box-shadow: none;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button:disabled {
+    background: rgba(255,253,246,.5);
+    color: #725e3c;
+    border-color: #cdbf9f;
+    opacity: 1;
+}
+.stApp:has(.hwfc-hub-hero) [data-heading-text] {
+    color: inherit;
+    font: inherit;
+}
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button span,
+.stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button p {
+    color: inherit;
+}
+.hwfc-hub-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    color: #607058;
+    font-size: .73rem;
+    padding: 20px 0 0;
+    margin-top: 8px;
+    border-top: 1px solid #d5dfd0;
+}
+.hwfc-hub-footer span { color: inherit; }
+@media (max-width: 900px) and (min-width: 641px) {
+    .stApp:has(.hwfc-hub-hero) .block-container { padding: 28px 24px 22px; }
+    .stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.hwfc-program-card) { padding: 18px 14px; }
+    .hwfc-program-card-top { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .hwfc-program-card { min-height: 260px; }
+    .stApp:has(.hwfc-hub-hero) h2.hwfc-program-card-title { font-size: 1.4rem; }
+}
+@media (max-width: 640px) {
+    .stApp:has(.hwfc-hub-hero) .block-container { margin: 3.5rem 12px 24px; max-width: calc(100% - 24px); padding: 24px 18px; border-radius: 25px; }
+    .hwfc-hub-kicker { font-size: .63rem; letter-spacing: .08em; }
+    .hwfc-hub-brand { gap: 10px; padding-bottom: 20px; }
+    .hwfc-hub-heading-row { padding-top: 26px; }
+    .hwfc-hub-leaf { display: none; }
+    .stApp:has(.hwfc-hub-hero) h1.hwfc-hub-title { font-size: 2.25rem; }
+    .hwfc-hub-subtitle { max-width: 240px; font-size: .88rem; }
+    .hwfc-hub-prompt { margin-top: 10px; gap: 6px; }
+    .hwfc-program-card { min-height: 0; }
+    .stApp:has(.hwfc-hub-hero) h2.hwfc-program-card-title { min-height: 0; font-size: 1.6rem; }
+    .hwfc-program-card-top { margin-bottom: 18px; }
+    .hwfc-program-card-copy { margin-bottom: 10px; }
+    .hwfc-hub-footer { font-size: .7rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.hwfc-program-card),
+    .stApp:has(.hwfc-hub-hero) [data-testid="stButton"] > button { transition: none; }
+    .stApp:has(.hwfc-hub-hero) :is([data-testid="stColumn"], [data-testid="column"]):has(.is-available):hover { transform: none; }
+}

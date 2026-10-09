@@ -1,0 +1,40 @@
+Co-op portal visual refresh - October 9, 2026
+
+Scope: Finance Operations landing page only.
+Branch: feature/portal-coop-ui, based on main f4ef015.
+No merge, push, deployment, accounting action or API connection performed.
+
+Approved direction:
+- Frosted rounded panels and soft gradients inspired by the supplied reference.
+- Co-op warmth retained with cream, sage, honey, mist and serif headings.
+- Three native program controls retain their existing keys and routing.
+- Daily Deposits and AP available; Credit Card remains disabled/planned.
+
+Verification:
+- 308 Python unit tests and 24 AP Node tests pass.
+- New decorative icon and visible availability tests observed RED then GREEN.
+- Existing style-contract tests now inspect the actually emitted hub stylesheet.
+- Browser: 1280px cards all 310px tall; action buttons share the same y position.
+- Browser: 760px tablet has equal-height cards and no horizontal overflow.
+- Browser: 390px stacked cards have no horizontal overflow; buttons >=44px high.
+- Native keyboard navigation reaches AP launch, exposes a 3px gold focus outline
+  and activates AP with Enter.
+- AP component loads; return confirmation and Leave reach the refreshed hub.
+- Daily route opens; both program workspaces retain the original dark palette.
+- No real financial inputs or files were used during this visual check.
+
+Review:
+- Independent read-only review found no Critical issues.
+- Supported Streamlit 1.37 uses legacy column and nested wrapper names.
+  Reproduced missing card styles and dark wrappers in an actual temporary 1.37
+  runtime, then verified corrected card padding/radii and transparent wrappers.
+  Legacy 390px layout also verified without overflow.
+- Style-contract tests redirected from the unused legacy CSS to renderer output.
+- Existing duplicate Open program accessible labels are unchanged; program
+  headings identify each button's card. Accounting and AP persistence internals
+  remain outside this visual change and are covered by existing regression tests.
+
+Preview runs separately on 127.0.0.1:8502.
+No fonts, graphics, analytics or other new external network assets are needed.
+Styling intentionally supports modern browsers with CSS :has and :is.
+Production Streamlit deployment has not been verified for this branch.

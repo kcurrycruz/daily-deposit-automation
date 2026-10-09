@@ -38,3 +38,8 @@ Preview runs separately on 127.0.0.1:8502.
 No fonts, graphics, analytics or other new external network assets are needed.
 Styling intentionally supports modern browsers with CSS :has and :is.
 Production Streamlit deployment has not been verified for this branch.
+
+Approved follow-up: Daily Deposits left, AP Statements middle, Credit Card right.
+Order-dependent tests observed RED then GREEN; 308 Python and 24 Node tests pass.
+Local preview process restarted to replace its cached registry; rendered card
+positions verified in the browser. No merge or publish performed.

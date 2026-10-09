@@ -48,16 +48,16 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
         True,
     ),
     ProgramDefinition(
-        "credit_card_process",
-        "Credit Card Process",
-        "Process and verify credit-card activity.",
-        False,
-    ),
-    ProgramDefinition(
         AP_STATEMENTS,
         "AP Statements",
         "Review and reconcile accounts-payable statements.",
         True,
+    ),
+    ProgramDefinition(
+        "credit_card_process",
+        "Credit Card Process",
+        "Process and verify credit-card activity.",
+        False,
     ),
 )
 

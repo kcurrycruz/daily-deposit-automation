@@ -65,11 +65,11 @@ class ProgramHubStateTests(unittest.TestCase):
 
         self.assertEqual(
             [program.title for program in PROGRAMS],
-            ["Daily Deposits", "Credit Card Process", "AP Statements"],
+            ["Daily Deposits", "AP Statements", "Credit Card Process"],
         )
         self.assertEqual(
             [program.enabled for program in PROGRAMS],
-            [True, False, True],
+            [True, True, False],
         )
 
     def test_normalize_selection_rejects_missing_disabled_and_unknown_keys(self):
@@ -290,7 +290,7 @@ class ProgramHubRendererTests(unittest.TestCase):
 
         self.assertEqual(
             [label for _, label, _ in ui.button_calls],
-            ["Open program →", "Coming Soon", "Open program →"],
+            ["Open program →", "Open program →", "Coming Soon"],
         )
 
     def test_clicking_daily_deposits_returns_its_key(self):
@@ -476,7 +476,7 @@ class ProgramHubStyleContractTests(unittest.TestCase):
         render_all_programs_action(ui)
         self.assertEqual(ui.markdown_calls, [])
 
-    def test_program_actions_are_full_width_with_only_daily_deposits_enabled(self):
+    def test_program_actions_are_full_width_with_daily_and_ap_enabled(self):
         from app.program_hub_ui import DAILY_DEPOSITS, render_program_hub
 
         ui = RecordingProgramHubUi()
@@ -485,7 +485,7 @@ class ProgramHubStyleContractTests(unittest.TestCase):
         self.assertTrue(all(call[2]["use_container_width"] for call in ui.button_calls))
         self.assertEqual(
             [call[2]["disabled"] for call in ui.button_calls],
-            [False, True, False],
+            [False, False, True],
         )
         self.assertEqual(ui.button_calls[0][2]["key"], f"open_program_{DAILY_DEPOSITS}")
 

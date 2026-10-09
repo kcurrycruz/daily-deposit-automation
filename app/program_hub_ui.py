@@ -7,6 +7,7 @@ from typing import MutableMapping
 
 ACTIVE_PROGRAM_KEY = "active_finance_program"
 DAILY_DEPOSITS = "daily_deposits"
+AP_STATEMENTS = "ap_statements"
 SIDEBAR_COLLAPSE_REQUEST_KEY = "_collapse_navigation_sidebar"
 DAILY_PROGRAM_SNAPSHOT_KEY = "_daily_program_widget_snapshot"
 DAILY_PROGRAM_UPLOADS_KEY = "_daily_program_preserved_uploads"
@@ -52,10 +53,10 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
         False,
     ),
     ProgramDefinition(
-        "ap_statements",
+        AP_STATEMENTS,
         "AP Statements",
         "Review and reconcile accounts-payable statements.",
-        False,
+        True,
     ),
 )
 

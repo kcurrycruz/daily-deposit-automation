@@ -46,7 +46,7 @@ class RecordingProgramHubUi(RecordingColumn):
 
 
 class ProgramHubStateTests(unittest.TestCase):
-    def test_daily_deposits_is_only_enabled_program_in_required_order(self):
+    def test_daily_and_ap_enabled_in_required_order(self):
         from app.program_hub_ui import PROGRAMS
 
         self.assertEqual(
@@ -55,7 +55,7 @@ class ProgramHubStateTests(unittest.TestCase):
         )
         self.assertEqual(
             [program.enabled for program in PROGRAMS],
-            [True, False, False],
+            [True, False, True],
         )
 
     def test_normalize_selection_rejects_missing_disabled_and_unknown_keys(self):
@@ -88,7 +88,7 @@ class ProgramHubStateTests(unittest.TestCase):
             "membership_payments": {"status": "ready"},
         }
 
-        self.assertFalse(activate_program(state, "ap_statements"))
+        self.assertFalse(activate_program(state, "credit_card_process"))
         self.assertEqual(state[ACTIVE_PROGRAM_KEY], "daily_deposits")
         self.assertEqual(state["membership_payments"], {"status": "ready"})
 
@@ -233,7 +233,7 @@ class ProgramHubRendererTests(unittest.TestCase):
         self.assertIn("Credit Card Process", rendered_copy)
         self.assertIn("AP Statements", rendered_copy)
         self.assertEqual(len(ui.button_calls), 3)
-        self.assertEqual(sum(call[2].get("disabled", False) for call in ui.button_calls), 2)
+        self.assertEqual(sum(call[2].get("disabled", False) for call in ui.button_calls), 1)
 
     def test_uses_open_and_coming_soon_action_labels(self):
         from app.program_hub_ui import render_program_hub
@@ -243,7 +243,7 @@ class ProgramHubRendererTests(unittest.TestCase):
 
         self.assertEqual(
             [label for _, label, _ in ui.button_calls],
-            ["Open program →", "Coming Soon", "Coming Soon"],
+            ["Open program →", "Coming Soon", "Open program →"],
         )
 
     def test_clicking_daily_deposits_returns_its_key(self):
@@ -443,7 +443,7 @@ class ProgramHubStyleContractTests(unittest.TestCase):
         self.assertTrue(all(call[2]["use_container_width"] for call in ui.button_calls))
         self.assertEqual(
             [call[2]["disabled"] for call in ui.button_calls],
-            [False, True, True],
+            [False, True, False],
         )
         self.assertEqual(ui.button_calls[0][2]["key"], f"open_program_{DAILY_DEPOSITS}")
 

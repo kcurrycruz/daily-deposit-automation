@@ -1,6 +1,5 @@
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 
 class RecordingUi:
@@ -59,11 +58,12 @@ class ApRendererTests(unittest.TestCase):
     def test_missing_build_shows_error_and_navigation_without_rendering_component(self):
         from app.ap_statements_ui import render_ap_statements
         ui, calls = RecordingUi(), []
-        with TemporaryDirectory() as folder:
-            ui.clicked = {"ap_all_programs"}
-            self.assertFalse(render_ap_statements(ui, component_renderer=lambda **kw: calls.append(kw), frontend_path=Path(folder)))
-            ui.clicked = {"ap_leave"}
-            self.assertTrue(render_ap_statements(ui, component_renderer=lambda **kw: calls.append(kw), frontend_path=Path(folder)))
+        missing_path = Path(__file__).resolve().parent / "nonexistent-ap-build"
+        self.assertFalse(missing_path.exists())
+        ui.clicked = {"ap_all_programs"}
+        self.assertFalse(render_ap_statements(ui, component_renderer=lambda **kw: calls.append(kw), frontend_path=missing_path))
+        ui.clicked = {"ap_leave"}
+        self.assertTrue(render_ap_statements(ui, component_renderer=lambda **kw: calls.append(kw), frontend_path=missing_path))
         self.assertEqual(calls, [])
         self.assertTrue(ui.errors)
 

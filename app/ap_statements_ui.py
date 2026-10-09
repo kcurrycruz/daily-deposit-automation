@@ -23,19 +23,22 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None) -> 
         "original PDFs again after leaving. Use Save session or export your "
         "report before switching programs."
     )
-    if ui.button("← All Programs", key="ap_all_programs"):
+    if ui.button("← All Programs", key="ap_all_programs", type="primary"):
         ui.session_state[_EXIT_KEY] = True
-    if ui.session_state.get(_EXIT_KEY):
-        ui.warning(
-            "Before leaving, use Save session and/or export your report in the "
-            "workspace below. Unsaved rows and notes will be lost; original "
-            "PDFs must be selected again. Browser saving is not a backup."
-        )
-        if ui.button("Stay in AP Statements", key="ap_stay"):
-            ui.session_state.pop(_EXIT_KEY, None)
-        if ui.button("Leave for All Programs", key="ap_leave"):
-            ui.session_state.pop(_EXIT_KEY, None)
-            return True
+    # Reserve one stable block so conditional guidance cannot move/remount
+    # the component and discard its browser-only state on a rerun.
+    with ui.container():
+        if ui.session_state.get(_EXIT_KEY):
+            ui.warning(
+                "Before leaving, use Save session and/or export your report in the "
+                "workspace below. Unsaved rows and notes will be lost; original "
+                "PDFs must be selected again. Browser saving is not a backup."
+            )
+            if ui.button("Stay in AP Statements", key="ap_stay", type="primary"):
+                ui.session_state.pop(_EXIT_KEY, None)
+            if ui.button("Leave for All Programs", key="ap_leave", type="primary"):
+                ui.session_state.pop(_EXIT_KEY, None)
+                return True
 
     path = Path(frontend_path) if frontend_path is not None else ap_frontend_path()
     if not (path / "index.html").is_file():

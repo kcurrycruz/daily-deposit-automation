@@ -16,6 +16,12 @@ class AssetReferences(HTMLParser):
                 self.references.append(value)
 
 class APAssetTests(unittest.TestCase):
+    def test_component_palette_overrides_sdk_body_theme_and_save_stays_visible(self):
+        styles = (FRONTEND / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("html body{background:#f7f8f5;color:#26372f}", styles)
+        self.assertNotIn(".top-actions>.button{display:none}", styles)
+        self.assertNotIn("fonts.googleapis.com", styles)
+
     def test_browser_entrypoint_has_local_existing_assets(self):
         index = FRONTEND / "index.html"
         self.assertTrue(index.is_file(), "AP component entrypoint must exist")

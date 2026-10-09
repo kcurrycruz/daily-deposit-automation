@@ -8,6 +8,18 @@ class RecordingUi:
         self.clicked = set()
         self.messages = []
         self.errors = []
+        self.blocks = []
+        self.button_calls = []
+
+    def container(self):
+        self.blocks.append("confirmation")
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
     def title(self, text):
         self.messages.append(text)
@@ -22,11 +34,23 @@ class RecordingUi:
         self.errors.append(text)
 
     def button(self, text, **kwargs):
+        self.button_calls.append(kwargs)
         self.messages.append(text)
         return kwargs.get("key") in self.clicked
 
 
 class ApRendererTests(unittest.TestCase):
+    def test_confirmation_always_has_a_reserved_block_before_component(self):
+        from app.ap_statements_ui import render_ap_statements
+        ui, positions = RecordingUi(), []
+        def component(**kwargs):
+            positions.append(tuple(ui.blocks))
+        render_ap_statements(ui, component_renderer=component)
+        ui.blocks = []
+        ui.clicked = {"ap_all_programs"}
+        render_ap_statements(ui, component_renderer=component)
+        self.assertEqual(positions, [("confirmation",), ("confirmation",)])
+
     def test_stable_component_key_and_privacy_guidance_without_financial_inputs(self):
         from app.ap_statements_ui import render_ap_statements
         ui, calls = RecordingUi(), []
@@ -38,6 +62,7 @@ class ApRendererTests(unittest.TestCase):
         for phrase in ["AP Statements", "browser profile", "original PDFs", "Save session", "BILL"]:
             self.assertIn(phrase, text)
         self.assertEqual(ui.session_state["run_result"], "retained")
+        self.assertEqual(ui.button_calls[0].get("type"), "primary")
 
     def test_exit_requires_confirmation_stay_keeps_workspace_leave_returns_true(self):
         from app.ap_statements_ui import render_ap_statements

@@ -231,6 +231,42 @@ class ProgramHubStateTests(unittest.TestCase):
 
 
 class ProgramHubRendererTests(unittest.TestCase):
+    def test_logo_leaves_are_embedded_transparent_decorative_images(self):
+        import base64
+        import io
+        from PIL import Image
+        from app.program_hub_ui import render_program_hub
+
+        ui = RecordingProgramHubUi()
+        render_program_hub(ui)
+        hero = next(body for _, body, _ in ui.markdown_calls if '<div class="hwfc-hub-hero">' in body)
+        parsed = CardMarkupParser()
+        parsed.feed(hero)
+        images = [attrs for tag, attrs in parsed.elements if tag == "img"]
+        self.assertEqual(len(images), 2)
+        for image in images:
+            self.assertEqual(image.get("alt"), "")
+            self.assertTrue(image["src"].startswith("data:image/png;base64,"))
+            with Image.open(io.BytesIO(base64.b64decode(image["src"].split(",", 1)[1]))) as asset:
+                self.assertEqual(asset.format, "PNG")
+                self.assertEqual(asset.mode, "RGBA")
+                self.assertEqual(asset.getchannel("A").getextrema()[0], 0)
+
+    def test_header_seal_is_square_and_does_not_reuse_the_wide_leaf_art(self):
+        import base64
+        import io
+        from PIL import Image
+        from app.program_hub_ui import render_program_hub
+
+        ui = RecordingProgramHubUi()
+        render_program_hub(ui)
+        parsed = CardMarkupParser()
+        parsed.feed(next(body for _, body, _ in ui.markdown_calls if '<div class="hwfc-hub-hero">' in body))
+        images = [attrs for tag, attrs in parsed.elements if tag == "img"]
+        with Image.open(io.BytesIO(base64.b64decode(images[0]["src"].split(",", 1)[1]))) as seal:
+            self.assertEqual(seal.width, seal.height)
+        self.assertNotEqual(images[0]["src"], images[1]["src"])
+
     def test_card_art_is_decorative_and_program_heading_remains_readable(self):
         from app.program_hub_ui import PROGRAMS, program_card_html
 

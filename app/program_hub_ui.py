@@ -1,6 +1,7 @@
 """Program registry and safe navigation state for the finance operations hub."""
 
 from dataclasses import dataclass
+from base64 import b64encode
 from html import escape
 from pathlib import Path
 from typing import MutableMapping
@@ -92,15 +93,16 @@ def render_program_hub(ui) -> str | None:
     """Render program choices and return an enabled selected program key."""
     hub_css = Path(__file__).with_name("program_hub.css").read_text(encoding="utf-8")
     ui.markdown(f"<style>{hub_css}</style>", unsafe_allow_html=True)
+    leaf_path = Path(__file__).with_name("assets") / "hwfc-leaf-modern.png"
+    leaf_src = "data:image/png;base64," + b64encode(leaf_path.read_bytes()).decode("ascii")
+    logo_path = Path(__file__).with_name("assets") / "hwfc-logo-simplified.png"
+    logo_src = "data:image/png;base64," + b64encode(logo_path.read_bytes()).decode("ascii")
     ui.markdown(
-        """
+        f"""
         <div class="hwfc-hub-hero">
           <div class="hwfc-hub-brand">
             <span class="hwfc-hub-emblem" aria-hidden="true">
-              <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" focusable="false">
-                <path d="M24 38V23M24 29C9 29 8 17 9 10c13 0 19 9 15 19Zm0-6C23 10 33 7 40 8c0 12-6 18-16 15Z"/>
-                <path d="m15 18 9 11m9-15-9 9" stroke-linecap="round"/>
-              </svg>
+              <img src="{logo_src}" alt="" width="64" height="64"/>
             </span>
             <div><div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
             <div class="hwfc-hub-brand-note">Our co-op. Our workspace.</div></div>
@@ -109,9 +111,7 @@ def render_program_hub(ui) -> str | None:
             <div><h1 class="hwfc-hub-title">Finance Operations</h1>
             <p class="hwfc-hub-subtitle">A little less busywork. More room for good work.</p></div>
             <span class="hwfc-hub-leaf" aria-hidden="true">
-              <svg viewBox="0 0 110 110" fill="none" stroke="currentColor" stroke-width="1.4" focusable="false">
-                <path d="M24 92C7 40 46 12 93 17c5 49-20 78-69 75Zm0 0 55-60M41 74l-4-23m22 5 24-2m-27 9L53 37"/>
-              </svg>
+              <img src="{leaf_src}" alt="" width="126" height="84"/>
             </span>
           </div>
         </div>

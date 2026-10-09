@@ -49,15 +49,14 @@
 .hwfc-hub-emblem {
     display: grid;
     place-items: center;
-    width: 48px;
-    height: 48px;
-    flex: 0 0 48px;
+    width: 64px;
+    height: 64px;
+    flex: 0 0 64px;
     color: #315f3a;
-    background: #e2ead9;
-    border: 1px solid #cad8c0;
-    border-radius: 16px 16px 16px 5px;
+    background: transparent;
+    border: 0;
 }
-.hwfc-hub-emblem svg { width: 36px; height: 36px; }
+.hwfc-hub-emblem img { width: 64px; height: 64px; object-fit: contain; }
 .hwfc-hub-kicker {
     color: #31563a;
     font-size: .72rem;
@@ -83,8 +82,8 @@
     margin: 0;
 }
 .hwfc-hub-subtitle { color: #596550; font-size: .97rem; margin: 14px 0 0; }
-.hwfc-hub-leaf { width: 102px; flex: 0 0 102px; color: #879b72; }
-.hwfc-hub-leaf svg { width: 100%; }
+.hwfc-hub-leaf { width: 126px; flex: 0 0 126px; }
+.hwfc-hub-leaf img { display: block; width: 100%; height: auto; object-fit: contain; }
 .hwfc-hub-prompt {
     margin: 8px 0 4px;
     display: flex;

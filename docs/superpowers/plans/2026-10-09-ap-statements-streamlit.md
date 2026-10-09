@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-09-ap-statements-streamlit-design.md`
 
+**Execution status:** Implemented on the local feature branch. Final automated checks: 305 Python tests and 24 Node tests pass. Independent review finding fixed. See `docs/ap-statements-validation.txt` for browser evidence and remaining pre-production checks. Integration/deployment awaits user choice.
+
 ## Global Constraints
 
 - BILL remains disconnected until the user obtains approval from their boss.
@@ -125,4 +127,4 @@
 
 ## Self Review
 
-All design requirements map to Tasks 1–4. The five review-focus conditions have explicit owning tests or browser checks. Function names, component key, storage keys, and routing return values are consistent. Product code, dependency installation, and live deployment remain deferred until the user reviews this plan and selects the execution method.
+All design requirements map to Tasks 1–4. The five review-focus conditions have explicit owning tests or browser checks. Function names, component key, storage keys, and routing return values are consistent. Inline implementation and local validation are complete; live deployment remains deferred. Network-payload capture, actual download retrieval, full Daily workbook browser retention and missing-WASM fault injection remain explicitly unverified.

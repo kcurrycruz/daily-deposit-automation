@@ -155,12 +155,13 @@ function collectRows(doc) {
   return rows;
 }
 function collectDoc(doc) {
-  doc.rows = collectRows(doc);
-  doc.vendor = document.querySelector('#doc-vendor').value.trim() || 'Unidentified vendor';
-  doc.statementDate = document.querySelector('#doc-date').value;
+  const rows = collectRows(doc);
+  const vendor = document.querySelector('#doc-vendor').value.trim() || 'Unidentified vendor';
+  const statementDate = document.querySelector('#doc-date').value;
   const total = document.querySelector('#doc-total').value.trim();
   if (total && cents(total) == null) throw new Error('Enter a valid printed statement total.');
-  doc.declaredTotal = total ? cents(total) : null;
+  // Commit only after every input validates; rejected edits preserve evidence.
+  Object.assign(doc, { rows, vendor, statementDate, declaredTotal: total ? cents(total) : null, confirmed: false });
 }
 async function uploadPDFs(fileList) {
   if (state.busy) return;
@@ -221,7 +222,8 @@ document.addEventListener('click', async e => {
     if (action === 'close') closeOverlay();
     if (action === 'drawer-tab') { state.drawerTab = target.dataset.tab; renderDrawer(); }
     if (action === 'save-extraction' || action === 'confirm-extraction') {
-      const doc = getDoc(); for (const row of groupInvoices(doc)) delete state.resolutions[row.id]; collectDoc(doc); doc.confirmed = false;
+      const doc = getDoc(); const priorRows = groupInvoices(doc); collectDoc(doc);
+      for (const row of priorRows) delete state.resolutions[row.id];
       if (action === 'confirm-extraction') {
         if (!doc.rows.length || doc.vendor === 'Unidentified vendor') throw new Error('Set the vendor and add transaction rows before confirming.');
         doc.confirmed = true; doc.rows.forEach(r => { r.confidence = 99; }); state.drawerTab = 'review';

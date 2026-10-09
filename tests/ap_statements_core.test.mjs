@@ -37,3 +37,38 @@ test('open-item statement total sums balances, not original invoice amounts', ()
   const s = { layout: 'bakemark', declaredTotal: 7500, rows: [{ type: 'invoice', amount: 10000, balance: 8000 }, { type: 'invoice', amount: 3000, balance: -500 }] };
   assert.equal(totals(s).difference, 0);
 });
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+function correctionFixture() {
+  const doc = { id: 'qa-doc', vendor: 'QA vendor', layout: 'generic', confirmed: true, statementDate: '2026-10-01', declaredTotal: 10000,
+    rows: [{ id: 'qa-row', type: 'invoice', invoiceNumber: 'QA-1', amount: 10000, balance: 10000, page: 1, confidence: 99 }] };
+  const rows = [{ ...doc.rows[0], amount: 20000, balance: 20000 }];
+  const source = readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('function collectDoc(doc)'), source.indexOf('async function uploadPDFs'));
+  const fields = { '#doc-vendor': 'Changed vendor', '#doc-date': '2026-10-02', '#doc-total': 'bad total' };
+  const context = { cents, collectRows: () => rows, document: { querySelector: key => ({ value: fields[key] }) } };
+  return { doc, rows, source, fields, context, collect: vm.runInNewContext('(' + fn + ')', context) };
+}
+test('rejected printed total leaves confirmed invoice and review decisions untouched', () => {
+  const fixture = correctionFixture();
+  const before = structuredClone(fixture.doc);
+  assert.throws(() => fixture.collect(fixture.doc), /valid printed statement total/);
+  assert.deepEqual(fixture.doc, before);
+});
+test('failed correction does not remove recorded review decisions', () => {
+  const fixture = correctionFixture();
+  const state = { resolutions: { existing: { note: 'Keep prior decision' } } };
+  const action = fixture.source.slice(fixture.source.indexOf("if (action === 'save-extraction'"), fixture.source.indexOf("if (action === 'add-row'"));
+  assert.throws(() => vm.runInNewContext(action, { ...fixture.context, action: 'save-extraction', getDoc: () => fixture.doc,
+    state, groupInvoices: () => [{ id: 'existing' }], collectDoc: fixture.collect }), /valid printed statement total/);
+  assert.deepEqual(state.resolutions, { existing: { note: 'Keep prior decision' } });
+});
+test('valid corrected values become an unconfirmed draft before comparison', () => {
+  const fixture = correctionFixture();
+  fixture.fields['#doc-total'] = '200.00';
+  fixture.collect(fixture.doc);
+  assert.equal(fixture.doc.rows[0].amount, 20000);
+  assert.equal(fixture.doc.declaredTotal, 20000);
+  assert.equal(fixture.doc.confirmed, false);
+});

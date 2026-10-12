@@ -115,6 +115,32 @@ body:has(.stApp #hwfc-daily-page) [data-testid="stPopoverBody"] button[kind="pri
     .stApp:has(#hwfc-daily-page) .hwfc-stepbar { grid-template-columns: repeat(2, 1fr); }
     .hwfc-daily-brand-name { font-size: .64rem; }
 }
+.hwfc-activity-totals {
+    background: #fff; border: 1px solid #dce3d8; border-radius: 14px;
+    padding: 20px; margin: 12px 0 20px; color: #26372f;
+}
+.hwfc-activity-total-heading { font-weight: 750; font-size: 1rem; color: #25452e; }
+.hwfc-activity-total-source { font-size: .78rem; color: #62715b; margin-top: 4px; }
+.hwfc-activity-total-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.hwfc-activity-total-cell { padding: 14px 16px; background: #f8f9f5; border: 1px solid #e2e8dc; border-radius: 10px; }
+.hwfc-activity-total-cell.report { background: #edf3e7; border-color: #cbdcc0; }
+.hwfc-activity-total-cell dt { font-size: .82rem; color: #53624e; margin: 0 0 6px; }
+.hwfc-activity-total-cell dd { font-size: clamp(1.35rem, 2.6vw, 1.85rem); font-weight: 750; font-variant-numeric: tabular-nums; color: #25452e; margin: 0; overflow-wrap: anywhere; }
+.hwfc-activity-total-progress { height: 7px; border-radius: 6px; background: #e2e8dc; overflow: hidden; }
+.hwfc-activity-total-progress span { display: block; height: 100%; background: #64874f; }
+.hwfc-activity-total-status { font-size: .82rem; font-weight: 650; margin-top: 10px; color: #53624e; }
+.hwfc-activity-total-note { font-size: .75rem; color: #62715b; margin-top: 3px; }
+.hwfc-activity-totals.is-matched .hwfc-activity-total-status { color: #205845; }
+.hwfc-activity-totals.is-over .hwfc-activity-total-cell.difference { background: #fff5e4; border-color: #e5cfa2; }
+.hwfc-activity-totals.is-over .hwfc-activity-total-cell.difference dd,
+.hwfc-activity-totals.is-over .hwfc-activity-total-status { color: #8b5c18; }
+.hwfc-activity-totals.is-over .hwfc-activity-total-progress span { background: #bd9347; }
+@media (max-width: 560px) {
+    .hwfc-activity-totals { padding: 14px; }
+    .hwfc-activity-total-grid { grid-template-columns: 1fr; gap: 8px; }
+    .hwfc-activity-total-cell { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
+    .hwfc-activity-total-cell dt { margin: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
     .stApp:has(#hwfc-daily-page) .hwfc-ops-progress > span { transition: none; }
 }

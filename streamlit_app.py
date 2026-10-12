@@ -36,6 +36,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.activity_breakdowns import (
+    DONATION_DEFAULT_ACCOUNT,
     activity_actuals,
     activity_closeout_ready,
     activity_workflow_keys,
@@ -47,6 +48,7 @@ from app.activity_breakdowns import (
     read_activity_source_totals,
     write_activity_payload_file,
 )
+from app.activity_totals_ui import render_activity_totals
 from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
@@ -3258,7 +3260,11 @@ for activity_key in activity_workflow_keys(activity_source_totals):
     active_step_panel.__enter__()
     activity_title, activity_source_label = activity_labels[activity_key]
     source_total = float(activity_source_totals[activity_key])
-    st.caption(f"{activity_source_label}: ${source_total:,.2f}")
+    totals_slot = st.empty()
+    render_activity_totals(
+        totals_slot, title=activity_title, source_label=activity_source_label,
+        source_total=source_total, rows=(),
+    )
     activity_choice_key = (
         f"activity_handling_{activity_key}_{closeout_workbook_key}"
     )
@@ -3405,9 +3411,14 @@ for activity_key in activity_workflow_keys(activity_source_totals):
                 purpose_key = f"activity_{activity_key}_{row_id}_purpose"
                 manager_key = f"activity_{activity_key}_{row_id}_manager"
                 amount_key = f"activity_{activity_key}_{row_id}_amount"
+                donation_accounts = load_default_chart_of_accounts()
+                # Seed new rows only; keep the existing widget identity and any
+                # restored/user-selected value across supported Streamlit versions.
+                if DONATION_DEFAULT_ACCOUNT in donation_accounts:
+                    st.session_state.setdefault(account_key, DONATION_DEFAULT_ACCOUNT)
                 selected_account = row_columns[0].selectbox(
                     "QuickBooks Account",
-                    options=load_default_chart_of_accounts(),
+                    options=donation_accounts,
                     index=None,
                     placeholder="Search account",
                     key=account_key,
@@ -3494,6 +3505,11 @@ for activity_key in activity_workflow_keys(activity_source_totals):
             )
             st.rerun()
 
+    render_activity_totals(
+        totals_slot, title=activity_title, source_label=activity_source_label,
+        source_total=source_total, rows=raw_rows,
+        pending_amount=float(amount) if activity_key == "paid_in" else 0,
+    )
     render_breakdown_scroll_target(
         st,
         components.html,

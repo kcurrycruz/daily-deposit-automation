@@ -1,0 +1,113 @@
+/* Daily-only overrides. Home and AP keep their dedicated presentation. */
+.stApp:has(#hwfc-daily-page) {
+    --hwfc-cream: #f7f8f4;
+    --hwfc-paper: #ffffff;
+    --hwfc-forest: #205845;
+    --hwfc-leaf: #64874f;
+    --hwfc-sage: #e8efdf;
+    --hwfc-gold: #946c20;
+    --hwfc-clay: #a34a32;
+    --hwfc-brown: #53624e;
+    --hwfc-ink: #26372f;
+    --hwfc-muted: #62715b;
+    --hwfc-green-soft: #edf4e8;
+    --hwfc-red-soft: #fff1ec;
+    --hwfc-yellow-soft: #fff6e3;
+    --hwfc-border: #dce3d8;
+    background: #fff;
+    color: var(--hwfc-ink);
+    color-scheme: light;
+}
+.stApp:has(#hwfc-daily-page) :is([data-testid="stAppViewContainer"], [data-testid="stHeader"]) {
+    background: #fff !important;
+}
+.stApp:has(#hwfc-daily-page) [data-testid="stSidebar"] {
+    background: #f2f4ec !important;
+    border-right: 1px solid var(--hwfc-border);
+}
+.stApp:has(#hwfc-daily-page) .block-container { padding-top: 2.5rem; }
+.stApp:has(#hwfc-daily-page) :is(h1,h2,h3,h4,label,p,span,.stMarkdown,.stCaption) { color: var(--hwfc-ink); }
+.stApp:has(#hwfc-daily-page) :is([data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p) { color: var(--hwfc-muted); }
+.hwfc-daily-brand {
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid #dce3d8; padding: 0 0 18px; margin-bottom: 6px;
+}
+.hwfc-daily-brand img { object-fit: contain; flex: 0 0 52px; }
+.hwfc-daily-brand-name { color: #31563a; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.hwfc-daily-brand-note { color: #62715b; font-size: .84rem; margin-top: 4px; }
+.stApp:has(#hwfc-daily-page) [data-testid="stSidebar"] .hwfc-daily-brand { gap: 8px; }
+.stApp:has(#hwfc-daily-page) [data-testid="stSidebar"] .hwfc-daily-brand-name { font-size: .63rem; }
+.stApp:has(#hwfc-daily-page) .hwfc-hero {
+    background: linear-gradient(120deg, #f4f7ee, #f9f8f1);
+    border: 1px solid var(--hwfc-border); border-radius: 16px;
+    box-shadow: none; padding: 26px 28px;
+}
+.stApp:has(#hwfc-daily-page) .hwfc-hero:after { content: none; }
+.stApp:has(#hwfc-daily-page) .hwfc-kicker { color: #62715b; font-size: .7rem; }
+.stApp:has(#hwfc-daily-page) .hwfc-title { color: #25452e; font-weight: 500; font-size: clamp(1.8rem, 3vw, 2.65rem); }
+.stApp:has(#hwfc-daily-page) .hwfc-subtitle { color: #53624e; line-height: 1.6; font-size: .9rem; }
+.stApp:has(#hwfc-daily-page) .hwfc-ops-status {
+    border: 1px solid var(--hwfc-border); border-radius: 12px;
+    background: #fff; padding: 12px 8px;
+}
+.stApp:has(#hwfc-daily-page) :is(.hwfc-ops-status-value,.hwfc-mini-value,.hwfc-card-value,.hwfc-plan-card-title,.hwfc-plan-card-row strong,.hwfc-deposit-workspace-header,.hwfc-workflow-heading-title,.hwfc-check-title,.hwfc-result-title,.hwfc-tip-title,.hwfc-tip-body strong) { color: #26372f; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-ops-progress,.hwfc-stepper-item:not(:last-child) .hwfc-stepper-track::after) { background: #e2e8dc; }
+.stApp:has(#hwfc-daily-page) .hwfc-ops-progress > span { background: #64874f; }
+.stApp:has(#hwfc-daily-page) .hwfc-ops-status.is-attention .hwfc-ops-progress > span { background: #bd9347; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-step,.hwfc-stepper-bubble) { background: #f5f7f1; color: #53624e; border-color: #dce3d8; }
+.stApp:has(#hwfc-daily-page) .hwfc-step.active { background: #205845; color: white; border-color: #205845; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-workflow-heading,.hwfc-source-strip) { background: #edf3e7; border-color: #cbdcc0; color: #31563a; }
+.stApp:has(#hwfc-daily-page) .hwfc-workflow-heading-sub { color: #53624e; }
+.stApp:has(#hwfc-daily-page) .hwfc-stepper-item.is-complete .hwfc-stepper-track::after { background: #64874f; }
+.stApp:has(#hwfc-daily-page) .hwfc-stepper-item.is-complete .hwfc-stepper-bubble { background: #205845; color: white; border-color: #205845; }
+.stApp:has(#hwfc-daily-page) .hwfc-stepper-item.is-current .hwfc-stepper-bubble { background: #e1edda; color: #25452e; border-color: #64874f; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-stepper-label span,.hwfc-stepper-label strong) { color: #31563a; }
+.stApp:has(#hwfc-daily-page) .hwfc-stepper-item.is-pending .hwfc-stepper-label strong { color: #62715b; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-plan-card,.hwfc-card,.hwfc-mini-card,.hwfc-equation,.hwfc-tip-card) {
+    background: #fff; border-color: #dce3d8; color: #26372f;
+    box-shadow: 0 3px 14px #26372f06;
+}
+.stApp:has(#hwfc-daily-page) :is(.hwfc-plan-card-row,.hwfc-check-sheet,.hwfc-workbook-check-sheet,.hwfc-tip-body,.hwfc-tip-example) { color: #53624e; border-bottom-color: #e5eadd; }
+.stApp:has(#hwfc-daily-page) :is(.hwfc-check-card,.hwfc-workbook-validation-card) { background: #f0f5e9; color: #26372f; border-color: #ccdcbc; }
+.stApp:has(#hwfc-daily-page) .hwfc-workbook-check { background: #fff; border-color: #ccdcbc; }
+.stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card.is-pending { background: #f8f9f5; border-color: #dce3d8; }
+.stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-pending { background: #fff; border-color: #dce3d8; }
+.stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-pending .hwfc-workbook-check-sheet { color: #62715b; }
+.stApp:has(#hwfc-daily-page) :is([data-testid="stFileUploader"], [data-testid="stFileUploaderDropzone"], [data-testid="stFileUploaderFile"], [data-testid="stMetric"], [data-testid="stVerticalBlockBorderWrapper"]) {
+    background: #fff !important; color: #26372f !important; border-color: #dce3d8 !important;
+}
+.stApp:has(#hwfc-daily-page) [data-testid="stFileUploader"] { border-color: #b9ccb0; background: #f7f9f3 !important; }
+.stApp:has(#hwfc-daily-page) :is(div[data-baseweb="input"], div[data-baseweb="select"], div[data-testid="stFileUploader"] section, div[data-testid="stExpander"], div[data-testid="stExpander"] details) {
+    background: #fff !important; color: #26372f !important; border-color: #dce3d8 !important;
+}
+.stApp:has(#hwfc-daily-page) :is(input,textarea,select,[data-baseweb="select"] > div) { background: #fff; color: #26372f; caret-color: #205845; }
+.stApp:has(#hwfc-daily-page) [data-testid="stExpander"] summary { background: #f8f9f5; border-radius: 10px; }
+.stApp:has(#hwfc-daily-page) :is(.stButton,.stDownloadButton,[data-testid="stPopover"]) > button { background: white; border-color: #d0dbca; color: #26372f; font-weight: 650 !important; border-radius: 8px !important; }
+.stApp:has(#hwfc-daily-page) :is(.stButton,.stDownloadButton,[data-testid="stPopover"]) > button:hover:not(:disabled) { background: #edf4e8; border-color: #64874f; }
+.stApp:has(#hwfc-daily-page) .stButton > button[kind="primary"],
+.stApp:has(#hwfc-daily-page) .stDownloadButton > button { background: #205845 !important; border-color: #205845 !important; color: white !important; }
+.stApp:has(#hwfc-daily-page) :is(button[kind="primary"],.stDownloadButton > button) :is(p,span) { color: white !important; }
+.stApp:has(#hwfc-daily-page) button:disabled { opacity: .5; }
+.stApp:has(#hwfc-daily-page) :is(button,input,textarea):focus-visible { outline: 2px solid #64874f; outline-offset: 3px; }
+.stApp:has(#hwfc-daily-page) [data-testid="stAlert"] { color: #26372f; }
+.stApp:has(#hwfc-daily-page) [data-testid="stMainBlockContainer"]:has(.hwfc-deposit-workspace-marker) { border-color: #dce3d8; box-shadow: 0 5px 25px #26372f08; }
+.stApp:has(#hwfc-daily-page) .stTabs [data-baseweb="tab"] { color: #53624e; background: #f8f9f5; }
+.stApp:has(#hwfc-daily-page) .stTabs [aria-selected="true"] { color: #205845; background: #e8efdf; }
+/* Streamlit portals mount outside .stApp: scope them by the active page, not
+   their ancestry. This also covers native select/date menus on later steps. */
+body:has(.stApp #hwfc-daily-page) :is([data-testid="stPopoverBody"], [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"]) {
+    background: #fff !important; color: #26372f !important;
+}
+body:has(.stApp #hwfc-daily-page) :is([data-testid="stPopoverBody"], [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"]) :is(p,span,label,input,textarea,button) { color: #26372f; }
+body:has(.stApp #hwfc-daily-page) [data-testid="stPopoverBody"] :is(div[data-baseweb="input"],div[data-baseweb="select"],div[data-testid="stFileUploader"],div[data-testid="stFileUploaderDropzone"],div[data-testid="stFileUploader"] section) { background: #fff !important; color: #26372f !important; border-color: #dce3d8 !important; }
+body:has(.stApp #hwfc-daily-page) [data-testid="stPopoverBody"] button[kind="primary"] { background: #205845 !important; border-color: #205845 !important; }
+body:has(.stApp #hwfc-daily-page) [data-testid="stPopoverBody"] button[kind="primary"] :is(p,span) { color: white; }
+@media (max-width: 720px) {
+    .stApp:has(#hwfc-daily-page) .block-container { padding: 2rem 1rem; }
+    .stApp:has(#hwfc-daily-page) .hwfc-hero { padding: 20px; }
+    .stApp:has(#hwfc-daily-page) .hwfc-stepbar { grid-template-columns: repeat(2, 1fr); }
+    .hwfc-daily-brand-name { font-size: .64rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .stApp:has(#hwfc-daily-page) .hwfc-ops-progress > span { transition: none; }
+}

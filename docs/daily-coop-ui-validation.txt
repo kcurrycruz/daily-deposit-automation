@@ -1,0 +1,36 @@
+Daily Deposits co-op theme and return confirmation
+Validated 2026-10-12; local isolated preview only, not deployed.
+
+Scope
+- White Daily workspace, cream sidebar, forest green controls and sage cards.
+- Reuse the existing simplified HWFC logo.
+- Keep all accounting, upload, draft, workbook, and IIF code unchanged.
+- Native light Streamlit theme also supports canvas-based editors; home and AP
+  retain their dedicated presentation.
+- Daily-only return confirmation uses the existing preserve/return/rerun route.
+
+Automated verification
+- Full Python unittest discovery: 462 passed, including 3 real Streamlit
+  interaction tests for opening, canceling, confirming and restoring state.
+- AP frontend Node tests: 27 passed, no failures.
+- The 3 navigation interaction tests also passed on Streamlit 1.37.
+- git diff --check passed.
+- Independent read-only code review: approved, no blocking findings.
+
+Browser verification (Streamlit 1.65, 127.0.0.1:8504)
+- Desktop Daily shell: white background, cream sidebar, readable dark text.
+- Resume Draft popup: native portal outside stApp now has dark text on white.
+- Return dialog: white, centered, 530px desktop, 4px backdrop blur and dimming.
+- Cancel, Escape and X keep Daily open; confirm returns to the co-op portal.
+- Re-entry into Daily renders correctly; portal gradients and AP white shell
+  remain unchanged when leaving Daily, with no lingering Daily marker.
+- At 390x844, page scroll width is 390; upload controls fit at 348px.
+- Mobile dialog fits at 326px with stacked buttons; viewport reset after QA.
+
+Limitations
+- No real financial documents or live BILL/QuickBooks connections were used.
+- Browser QA exercised the upload screen and navigation. Later-stage accounting
+  and export behavior is covered by the existing regression suite; no real
+  end-to-end deposit was performed in this visual change.
+- Streamlit 1.37 dialog interactions were tested, but exact old-version browser
+  CSS rendering was not; both old BaseWeb and current React Aria selectors exist.

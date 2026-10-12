@@ -47,6 +47,7 @@ class RecordingUI:
     def __init__(self, clicked_keys=()):
         self.events = []
         self.clicked_keys = set(clicked_keys)
+        self.session_state = {}
 
     def __enter__(self):
         return self
@@ -251,7 +252,7 @@ class RunHistoryUITests(unittest.TestCase):
         renderer = getattr(run_history_ui, "render_daily_sidebar", None)
         self.assertTrue(callable(renderer), "Daily sidebar renderer is missing")
 
-        ui = RecordingUI({"return_to_program_hub"})
+        ui = RecordingUI()
         clicked = renderer(
             ui,
             records=[],
@@ -268,7 +269,7 @@ class RunHistoryUITests(unittest.TestCase):
             controls,
             [("button", "← All Programs"), ("expander", "Run History")],
         )
-        self.assertTrue(clicked)
+        self.assertFalse(clicked)
 
     def test_run_history_is_collapsed_by_default(self):
         self.assertIsNotNone(find_spec("app.run_history_ui"))

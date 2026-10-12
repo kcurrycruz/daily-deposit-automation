@@ -1,0 +1,32 @@
+/* Only the Daily return dialog, never other app dialogs. */
+[data-testid="stDialog"][data-rac]:has(#hwfc-daily-return-dialog),
+div[data-baseweb="modal"]:has(#hwfc-daily-return-dialog) {
+    background: rgba(38, 62, 51, .30);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+}
+[data-testid="stDialog"][data-rac]:has(#hwfc-daily-return-dialog) > div {
+    width: min(530px, calc(100vw - 32px));
+    border-radius: 12px;
+    margin: 0;
+}
+[role="dialog"]:has(#hwfc-daily-return-dialog) {
+    background: #fff !important;
+    color: #26372f !important;
+    border: 1px solid #dce3d8;
+    border-radius: 12px;
+    box-shadow: 0 20px 70px #26372f24;
+    width: min(530px, calc(100vw - 32px));
+    max-width: 100%;
+}
+[role="dialog"]:has(#hwfc-daily-return-dialog) :is(h2, h3, p, span, label) { color: #26372f; }
+[role="dialog"]:has(#hwfc-daily-return-dialog) [data-testid="stCaptionContainer"] p { color: #63745c; }
+[role="dialog"]:has(#hwfc-daily-return-dialog) button { background: white; color: #26372f; border: 1px solid #dce3d8; }
+[role="dialog"]:has(#hwfc-daily-return-dialog) button[kind="primary"] { background: #205845 !important; border-color: #205845 !important; }
+[role="dialog"]:has(#hwfc-daily-return-dialog) button[kind="primary"] :is(p, span) { color: white; }
+@media (prefers-reduced-motion: reduce) {
+    div[data-baseweb="modal"]:has(#hwfc-daily-return-dialog) { animation: none; transition: none; }
+}

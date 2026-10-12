@@ -89,6 +89,7 @@ from app.run_history_ui import (
     render_daily_sidebar,
     render_sidebar_collapse_request,
 )
+from app.daily_theme_ui import render_daily_theme
 from app.chart_of_accounts import load_default_chart_of_accounts
 from app.closeout_reconciliation import (
     STANDARD_CLOSEOUT_ORDER,
@@ -2226,6 +2227,7 @@ if selected_program != DAILY_DEPOSITS:
     st.rerun()
 
 restore_daily_program_state(st.session_state)
+render_daily_theme(st)
 
 # ---------------------------------------------------------------------
 # Header

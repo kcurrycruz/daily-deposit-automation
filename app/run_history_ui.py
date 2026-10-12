@@ -6,8 +6,9 @@ from pathlib import Path
 
 from app.program_hub_ui import (
     SIDEBAR_COLLAPSE_REQUEST_KEY,
-    render_all_programs_action,
 )
+from app.daily_navigation_ui import render_daily_program_return
+from app.daily_theme_ui import render_daily_brand
 
 
 def latest_prior_iif_run(records: list[dict], deposit_date: date) -> dict | None:
@@ -67,8 +68,8 @@ def render_daily_sidebar(
     run_time_formatter,
 ) -> bool:
     """Render Daily Deposit navigation followed by collapsed Run History."""
-    ui.markdown("## 🌿 HWFC Daily Deposit")
-    return_to_hub = render_all_programs_action(ui)
+    render_daily_brand(ui, compact=True)
+    return_to_hub = render_daily_program_return(ui)
     render_run_history(
         ui,
         records=records,

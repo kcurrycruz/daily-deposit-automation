@@ -3,3 +3,12 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+# A light native widget theme complements all three co-op workspaces, including
+# canvas-based data editors that cannot be reliably recolored with CSS.
+[theme]
+base = "light"
+primaryColor = "#205845"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F2F4EC"
+textColor = "#26372F"

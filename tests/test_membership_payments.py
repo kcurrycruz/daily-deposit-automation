@@ -1673,7 +1673,9 @@ class MembershipPaymentTests(unittest.TestCase):
         self.assertIn('st.markdown("#### InHouse Charges")', source)
         self.assertIn('placeholder="Search account"', source)
         self.assertIn('"Actual InHouse Charges"', source)
-        self.assertIn('"Difference from System / BS"', source)
+        # The new live panel replaces the old small difference caption; its
+        # displayed amounts and signed credits are exercised by AppTest.
+        self.assertIn('target_label="System / BS total"', inhouse_source)
         self.assertNotIn('"Charge (House) Actual",\n        min_value=', source)
         closeout_source = source[source.index("if uploaded and active_step == STEP_CLOSEOUT"):]
         self.assertNotIn('key=f"closeout_inhouse_add_', closeout_source)

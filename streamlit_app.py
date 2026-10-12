@@ -49,6 +49,7 @@ from app.activity_breakdowns import (
     write_activity_payload_file,
 )
 from app.activity_totals_ui import render_activity_totals
+from app.step_totals_ui import entry_amount_total, render_step_totals
 from app.coupon_reconciliation import (
     read_coupon_receivable_total,
     reconcile_coupon_receivable,
@@ -2846,6 +2847,7 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
         quickbooks_names_path = (
             Path(__file__).parent / "assets" / "quickbooks_other_names.txt"
         )
+        membership_totals_slot = st.empty()
         try:
             quickbooks_member_names = load_quickbooks_member_names(
                 quickbooks_names_path
@@ -3122,6 +3124,13 @@ if subscription_total > 0 and active_step == STEP_MEMBER_SHARES:
 
         membership_payments.extend(
             dict(payment) for payment in st.session_state[saved_payments_key]
+        )
+        render_step_totals(
+            membership_totals_slot, title="Member Shares",
+            target_label="Subscription revenue", target_total=subscription_total,
+            entered_label="Payments + current draft",
+            entered_total=entry_amount_total(membership_payments, pending_amount=amount),
+            note="Includes the current payment draft once; not saved or approved.",
         )
 
         render_breakdown_scroll_target(
@@ -3586,6 +3595,7 @@ if STEP_COUPONS in required_steps and STEP_COUPONS in step_completions:
 if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
+    coupon_totals_slot = st.empty()
     st.caption(f"Balance Sheet Coupons Receivable (code 908): ${coupon_bs_total:,.2f}")
     coupon_choice_key = f"coupon_handling_{closeout_workbook_key}"
     coupon_scroll_request_key = f"coupon_scroll_{closeout_workbook_key}"
@@ -3668,6 +3678,14 @@ if uploaded and STEP_COUPONS in required_steps and active_step == STEP_COUPONS:
             format="%.2f",
             key=f"coupon_mfg_{closeout_workbook_key}",
         )
+        render_step_totals(
+            coupon_totals_slot, title="Coupons Receivable",
+            target_label="Closeout coupon total", target_total=coupon_closeout_total,
+            entered_label="NCG + MFG counted",
+            entered_total=entry_amount_total([{"amount": coupon_ncg_total}, {"amount": coupon_mfg_total}]),
+            reference_label="Balance Sheet Coupons Receivable (code 908)",
+            reference_total=coupon_bs_total,
+        )
 
         try:
             coupon_preview = reconcile_coupon_receivable(
@@ -3704,6 +3722,7 @@ if uploaded and active_step == STEP_INHOUSE:
     active_step_panel = active_step_content.container()
     active_step_panel.__enter__()
     st.markdown("#### InHouse Charges")
+    inhouse_totals_slot = st.empty()
     st.caption("Assign each house charge to a QuickBooks account and memo.")
     inhouse_ids_key = f"inhouse_ids_{closeout_workbook_key}"
     inhouse_saved_key = f"inhouse_saved_payload_{closeout_workbook_key}"
@@ -3812,13 +3831,12 @@ if uploaded and active_step == STEP_INHOUSE:
 
     inhouse_total = round(sum(row["amount"] for row in inhouse_rows), 2)
     inhouse_difference = round(inhouse_total - float(charge_house_total), 2)
-    summary_columns = st.columns(3)
-    summary_columns[0].caption("System / BS")
-    summary_columns[0].write(f"${charge_house_total:,.2f}")
-    summary_columns[1].caption("Actual InHouse Charges")
-    summary_columns[1].write(f"${inhouse_total:,.2f}")
-    summary_columns[2].caption("Difference from System / BS")
-    summary_columns[2].write(f"{inhouse_difference:+,.2f}")
+    render_step_totals(
+        inhouse_totals_slot, title="InHouse Charges",
+        target_label="System / BS total", target_total=charge_house_total,
+        entered_label="Actual InHouse Charges", entered_total=inhouse_total,
+        note="Includes draft charges minus signed credits; not saved or approved.",
+    )
     if inhouse_difference == 0:
         st.success("InHouse charges match the System / BS total.", icon="✅")
     else:
@@ -3932,6 +3950,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
         st.rerun()
     else:
         st.markdown("### Closeout Sheet reconciliation")
+        closeout_totals_slot = st.empty()
         st.caption(
             "Enter positive amounts exactly as printed on the paper Closeout Sheet. "
             "The app handles which amounts add to or remove from the deposit."
@@ -4204,6 +4223,13 @@ if uploaded and active_step == STEP_CLOSEOUT:
                     review_context=closeout_review_context,
                 )
             )
+            render_step_totals(
+                closeout_totals_slot, title="Closeout Sheet",
+                target_label="Paper Closeout total", target_total=final_closeout_total,
+                entered_label="Reviewed deposit",
+                entered_total=(saved_closeout_preview["preview"]["provisional_total"] if preview_is_fresh else None),
+                note="Re-run Review Closeout after changes. Matching totals do not replace final approval.",
+            )
             review_settlement_ok = bool(
                 settlement_file is not None
                 and validate_settlement_processed_net_header(
@@ -4307,17 +4333,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                         hide_index=True,
                         use_container_width=True,
                     )
-                total_columns = st.columns(3)
-                total_columns[0].metric(
-                    "Generated deposit",
-                    f"${float(closeout_preview['provisional_total']):,.2f}",
-                )
-                total_columns[1].metric(
-                    "Paper Closeout total",
-                    f"${float(closeout_preview['final_total']):,.2f}",
-                )
                 remaining = float(closeout_preview["remaining"])
-                total_columns[2].metric("Remaining", f"{remaining:+,.2f}")
                 if remaining != 0:
                     st.warning(
                         f"The reviewed deposit still differs by {remaining:+,.2f}. "

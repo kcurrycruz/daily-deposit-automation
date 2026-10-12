@@ -77,6 +77,10 @@
 .stApp:has(#hwfc-daily-page) :is(.hwfc-plan-card-row,.hwfc-check-sheet,.hwfc-workbook-check-sheet,.hwfc-tip-body,.hwfc-tip-example) { color: #53624e; border-bottom-color: #e5eadd; }
 .stApp:has(#hwfc-daily-page) :is(.hwfc-check-card,.hwfc-workbook-validation-card) { background: #f0f5e9; color: #26372f; border-color: #ccdcbc; }
 .stApp:has(#hwfc-daily-page) .hwfc-workbook-check { background: #fff; border-color: #ccdcbc; }
+.stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-verified {
+    background: #e1edda; border-color: #64874f;
+}
+.stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-verified .hwfc-workbook-check-label { color: #205845; }
 .stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card.is-pending { background: #f8f9f5; border-color: #dce3d8; }
 .stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-pending { background: #fff; border-color: #dce3d8; }
 .stApp:has(#hwfc-daily-page) .hwfc-sms-validation-card .hwfc-workbook-check.is-pending .hwfc-workbook-check-sheet { color: #62715b; }

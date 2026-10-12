@@ -50,6 +50,13 @@
     border: 1px solid var(--hwfc-border); border-radius: 12px;
     background: #fff; padding: 12px 8px;
 }
+/* Let wrapped status text set the row height while all bars share its bottom. */
+.stApp:has(#hwfc-daily-page) .hwfc-ops-status-item {
+    display: flex;
+    flex-direction: column;
+}
+.stApp:has(#hwfc-daily-page) .hwfc-ops-status-value { flex: 1; }
+.stApp:has(#hwfc-daily-page) .hwfc-ops-progress { flex-shrink: 0; }
 .stApp:has(#hwfc-daily-page) :is(.hwfc-ops-status-value,.hwfc-mini-value,.hwfc-card-value,.hwfc-plan-card-title,.hwfc-plan-card-row strong,.hwfc-deposit-workspace-header,.hwfc-workflow-heading-title,.hwfc-check-title,.hwfc-result-title,.hwfc-tip-title,.hwfc-tip-body strong) { color: #26372f; }
 .stApp:has(#hwfc-daily-page) :is(.hwfc-ops-progress,.hwfc-stepper-item:not(:last-child) .hwfc-stepper-track::after) { background: #e2e8dc; }
 .stApp:has(#hwfc-daily-page) .hwfc-ops-progress > span { background: #64874f; }

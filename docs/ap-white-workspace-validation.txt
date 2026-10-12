@@ -1,0 +1,31 @@
+AP white workspace and sidebar navigation - October 12, 2026
+
+Approved scope: AP-only full-width white wrapper, no duplicated page heading,
+and Go back to programs in the component sidebar. Home and Daily unchanged.
+Base: DD-v2 2992383771d60c67e8bc6f21705136972668252d.
+
+The existing leave warning is shown inside the component's modal.
+Cancel leaves browser state untouched. Confirm emits a navigation-only
+action and random request UUID; event detail is never forwarded.
+Python accepts exactly the action/request_id fields and a canonical v4 UUID.
+Consumed IDs are ignored so a reopened component does not exit immediately.
+Stable component key and reserved pre-component block retained.
+Missing frontend builds retain native confirmed-return navigation.
+Privacy and disconnected-BILL notices retained below the workspace.
+
+Verification:
+- Baseline: 456 Python and 24 Node tests passed.
+- New layout/navigation tests observed RED then GREEN.
+- Browser re-entry exposed a stale-value defect; regression reproduced it,
+  UUID consumption fix passed, confirmed exit and re-entry verified in browser.
+- Final 459 Python and 27 Node tests passed.
+- Pinned frontend bundle rebuilt without enabling dependency install scripts.
+- Independent review: no remaining Critical/Important/Minor findings.
+- Streamlit 1.65 preview at 127.0.0.1:8504.
+- Desktop 1280px: parent white, frame width 1270px, sidebar back visible.
+- Mobile 390px: outer document has no horizontal overflow; back button >=44px.
+- Tablet 760px: component body width and scroll width both 750px; back visible.
+- Temporary viewport override reset after checks.
+- Home co-op design remains intact on return. No Daily processing files changed.
+- Only sample AP data used; no real PDF/CSV upload, accounting/API action.
+- This refinement is local only; no merge, push or hosted reboot performed.

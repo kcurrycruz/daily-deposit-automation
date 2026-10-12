@@ -105,4 +105,4 @@ return true;`)}Ho.createIsValidFunction=Jb;function Gb(t){return typeof t!="bigi
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */var um=new WeakSet;function lm(t,e=900){um.has(t)||(t.setComponentReady(),t.setFrameHeight(e),um.add(t))}lm(ri);
+ */var um=new WeakSet;function lm(t,e=900,r=void 0){um.has(t)||(t.setComponentReady(),t.setFrameHeight(e),r?.addEventListener("hwfc:return-to-programs",()=>{t.setComponentValue({action:"return_to_programs",request_id:crypto.randomUUID()})}),um.add(t))}lm(ri,900,window);

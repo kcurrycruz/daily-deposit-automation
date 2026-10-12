@@ -1,0 +1,32 @@
+/* AP-only shell: the home portal and Daily Deposits retain their themes. */
+.stApp:has(#hwfc-ap-page),
+.stApp:has(#hwfc-ap-page) [data-testid="stAppViewContainer"],
+.stApp:has(#hwfc-ap-page) [data-testid="stHeader"],
+.stApp:has(#hwfc-ap-page) [data-testid="stVerticalBlockBorderWrapper"] {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #26372f !important;
+}
+.stApp:has(#hwfc-ap-page) .block-container {
+    max-width: none;
+    padding: 3.5rem 0 1rem;
+    margin: 0;
+    background: #ffffff;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+.stApp:has(#hwfc-ap-page) [data-testid="stVerticalBlock"] { gap: 0; }
+.stApp:has(#hwfc-ap-page) p,
+.stApp:has(#hwfc-ap-page) span,
+.stApp:has(#hwfc-ap-page) h1,
+.stApp:has(#hwfc-ap-page) [data-testid="stCaptionContainer"] {
+    color: #53624e;
+}
+.stApp:has(#hwfc-ap-page) [data-testid="stCaptionContainer"] {
+    padding: 6px 24px 0;
+    font-size: .73rem;
+}
+.stApp:has(#hwfc-ap-page) [data-testid="stHeader"] button,
+.stApp:has(#hwfc-ap-page) [data-testid="stHeader"] button span { color: #31563a; }
+.stApp:has(#hwfc-ap-page) [data-testid="stButton"] button p { color: #ffffff; }

@@ -27,6 +27,9 @@ class RecordingUi:
     def caption(self, text):
         self.messages.append(text)
 
+    def markdown(self, text, **kwargs):
+        self.messages.append(text)
+
     def warning(self, text):
         self.messages.append(text)
 
@@ -47,7 +50,7 @@ class ApRendererTests(unittest.TestCase):
             positions.append(tuple(ui.blocks))
         render_ap_statements(ui, component_renderer=component)
         ui.blocks = []
-        ui.clicked = {"ap_all_programs"}
+        ui.session_state["_ap_exit_confirmation"] = True
         render_ap_statements(ui, component_renderer=component)
         self.assertEqual(positions, [("confirmation",), ("confirmation",)])
 
@@ -59,25 +62,54 @@ class ApRendererTests(unittest.TestCase):
         self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
         self.assertEqual(calls, [{"key": "hwfc_ap_statements_workspace"}] * 2)
         text = " ".join(ui.messages)
-        for phrase in ["AP Statements", "browser profile", "original PDFs", "Save session", "BILL"]:
+        for phrase in ["browser profile", "original PDFs", "Save session", "BILL"]:
             self.assertIn(phrase, text)
         self.assertEqual(ui.session_state["run_result"], "retained")
-        self.assertEqual(ui.button_calls[0].get("type"), "primary")
+        self.assertEqual(ui.button_calls, [])
+        self.assertNotIn("AP Statements", ui.messages)
+
+    def test_confirmed_sidebar_exit_returns_to_hub_without_changing_daily_results(self):
+        from app.ap_statements_ui import render_ap_statements
+        ui = RecordingUi()
+        request = {"action": "return_to_programs", "request_id": "00000000-0000-4000-8000-000000000001"}
+        self.assertTrue(render_ap_statements(ui, component_renderer=lambda **kw: request))
+        self.assertEqual(ui.session_state["run_result"], "retained")
+
+    def test_consumed_sidebar_request_does_not_exit_reopened_ap(self):
+        from app.ap_statements_ui import render_ap_statements
+        ui = RecordingUi()
+        request = {"action": "return_to_programs", "request_id": "00000000-0000-4000-8000-000000000001"}
+        self.assertTrue(render_ap_statements(ui, component_renderer=lambda **kw: request))
+        self.assertFalse(render_ap_statements(ui, component_renderer=lambda **kw: request))
+        next_request = {"action": "return_to_programs", "request_id": "00000000-0000-4000-8000-000000000002"}
+        self.assertTrue(render_ap_statements(ui, component_renderer=lambda **kw: next_request))
+
+    def test_component_financial_or_unknown_values_cannot_navigate(self):
+        from app.ap_statements_ui import render_ap_statements
+        for value in (None, True, "unknown", "return_to_programs",
+                      {"action": "return_to_programs", "invoices": []},
+                      {"action": "return_to_programs", "request_id": "invoice-data"},
+                      {"action": "return_to_programs", "request_id": "00000000-0000-4000-8000-000000000001", "invoices": []}):
+            with self.subTest(value=value):
+                ui = RecordingUi()
+                self.assertFalse(render_ap_statements(ui, component_renderer=lambda **kw: value))
+                self.assertEqual(ui.session_state["active_finance_program"], "ap_statements")
 
     def test_exit_requires_confirmation_stay_keeps_workspace_leave_returns_true(self):
         from app.ap_statements_ui import render_ap_statements
         ui = RecordingUi()
+        missing_path = Path(__file__).resolve().parent / "nonexistent-ap-build"
         renderer = lambda **kwargs: None
         ui.clicked = {"ap_all_programs"}
-        self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
+        self.assertFalse(render_ap_statements(ui, component_renderer=renderer, frontend_path=missing_path))
         self.assertIn("ap_statements", ui.session_state.values())
         self.assertIn("export", " ".join(ui.messages))
         ui.clicked = {"ap_stay"}
-        self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
+        self.assertFalse(render_ap_statements(ui, component_renderer=renderer, frontend_path=missing_path))
         ui.clicked = {"ap_all_programs"}
-        self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
+        self.assertFalse(render_ap_statements(ui, component_renderer=renderer, frontend_path=missing_path))
         ui.clicked = {"ap_leave"}
-        self.assertTrue(render_ap_statements(ui, component_renderer=renderer))
+        self.assertTrue(render_ap_statements(ui, component_renderer=renderer, frontend_path=missing_path))
         self.assertEqual(ui.session_state["run_result"], "retained")
 
     def test_missing_build_shows_error_and_navigation_without_rendering_component(self):

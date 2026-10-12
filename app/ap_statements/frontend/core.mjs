@@ -1,26 +1,34 @@
 export const money = cents => cents == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 export function cents(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value * 100) : null;
-  const raw = String(value ?? '').trim();
+  if (typeof value === 'number') {
+    const result = Math.round(value * 100);
+    return Number.isFinite(value) && Number.isSafeInteger(result) ? result : null;
+  }
+  const raw = String(value ?? '').trim().replace(/\s+/g, '');
   if (!raw) return null;
-  const negative = raw.includes('-') || raw.includes('(');
-  const clean = raw.replace(/[$,()\s+-]/g, '');
-  if (!/^\d+(?:\.\d{1,2})?$/.test(clean)) return null;
-  const [whole, decimal = ''] = clean.split('.');
-  return (Number(whole) * 100 + Number(decimal.padEnd(2, '0'))) * (negative ? -1 : 1);
+  // A sign belongs at an edge; accounting parentheses must enclose the amount.
+  const match = raw.match(/^(?:\(\$?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\)|([+-]?)(?:\$)?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)(-?)|\$([+-])((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?))$/);
+  if (!match || (match[2] && match[4])) return null;
+  const negative = !!match[1] || match[2] === '-' || match[4] === '-' || match[5] === '-';
+  const [whole, decimal = ''] = (match[1] || match[3] || match[6]).replaceAll(',', '').split('.');
+  const result = BigInt(whole) * 100n + BigInt(decimal.padEnd(2, '0'));
+  if (result > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(result) * (negative ? -1 : 1);
 }
 export const invoiceKey = value => String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
-export const vendorKey = value => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+export const vendorKey = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 export const uid = () => globalThis.crypto?.randomUUID?.() ?? `r${Date.now()}${Math.random().toString(36).slice(2)}`;
 const datePattern = /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/;
-const moneyPattern = /(?:-\s*\$?\s*|\$\s*|\()?\d[\d,]*\.\d{2}\)?-?/g;
+const moneyPattern = /(?:-\s*\$?\s*|\$\s*|\(\s*\$?\s*)?\d[\d,]*\.\d{2}\)?-?/g;
 export function dateISO(value) {
   const raw = String(value ?? '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
-  if (!m) return '';
-  const year = m[3].length === 2 ? `20${m[3]}` : m[3];
-  const result = `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  let result = raw;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+    if (!m) return '';
+    const year = m[3].length === 2 ? `20${m[3]}` : m[3];
+    result = `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
   const d = new Date(`${result}T12:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === result ? result : '';
 }
@@ -223,7 +231,9 @@ export function importRecords(text) {
     const vendor = get(row, 'vendor').trim(); const invoiceNumber = get(row, 'invoiceNumber').trim();
     if (!vendor || !invoiceNumber || amount == null) throw new Error(`Invalid vendor, invoice number or amount on CSV row ${i + 2}.`);
     const fieldMoney = name => { const value = get(row, name); const parsed = cents(value); if (value.trim() && parsed == null) throw new Error(`Invalid ${name} on CSV row ${i + 2}.`); return parsed ?? 0; };
-    return { id: get(row, 'id') || `csv-${i}`, vendor, invoiceNumber, amount, kind: get(row, 'kind') || 'invoice', currency: get(row, 'currency') || 'USD', clearedPaymentAmount: fieldMoney('clearedPaymentAmount'), scheduledAmount: fieldMoney('scheduledAmount'), creditAmount: fieldMoney('creditAmount'), paymentDate: dateISO(get(row, 'paymentDate')), status: get(row, 'status') };
+    const rawDate = get(row, 'paymentDate').trim(), paymentDate = dateISO(rawDate);
+    if (rawDate && !paymentDate) throw new Error(`Invalid paymentDate on CSV row ${i + 2}.`);
+    return { id: get(row, 'id') || `csv-${i}`, vendor, invoiceNumber, amount, kind: get(row, 'kind') || 'invoice', currency: get(row, 'currency') || 'USD', clearedPaymentAmount: fieldMoney('clearedPaymentAmount'), scheduledAmount: fieldMoney('scheduledAmount'), creditAmount: fieldMoney('creditAmount'), paymentDate, status: get(row, 'status') };
   });
 }
 export function csvCell(value) {

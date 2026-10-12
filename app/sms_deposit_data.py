@@ -98,11 +98,16 @@ def build_sms_deposit_data(bundle: SmsExportBundle) -> SmsDepositData:
         sales_by_subdept.get(27, _ZERO),
     )
     if 3542 in coupon_rows:
+        _, coupon_columns = _find_subdepartment_header(
+            bundle.reports["coupons"].rows, "Store Coupons"
+        )
         _assert_control(
             bundle.reports["coupons"],
             "store coupons total",
             store_coupons_raw,
             "Store Coupons",
+            amount_column=coupon_columns["control_amount"],
+            strict_amount_column=bool(coupon_columns["strict_amount"]),
         )
 
     discounts_by_level, discount_total = _discounts(bundle.reports["discounts"])
@@ -142,9 +147,9 @@ def _subdepartment_amounts(
     amounts: dict[int, Decimal] = {}
     for row in report.rows[header_index + 1 :]:
         code = _integer(_cell(row, columns["code"]))
-        amount = _maybe_money(_cell(row, columns["amount"]))
-        if code is None or amount is None:
+        if code is None:
             continue
+        amount = _required_money(_cell(row, columns["amount"]), f"{report_label} code {code}")
         amounts[code] = _money(amounts.get(code, _ZERO) + amount)
 
     total = _sum(amounts.values())
@@ -156,6 +161,7 @@ def _subdepartment_amounts(
         report_label,
         amount_column=columns["amount"],
         control_amount_column=columns.get("control_amount"),
+        strict_amount_column=bool(columns["strict_amount"]),
         fallback_control_labels=fallback_control_labels,
     )
     return amounts, total
@@ -166,9 +172,9 @@ def _discounts(report: SmsExport) -> tuple[dict[int, Decimal], Decimal]:
     amounts: dict[int, Decimal] = {}
     for row in report.rows[header_index + 1 :]:
         level = _integer(_cell(row, columns["level"]))
-        amount = _maybe_money(_cell(row, columns["amount"]))
-        if level is None or amount is None:
+        if level is None:
             continue
+        amount = _required_money(_cell(row, columns["amount"]), f"Discount level {level}")
         amounts[level] = _money(amounts.get(level, _ZERO) + abs(amount))
     total = _sum(amounts.values())
     _assert_control(
@@ -188,9 +194,9 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
     amounts: dict[int, Decimal] = {}
     for row in report.rows[header_index + 1 :]:
         code = _integer(_cell(row, columns["code"]))
-        amount = _maybe_money(_cell(row, columns["amount"]))
-        if code is None or amount is None:
+        if code is None:
             continue
+        amount = _required_money(_cell(row, columns["amount"]), f"HASH code {code}")
         amounts[code] = _money(amounts.get(code, _ZERO) + amount)
     _assert_control(
         report,
@@ -200,6 +206,7 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
         absolute=True,
         amount_column=columns["amount"],
         control_amount_column=columns.get("control_amount"),
+        strict_amount_column=bool(columns["strict_amount"]),
         fallback_control_labels=("total",),
     )
     return (
@@ -216,11 +223,14 @@ def _balance_sheet_amounts(report: SmsExport) -> dict[str, Decimal]:
     gift_card_tender = _ZERO
     paid_out_revenue = None
     paid_out_tender = _ZERO
+    recognized_codes = set(_BS_CODE_KEYS) | set(_BS_SUMMED_CODES) | {
+        917, 1117, 1317, 914, 1114, 1314, 934, 1334,
+    }
     for row in report.rows[header_index + 1 :]:
         code = _integer(_cell(row, columns["code"]))
-        amount = _maybe_money(_cell(row, columns["amount"]))
-        if code is None or amount is None:
+        if code not in recognized_codes:
             continue
+        amount = _required_money(_cell(row, columns["amount"]), f"Balance Sheet code {code}")
         if code in _BS_CODE_KEYS:
             data[_BS_CODE_KEYS[code]] = amount
         elif code in _BS_SUMMED_CODES:
@@ -264,10 +274,10 @@ def _milk_bottle_total(report: SmsExport) -> Decimal:
     total = _ZERO
     for row in report.rows[header_index + 1 :]:
         description = _cell(row, columns["description"])
-        amount = _maybe_money(_cell(row, columns["amount"]))
-        if not isinstance(description, str) or amount is None:
+        if not isinstance(description, str):
             continue
         if _is_returned_milk_bottle(description):
+            amount = _required_money(_cell(row, columns["amount"]), "Returned Milk Bottle Net Sales")
             total = _money(total + abs(amount))
     return total
 
@@ -278,6 +288,8 @@ def _hierarchical_milk_bottle_total(report: SmsExport) -> Decimal:
     found_item_row = False
     for row in report.rows:
         if _integer(_cell(row, 0)) is not None:
+            if returned_item:
+                raise ValueError("Returned Milk Bottle item is missing its Net Sales amount.")
             descriptions = [value for value in row[1:] if isinstance(value, str) and value.strip()]
             returned_item = any(_is_returned_milk_bottle(value) for value in descriptions)
             found_item_row = True
@@ -294,18 +306,19 @@ def _hierarchical_milk_bottle_total(report: SmsExport) -> Decimal:
         )
         if net_sales_index is None:
             continue
-        amount = next(
-            (
-                parsed
-                for value in row[net_sales_index + 1 :]
-                if (parsed := _maybe_money(value)) is not None
-            ),
+        # Empty padding cells are part of the hierarchical SMS layout. The
+        # first occupied monetary slot is authoritative, even when corrupt.
+        raw_amount = next(
+            (value for value in row[net_sales_index + 1 :]
+             if value is not None and str(value).strip()),
             None,
         )
-        if amount is not None:
-            total = _money(total + abs(amount))
+        amount = _required_money(raw_amount, "Returned Milk Bottle Net Sales")
+        total = _money(total + abs(amount))
         returned_item = False
 
+    if returned_item:
+        raise ValueError("Returned Milk Bottle item is missing its Net Sales amount.")
     if not found_item_row:
         raise ValueError("Milk Bottles report has no item detail rows.")
     return total
@@ -409,13 +422,15 @@ def _find_subdepartment_header(
     if columns["code"] < 0:
         raise ValueError(f"{report_label} report is missing its sub-department code column.")
     columns["control_amount"] = columns["amount"]
-    if columns["amount"] > 0:
+    columns["strict_amount"] = named_code_column is not None
+    if named_code_column is None and columns["amount"] > 0:
         for detail_row in rows[header_index + 1 :]:
             if _integer(_cell(detail_row, columns["code"])) is None:
                 continue
-            declared_amount = _maybe_money(_cell(detail_row, columns["amount"]))
             shifted_amount = _maybe_money(_cell(detail_row, columns["amount"] - 1))
-            if declared_amount is None and shifted_amount is not None:
+            declared_value = _cell(detail_row, columns["amount"])
+            declared_blank = declared_value is None or str(declared_value).strip() == ""
+            if declared_blank and shifted_amount is not None:
                 columns["amount"] -= 1
             break
     return header_index, columns
@@ -430,6 +445,7 @@ def _assert_control(
     absolute: bool = False,
     amount_column: int | None = None,
     control_amount_column: int | None = None,
+    strict_amount_column: bool = False,
     fallback_control_labels: tuple[str, ...] = (),
 ) -> None:
     amount_column = (
@@ -441,6 +457,7 @@ def _assert_control(
         report.rows,
         control_label,
         amount_column=amount_column,
+        strict_amount_column=strict_amount_column,
     )
     for fallback_label in fallback_control_labels:
         if expected is not None:
@@ -449,6 +466,7 @@ def _assert_control(
             report.rows,
             fallback_label,
             amount_column=amount_column,
+            strict_amount_column=strict_amount_column,
         )
     if expected is None:
         raise ValueError(f"{report_label} report is missing its {control_label} control row.")
@@ -467,6 +485,7 @@ def _control_total(
     control_label: str,
     *,
     amount_column: int | None = None,
+    strict_amount_column: bool = False,
 ) -> Decimal | None:
     label = " ".join(control_label.casefold().split())
     for row in rows:
@@ -485,9 +504,9 @@ def _control_total(
         if not matches:
             continue
         if amount_column is not None:
-            amount = _maybe_money(_cell(row, amount_column))
-            if amount is not None:
-                return amount
+            declared_value = _cell(row, amount_column)
+            if strict_amount_column or (declared_value is not None and str(declared_value).strip()):
+                return _required_money(declared_value, control_label)
         text = " ".join(
             " ".join(value.casefold().split()) for value in row if isinstance(value, str)
         )
@@ -513,7 +532,7 @@ def _integer(value: object) -> int | None:
         decimal = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
-    if decimal != decimal.to_integral_value():
+    if not decimal.is_finite() or decimal != decimal.to_integral_value():
         return None
     return int(decimal)
 
@@ -522,9 +541,17 @@ def _maybe_money(value: object) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return _money(Decimal(str(value).replace(",", "").replace("$", "")))
+        amount = Decimal(str(value).replace(",", "").replace("$", ""))
+        return _money(amount) if amount.is_finite() else None
     except (InvalidOperation, ValueError):
         return None
+
+
+def _required_money(value: object, label: str) -> Decimal:
+    amount = _maybe_money(value)
+    if amount is None:
+        raise ValueError(f"{label} must contain a valid monetary amount.")
+    return amount
 
 
 def _money(value: Decimal) -> Decimal:

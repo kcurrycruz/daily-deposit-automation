@@ -1,4 +1,4 @@
-name: Validate Python
+name: Validate Application
 
 on:
   push:
@@ -24,6 +24,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - run: pip install -r requirements.txt
-      - run: python -m py_compile app/membership_payments.py app/pos_to_quickbooks_v2.py streamlit_app.py
-      - run: python -m unittest tests.test_membership_payments -v
+      - run: python -m compileall -q app streamlit_app.py
+      - run: python -m unittest discover -s tests -v
+      - run: node --test --test-isolation=none tests/ap_statements*.test.mjs

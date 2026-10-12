@@ -8,7 +8,7 @@ RUN:
   py C:\\POS_Automation\\pos_to_quickbooks_v2.py
 """
 
-import sys, re, logging, csv, argparse, json
+import sys, re, logging, csv, argparse, json, math
 from datetime import date, datetime, timedelta
 from datetime import date, datetime
 from decimal import Decimal
@@ -183,6 +183,26 @@ def clean_amount(val) -> float:
         return float(s)
     except ValueError:
         return 0.0
+
+
+def _finite_amount(value, label: str) -> float:
+    """A recognized monetary cell must never silently become zero or NaN."""
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        amount = float(value)
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError(f"{label} must contain a valid monetary amount") from None
+    if not math.isfinite(amount):
+        raise ValueError(f"{label} must contain a valid monetary amount")
+    return amount
+
+
+def _iif_text(value, label: str) -> str:
+    text = str(value) if value is not None else ""
+    if any(delimiter in text for delimiter in ("\t", "\r", "\n")):
+        raise ValueError(f"{label} cannot contain tabs or line breaks")
+    return text
 
 
 def read_rows(filepath: Path) -> list:
@@ -398,14 +418,18 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
     sales = {}
     misc_lines = []
     milk_bottle_return = 0.0
-    store_coupons_amt = 0.0
+    store_coupons_amt = None
     owner_apprec_amt = 0.0
     sales_total_xl = 0.0
     pass_through_total = 0.0
     dust_bunnies_total = 0.0
     milk_bottles_returns = 0.0
     refunded_discounts = 0.0
-    hash_sales_total = _hash_control_total(wb, report_date)
+    try:
+        hash_sales_total = _hash_control_total(wb, report_date)
+    except ValueError:
+        wb.close()
+        raise
     if hash_sales_total is not None:
         log.info(f"    Hash Sales source control: ${hash_sales_total:.2f}")
 
@@ -414,22 +438,26 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
             val = row[12] if len(row) > 12 else None
             if val is not None:
                 try:
-                    milk_bottle_return = -abs(float(val))
+                    milk_bottle_return = -abs(_finite_amount(val, "Milk Bottle Return (M1)"))
                     log.info(f"    Milk Bottle Return (M1): ${milk_bottle_return:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             val_m1_mbr = row[12] if len(row) > 12 else None
             if val_m1_mbr is not None:
                 try:
-                    milk_bottles_returns = float(val_m1_mbr)
+                    milk_bottles_returns = _finite_amount(val_m1_mbr, "Milk Bottle Return (M1)")
                     log.info(f"    Milk Bottles Returns (M1): ${milk_bottles_returns:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             val_o1 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p1 = row[15] if len(row) > 15 else None
-            if val_p1 is not None:
+            if val_p1 is not None and any(label in val_o1 for label in (
+                "refunded", "hash", "pass through", "donation", "dust"
+            )):
                 try:
-                    p1_val = float(val_p1)
+                    p1_val = _finite_amount(val_p1, "Sales report P1")
                     if "refunded" in val_o1:
                         log.info(f"    Refunded Discounts found in O1/P1 (${p1_val:.2f}) — HASH tab is authoritative")
                     elif "hash" in val_o1:
@@ -441,7 +469,8 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
                         dust_bunnies_total = p1_val
                         log.info(f"    Dust Bunnies (O1/P1): ${p1_val:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             continue
 
         if i == 2:
@@ -449,21 +478,25 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
             val_m = row[12] if len(row) > 12 else None
             if val_j is not None:
                 try:
-                    owner_apprec_amt = float(val_j)
+                    owner_apprec_amt = _finite_amount(val_j, "Owner Appreciation (J2)")
                     log.info(f"    Owner Apprec 5% (J2): ${owner_apprec_amt:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             if val_m is not None:
                 try:
-                    store_coupons_amt = float(val_m)
+                    store_coupons_amt = _finite_amount(val_m, "Store Coupons (M2)")
                     log.info(f"    Store Coupons (M2): ${store_coupons_amt:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             val_o2 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p2 = row[15] if len(row) > 15 else None
-            if val_p2 is not None:
+            if val_p2 is not None and any(label in val_o2 for label in (
+                "refunded", "hash", "pass through", "donation", "dust"
+            )):
                 try:
-                    p2_val = float(val_p2)
+                    p2_val = _finite_amount(val_p2, "Sales report P2")
                     if "refunded" in val_o2:
                         log.info(f"    Refunded Discounts found in O2/P2 (${p2_val:.2f}) — HASH tab is authoritative")
                     elif "hash" in val_o2:
@@ -475,22 +508,26 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
                         dust_bunnies_total = p2_val
                         log.info(f"    Dust Bunnies (O2/P2): ${p2_val:.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             continue
 
         if i == 3:
             val_j3 = row[9] if len(row) > 9 else None
             if val_j3 is not None:
                 try:
-                    sales_total_xl = round(float(val_j3), 2)
+                    sales_total_xl = round(_finite_amount(val_j3, "Sales control (J3)"), 2)
                     log.info(f"    Excel Sales Total (J3): ${sales_total_xl:,.2f}")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             val_o3 = str(row[14]).strip().lower() if len(row) > 14 and row[14] else ""
             val_p3 = row[15] if len(row) > 15 else None
-            if val_p3 is not None:
+            if val_p3 is not None and any(label in val_o3 for label in (
+                "refunded", "hash", "pass through", "donation", "dust"
+            )):
                 try:
-                    p3_val = float(val_p3)
+                    p3_val = _finite_amount(val_p3, "Sales report P3")
                     if "dust" in val_o3:
                         dust_bunnies_total = p3_val
                         log.info(f"    Dust Bunnies (O3/P3): ${p3_val:.2f}")
@@ -502,7 +539,8 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
                     elif "pass through" in val_o3 or "donation" in val_o3:
                         log.info(f"    Pass Through found in O3/P3 (${p3_val:.2f}) — HASH tab is authoritative")
                 except (ValueError, TypeError):
-                    pass
+                    wb.close()
+                    raise
             continue
 
         dept_num = row[0]
@@ -513,12 +551,11 @@ def parse_excel_report(filepath: Path, report_date=None) -> tuple:
             dept_num = int(dept_num)
         except (ValueError, TypeError):
             continue
-        if amount is None:
-            amount = 0.0
         try:
-            amount = float(amount)
-        except (ValueError, TypeError):
-            amount = 0.0
+            amount = _finite_amount(amount, f"Sales department {dept_num}")
+        except ValueError:
+            wb.close()
+            raise
 
         if dept_num == 22 and amount != 0.0:
             normalized_amount = Decimal(str(amount)).quantize(Decimal("0.01"))
@@ -646,10 +683,12 @@ def _hash_control_total(wb, report_date=None) -> float | None:
             if amount_column < len(row)
             else ()
         )
+        if candidates and candidates[0] is not None and str(candidates[0]).strip():
+            return round(abs(_finite_amount(candidates[0], "HASH control total")), 2)
         for value in (*candidates, *reversed(row)):
             try:
-                return round(abs(float(value)), 2)
-            except (TypeError, ValueError):
+                return round(abs(_finite_amount(value, "HASH control total")), 2)
+            except ValueError:
                 continue
     return None
 
@@ -751,22 +790,22 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
             continue
         code = int(numeric_code)
         code_index = code_col
-        if len(row) <= amount_col:
-            log.warning(f"    HASH row {excel_row_num} code {code}: Amount column missing")
-            continue
-        raw_amount = row[amount_col]
-        try:
-            amount = round(float(raw_amount), 2)
-        except (TypeError, ValueError):
-            amount = None
+        raw_amount = row[amount_col] if len(row) > amount_col else None
+        amount = None
+        if raw_amount is not None and str(raw_amount).strip():
+            try:
+                amount = round(_finite_amount(raw_amount, f"HASH code {code} Amount"), 2)
+            except ValueError:
+                wb.close()
+                raise
         if amount is None:
             fallback_values = []
             for idx, value in enumerate(row):
                 if idx < 3 or value is None:
                     continue
                 try:
-                    num = float(value)
-                except (TypeError, ValueError):
+                    num = _finite_amount(value, f"HASH code {code} shifted Amount")
+                except ValueError:
                     continue
                 if abs(num - code) < 0.000001:
                     continue
@@ -774,8 +813,8 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
             if fallback_values:
                 amount = round(fallback_values[1][1] if len(fallback_values) >= 2 else fallback_values[0][1], 2)
         if amount is None:
-            log.warning(f"    HASH row {excel_row_num} code {code}: could not read Amount")
-            continue
+            wb.close()
+            raise ValueError(f"HASH code {code} must contain a valid monetary amount")
         detail_total = round(detail_total + amount, 2)
         row_type = target_codes.get(code)
         if row_type == "refunded":
@@ -854,10 +893,11 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
     for row in ws.iter_rows(values_only=True):
         if row[2] is not None and "member discount" in str(row[2]).lower():
             try:
-                grand_total = abs(float(str(row[8])))
+                grand_total = abs(_finite_amount(row[8], "Discount control total"))
                 log.info(f"    Discounts grand total: ${grand_total:,.2f}")
             except (ValueError, TypeError):
-                pass
+                wb.close()
+                raise
             continue
 
         code = row[3] if len(row) > 3 else None
@@ -870,13 +910,17 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
                     desc_candidates.append(val)
         shopper_desc = " | ".join(dict.fromkeys(desc_candidates)) if desc_candidates else "(no description found)"
 
-        if code is None or amt is None:
+        if code is None:
             continue
         try:
             code = int(float(str(code)))
-            amt = float(str(amt))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             continue
+        try:
+            amt = _finite_amount(amt, f"Discount level {code} amount")
+        except ValueError:
+            wb.close()
+            raise
         if amt == 0:
             continue
 
@@ -976,10 +1020,15 @@ def parse_card_settlement_report(filepath: Path) -> dict:
             continue
         raw_network = str(row[network_col] or "").strip()
         network = re.sub(r"[^a-z0-9]+", "", raw_network.lower())
-        try:
-            amount = round(float(row[net_col]), 2)
-        except (TypeError, ValueError):
+        known_network = any(network.startswith(prefix) for prefix in
+                            ("visa", "mastercard", "discover", "amex", "americanexpress", "debit", "ebt")) or network == "mc"
+        if not known_network:
             continue
+        try:
+            amount = round(_finite_amount(row[net_col], f"Settlement {raw_network} Processed Net Amount"), 2)
+        except ValueError:
+            wb.close()
+            raise
 
         if network.startswith("visa") or network.startswith("mastercard") or network == "mc":
             totals["visa_mc"] = round(totals["visa_mc"] + amount, 2)
@@ -1003,6 +1052,7 @@ def parse_card_settlement_report(filepath: Path) -> dict:
         f"Debit=${totals['debit']:,.2f} "
         f"EBT=${totals['ebt']:,.2f}"
     )
+    wb.close()
     return totals
 
 def parse_bs_sheet(filepath: Path, report_date) -> dict:
@@ -1017,11 +1067,23 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
             log.info(f"  Reading BS sheet: '{candidate}'")
             break
     if ws is None:
+        conflicting_dated_sheet = False
         for sheet in wb.sheetnames:
-            if sheet.upper().endswith(" BS"):
+            if "xxxxxx" in sheet.casefold():
+                continue
+            if sheet.upper().endswith(" BS") or sheet.strip().upper() == "BS":
+                sheet_dates = _report_dates_in_name(sheet)
+                if sheet_dates and sheet_dates != {report_date}:
+                    conflicting_dated_sheet = True
+                    continue
                 ws = wb[sheet]
                 log.info(f"  Reading BS sheet: '{sheet}'")
                 break
+        if ws is None and conflicting_dated_sheet:
+            wb.close()
+            raise ValueError(
+                f"No Balance Sheet tab matches deposit date {report_date:%m/%d/%Y}."
+            )
     if ws is None:
         log.warning(f"  No BS sheet found in {filepath.name}")
         wb.close()
@@ -1049,9 +1111,10 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         bal = row[7] if len(row) > 7 else None
         def to_float(v):
             try:
-                return float(v)
-            except Exception:
-                return 0.0
+                return _finite_amount(v, f"Balance Sheet code {code} amount")
+            except ValueError:
+                wb.close()
+                raise
 
         if row[1] == "Total" and row[2] == "Taxes":
             bs["sales_tax"] = to_float(bal)
@@ -1106,20 +1169,42 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
     return bs
 
 
+def _report_dates_in_name(name: str) -> set[date]:
+    """Recognize supported date stamps without treating an undated name as stale."""
+    tokens = re.findall(
+        r"(?<!\d)(?:\d{4}[-.]\d{1,2}[-.]\d{1,2}|"
+        r"\d{1,2}[-.]\d{1,2}[-.]\d{2,4}|\d{8}|\d{6}|\d{5})(?!\d)",
+        name,
+    )
+    dates = set()
+    for token in tokens:
+        if token.isdigit() and len(token) == 5:
+            token = f"{token[0]}/{token[1:3]}/{token[3:]}"
+        if token.isdigit():
+            patterns = ("%m%d%y",) if len(token) == 6 else ("%Y%m%d", "%m%d%Y")
+        else:
+            patterns = ("%Y-%m-%d", "%Y.%m.%d", "%m-%d-%Y", "%m-%d-%y",
+                        "%m.%d.%Y", "%m.%d.%y", "%m/%d/%y")
+        for pattern in patterns:
+            try:
+                dates.add(datetime.strptime(token, pattern).date())
+                break
+            except ValueError:
+                continue
+    return dates
+
+
 def find_todays_files(deposit_date=None):
     folder = Path(CONFIG["pos_export_folder"])
     selected_date = deposit_date or date.today()
-    date_patterns = [
-        selected_date.strftime("%Y-%m-%d"), selected_date.strftime("%m-%d-%Y"),
-        selected_date.strftime("%m%d%Y"), selected_date.strftime("%Y%m%d"),
-        selected_date.strftime("%m%d%y"), selected_date.strftime("%m-%d-%y"),
-        selected_date.strftime("%-m.%-d.%Y") if sys.platform != "win32" else selected_date.strftime("%#m.%#d.%Y"),
-    ]
     all_files = [f for f in folder.iterdir() if f.is_file() and not f.name.startswith("~$")]
-    dated_files = [f for f in all_files if any(p in f.name for p in date_patterns)]
-    candidates = dated_files if dated_files else all_files
+    candidates = [
+        file for file in all_files
+        if not (file_dates := _report_dates_in_name(file.name))
+        or file_dates == {selected_date}
+    ]
     if not candidates:
-        raise FileNotFoundError(f"No input files found in {folder}. Upload the day's files into input/daily_reports and run again.")
+        raise FileNotFoundError(f"No input files found for {selected_date:%m/%d/%Y} in {folder}. Upload the day's files into input/daily_reports and run again.")
 
     sms_files, cc_file, coupon_files, excel_files, settlement_files = [], None, [], [], []
     for f in candidates:
@@ -1128,6 +1213,7 @@ def find_todays_files(deposit_date=None):
         if suffix in {".xlsx", ".xlsm"}:
             is_settlement = "DAILY CARD SETTLEMENT" in name_up or "CARD SETTLEMENT" in name_up
             if not is_settlement:
+                wb_probe = None
                 try:
                     import openpyxl
                     wb_probe = openpyxl.load_workbook(f, read_only=True, data_only=True)
@@ -1140,6 +1226,9 @@ def find_todays_files(deposit_date=None):
                     is_settlement = "DAILY CARD SETTLEMENT REPORT" in probe and "PROCESSED NET AMOUNT" in probe
                 except Exception:
                     is_settlement = False
+                finally:
+                    if wb_probe is not None:
+                        wb_probe.close()
             if is_settlement:
                 settlement_files.append(f)
                 log.info(f"  Card settlement : {f.name}")
@@ -1170,26 +1259,33 @@ def find_todays_files(deposit_date=None):
             log.info(f"  CSV not recognized: {f.name}")
 
     if len(excel_files) > 1:
-        dated_excel = [f for f in excel_files if any(p in f.name for p in date_patterns)]
-        excel_files = dated_excel or [max(excel_files, key=lambda p: p.stat().st_mtime)]
-        if not dated_excel:
-            log.info(f"  Multiple Excel files found; using newest: {excel_files[0].name}")
+        raise ValueError(
+            "Multiple accounting workbooks match this deposit. Keep one workbook: "
+            + ", ".join(file.name for file in excel_files)
+        )
     if len(settlement_files) > 1:
         matching = []
         for f in settlement_files:
-            try:
-                parsed = parse_card_settlement_report(f)
-                if parsed.get("report_date") == selected_date:
-                    matching.append(f)
-            except Exception:
-                pass
-        settlement_files = matching or [max(settlement_files, key=lambda p: p.stat().st_mtime)]
+            parsed = parse_card_settlement_report(f)
+            if parsed.get("report_date") == selected_date:
+                matching.append(f)
+        if len(matching) != 1:
+            raise ValueError(
+                "Select exactly one Daily Card Settlement Report matching "
+                f"deposit date {selected_date:%m/%d/%Y}."
+            )
+        settlement_files = matching
     if not sms_files:
         log.info("  No SMS CSV needed if Excel report contains sales/discount tabs.")
     return sms_files, cc_file, coupon_files, excel_files, settlement_files
 
 def spl(date_str, acct, name, amount, memo, class_name=""):
-    amt_str = f"{amount:.2f}" if amount is not None else ""
+    date_str = _iif_text(date_str, "IIF date")
+    acct = _iif_text(acct, "IIF account")
+    name = _iif_text(name, "IIF name")
+    memo = _iif_text(memo, "IIF memo")
+    class_name = _iif_text(class_name, "IIF class")
+    amt_str = f"{_finite_amount(amount, 'IIF amount'):.2f}" if amount is not None else ""
     return f"SPL\tDEPOSIT\t{date_str}\t{acct}\t{name}\t{amt_str}\t{memo}\t{class_name}"
 
 
@@ -1247,9 +1343,9 @@ def build_card_settlement_adjustments(settlement_data: dict, bs_data: dict) -> l
     return adjustments
 
 
-def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float = 0.0, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float | None = None, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None, hash_misc_lines: list = None) -> Path:
+def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owner_local_amt: float = 0.0, per_dept_coupons: dict = None, milk_bottle_return: float = 0.0, store_coupons_xl: float | None = None, owner_apprec_xl: float = 0.0, misc_tba_lines: list = None, excel_sales_total: float = 0.0, excel_discount_total: float = 0.0, bs_data: dict = None, pass_through_total: float = 0.0, dust_bunnies_total: float = 0.0, milk_bottles_returns: float = 0.0, refunded_discounts: float = 0.0, hash_sales_total: float | None = None, paid_in_total: float = 0.0, settlement_data: dict = None, membership_payments: list = None, membership_mode: str = "automatic", coupon_mode: str = "quickbooks", coupon_closeout_total: float | None = None, coupon_ncg_total: float | None = None, coupon_mfg_total: float | None = None, closeout_payload: dict | None = None, closeout_preview_path: Path | None = None, activity_payload: dict | None = None, hash_misc_lines: list = None) -> Path:
     date_str = report_date.strftime("%m/%d/%Y")
-    deposit_acct = CONFIG["deposit_account"]
+    deposit_acct = _iif_text(CONFIG["deposit_account"], "Deposit account")
     iif_path = output_dir / f"deposit_{report_date.strftime('%Y%m%d')}.iif"
     if misc_tba_lines is None:
         misc_tba_lines = []
@@ -1381,7 +1477,7 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     def s(key):
         if key not in sales:
             return None
-        return -abs(sales[key])
+        return -sales[key]
 
     def d(key):
         return abs(discounts[key]) if key in discounts else None
@@ -1436,11 +1532,11 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
                 seen_deli = True
             else:
                 catering_key = "7110210 · Sales - In-House Deli|Catering"
-                amt = -abs(sales[catering_key]) if catering_key in sales else None
+                amt = -sales[catering_key] if catering_key in sales else None
         elif acct in INCOME_ACCOUNTS:
             amt = s(acct)
         else:
-            amt = -(abs(sales[acct])) if acct in sales else None
+            amt = -sales[acct] if acct in sales else None
         if not has_amount(amt):
             continue
         spl_total += amt
@@ -1461,17 +1557,21 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
             )
         )
 
-    bag_amt = -(abs(sales.get("4150300 · NYS Paper Bag Fees Payable", 0))) or None
+    bag_amt = -sales.get("4150300 · NYS Paper Bag Fees Payable", 0) or None
     if has_amount(bag_amt):
         spl_total += bag_amt
         spls.append(spl(date_str, "4150300 · NYS Paper Bag Fees Payable", "", bag_amt, "NYS-Albany County Paper Bag Fees"))
 
-    if store_coupons_xl != 0.0:
-        coupon_amt = abs(store_coupons_xl)
+    # Only source-sales rows belong in the Sales control. Later expense rows
+    # may legitimately use an account that also receives subdepartment sales.
+    sales_spls = tuple(spls)
+
+    if store_coupons_xl is not None:
+        coupon_amt = -store_coupons_xl
         log.info(f"    Coupons from Excel M2: ${store_coupons_xl:.2f}")
     else:
         raw_coupon = sales.get("8515000 · Marketing - Coupons, Store", 0)
-        coupon_amt = abs(raw_coupon) if raw_coupon != 0 else None
+        coupon_amt = -raw_coupon if raw_coupon != 0 else None
     if has_amount(coupon_amt):
         spl_total += coupon_amt
         spls.append(spl(date_str, "8515000 · Marketing - Coupons, Store", "", coupon_amt, "Store Coupons"))
@@ -1992,25 +2092,18 @@ def generate_iif(sales: dict, discounts: dict, cc: dict, report_date: date, owne
     spl_total = round(spl_total, 2)
     trns_amt = round(-spl_total, 2)
 
-    COUPON_ACCT = "8515000 · Marketing - Coupons, Store"
-    sales_acct_set = set(sales.keys()) - {COUPON_ACCT}
     gross_sales_spl = 0.0
-    for line in spls:
+    for line in sales_spls:
         parts = line.split("\t")
         if len(parts) < 6 or not parts[5].strip():
             continue
-        acct = parts[3].strip()
-        if acct in sales_acct_set:
-            try:
-                gross_sales_spl += abs(float(parts[5]))
-            except ValueError:
-                pass
+        gross_sales_spl -= float(parts[5])
     if misc_tba_lines:
         for memo, amount in misc_tba_lines:
             gross_sales_spl += amount
     gross_sales_spl = round(gross_sales_spl, 2)
 
-    coupon_deduct = abs(store_coupons_xl) if store_coupons_xl else abs(sales.get("8515000 · Marketing - Coupons, Store", 0))
+    coupon_deduct = -store_coupons_xl if store_coupons_xl is not None else -sales.get("8515000 · Marketing - Coupons, Store", 0)
     owner_apprec_deduct = abs(owner_apprec_xl) if owner_apprec_xl else 0.0
     milk_returns_deduct = abs(milk_bottle_return) if milk_bottle_return else abs(milk_bottles_returns) if milk_bottles_returns else 0.0
     net_sales_check = round(gross_sales_spl - coupon_deduct - owner_apprec_deduct - milk_returns_deduct, 2)
@@ -2292,7 +2385,7 @@ def main():
 
         # Prefer Excel report for sales if available (more accurate net amounts)
         milk_bottle_return = 0.0
-        store_coupons_xl   = 0.0
+        store_coupons_xl   = None
         owner_apprec_xl    = 0.0
         misc_tba_lines     = []
         excel_sales_total  = 0.0
@@ -2314,7 +2407,8 @@ def main():
                     sales[k] = round(sales.get(k, 0.0) + v, 2)
                 misc_tba_lines.extend(xl_misc)
                 milk_bottle_return   += mb_ret
-                store_coupons_xl     += sc_amt
+                if sc_amt is not None:
+                    store_coupons_xl = (store_coupons_xl or 0.0) + sc_amt
                 owner_apprec_xl      += oa_amt
                 excel_sales_total    += xl_total
                 pass_through_total   += pt_total
@@ -2359,7 +2453,9 @@ def main():
                         discounts[k] = round(discounts.get(k, 0.0) + v, 2)
         else:
             for f in sms_files:
-                _, d_map = parse_sms_file(f)
+                s_map, d_map = parse_sms_file(f)
+                for k, v in s_map.items():
+                    sales[k] = round(sales.get(k, 0.0) + v, 2)
                 for k, v in d_map.items():
                     discounts[k] = round(discounts.get(k, 0.0) + v, 2)
 
@@ -2369,9 +2465,9 @@ def main():
             settlement_data = parse_card_settlement_report(settlement_files[0])
             settlement_report_date = settlement_data.get("report_date")
             if settlement_report_date and settlement_report_date != yesterday:
-                log.warning(
-                    f"  CARD SETTLEMENT DATE MISMATCH: settlement={settlement_report_date:%m/%d/%Y} "
-                    f"deposit={yesterday:%m/%d/%Y}"
+                raise ValueError(
+                    f"Card settlement date {settlement_report_date:%m/%d/%Y} "
+                    f"does not match deposit date {yesterday:%m/%d/%Y}."
                 )
         else:
             log.warning("  No Daily Card Settlement Report found — card tender lines will fall back to BS values.")

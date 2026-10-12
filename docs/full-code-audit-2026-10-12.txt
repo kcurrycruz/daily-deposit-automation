@@ -1,0 +1,142 @@
+FINANCE OPERATIONS CODE AUDIT - October 12, 2026
+
+Status: isolated preview changes only; not merged, pushed, or deployed.
+Baseline: 5ffb6ad5bad9325b6c9260929d24a70b5f2eb635 (DD-v2)
+Branch: codex/full-code-audit
+
+SCOPE AND METHOD
+Reviewed first-party deposit accounting, SMS normalization, source selection,
+membership/closeout/activity state, upload/date validation, draft recovery,
+Run History, download gating, portal/navigation/theme integration, AP parsing,
+matching, review decisions, CSV import/export, browser session persistence,
+local PDF/OCR asset delivery, and repository/deployment validation settings.
+Used synthetic inputs, regression tests, independent code review, and local
+browser smoke checks. No live BILL calls, QuickBooks import, or real Finance
+files were used. This is a broad first-party code audit, not a claim that every
+dependency or every possible vendor PDF has been exhaustively tested.
+
+CONFIRMED FIXES
+1. Signed sales/refunds were converted to absolute values before IIF output.
+   A synthetic 100 - 25 - 5 - 2 sale now yields a 68 deposit, not 132.
+   Source sales controls retain signs and include catering. Later expenses
+   sharing a sales account no longer distort the source-sales control.
+   Files: app/pos_to_quickbooks_v2.py; tests/test_accounting_audit.py.
+
+2. Adjusted Store Coupons M2 zero was treated as missing, and positive M2
+   was converted to the wrong sign. Missing, zero, and positive values are
+   now distinct. Grocery 300 / raw coupons -100 / returned milk 100 or 200
+   preserves the independently expected 200 deposit after reclassification.
+
+3. Recognized malformed/nonfinite monetary cells could disappear, become
+   zero, or use a different numeric cell. Recognized sales, discounts, HASH,
+   Balance Sheet, settlement, and returned-milk amounts now reject invalid
+   values. Explicit named Code/Amount layouts do not substitute Qty for a
+   missing amount or control. Hierarchical milk returns skip blank padding
+   only, not occupied corrupt amounts. Representative shifted SMS formats
+   remain supported. Files: app/sms_deposit_data.py and engine parsers.
+
+4. Tabs/newlines in IIF text could create extra columns/records; nonfinite
+   amounts could be serialized. Central serialization rejects these before
+   writing output.
+
+5. AP vendor normalization collapsed distinct vendors such as A&B Supply
+   and AB Supply. Automatic identity now preserves punctuation and word
+   boundaries; case/extra whitespace and explicit vendor aliases work.
+   Files: app/ap_statements/frontend/core.mjs; AP audit regressions.
+
+6. AP mapping/row edits could retain stale review decisions and hide changed
+   evidence. Affected decisions reopen; notes remain as drafts. Unrelated
+   reviews survive. Reviewed counts, filters, badges, and exports require
+   an actual saved decision, not a note-only draft.
+   Successful row additions/deletions also refresh the main dashboard/queue
+   immediately, rather than leaving stale counts behind the drawer.
+
+7. A newly added AP row with a blank invoice reference could not be deleted.
+   Deletion now validates retained rows only. Invalid retained edits reject
+   without partially deleting the target row.
+
+8. AP amount parsing accepted malformed signs/parentheses and unsafe cents;
+   ISO date parsing accepted impossible calendar days. Money now validates
+   complete notation and safe integer cents. ISO/slash dates validate the
+   calendar. A supplied invalid CSV payment date rejects with its row number.
+
+9. A successful process without today's IIF could return another date's
+   newest IIF. The app now requires the exact expected artifact and errors
+   if it is absent. File: streamlit_app.py; tests/test_audit_safety.py.
+
+10. Run History writes could expose partial JSON or replace damaged history.
+    History now uses a same-directory temporary file, flush/fsync, and atomic
+    replacement; damaged prior history is preserved and reported. One bad
+    entry no longer hides all valid entries. Existing exclusive run locking
+    still covers the app's generation/archive sequence.
+
+11. Run History financial archives and Streamlit secrets were not excluded
+    from Git. Added output/history/ and .streamlit/secrets.toml ignores.
+    This is preventive protection; no actual committed secret/history leak
+    was found or claimed. Ignoring files does not remove existing Git history.
+
+12. CI covered only a membership suite and three Python compilation targets.
+    It now compiles the app, discovers the full Python test suite, and runs
+    AP JavaScript tests under Node 24. Remote CI is not verified until pushed.
+
+13. Older command-line source-selection paths could omit CSV sales, use
+    another day's files/BS tab, aggregate duplicate accounting workbooks,
+    or continue after a settlement-date mismatch. CSV sales now reach IIF
+    generation (100 sales / 5 discount -> 95 deposit, previously -5).
+    Conflicting filename dates and dated BS tabs reject, ambiguous workbook
+    and settlement selections reject, and a known settlement-date mismatch
+    stops before IIF generation. Supported undated names remain usable;
+    the app's verified SMS/settlement date boundaries remain necessary.
+
+VERIFICATION
+- Full Python unittest discovery: 501 passed, 0 failures, 15.620 seconds.
+- All five AP Node test files: 45 passed, 0 failures.
+- Total: 546 automated tests. Added 38 Python methods and 18 AP Node tests.
+- Python compileall for app and streamlit_app.py: passed.
+- Node syntax checks for changed AP modules: passed.
+- git diff --check: passed. Local Python pip check: no broken requirements.
+- New regression cases were demonstrated failing before their fixes.
+- Browser smoke checks: portal -> Daily Deposits -> return confirmation ->
+  portal -> AP Statements; fictional blank-row add/delete; changed invoice
+  reopens extraction and retains its note without a saved review timestamp.
+- Independent review found three follow-up defects; targeted fixes,
+  compatible shifted SMS formats, and final CLI changes were re-reviewed.
+  Final verdict: technically ready to merge the reviewed changes, with no
+  remaining critical/important findings in that diff. This is not a blanket
+  production certification; the limitations below remain. No remote CI run
+  or live import.
+
+REMAINING LIMITATIONS / OPERATIONAL RISKS
+- BILL API is still disconnected; demo matches are simulated. CSV coverage
+  is only as complete/current as the export. No QuickBooks sync verification.
+- Review a known closed deposit against your approved Finance totals before
+  deploying accounting changes or importing an IIF into QuickBooks.
+- Legacy CSV clean_amount still uses tolerant scanning; malformed values can
+  become zero. Older blank HASH amount heuristics can interpret a quantity
+  as money in ambiguous shifted layouts. Do not use unverified legacy CSV or
+  ambiguous manually prepared workbooks for production deposits.
+- Direct command-line runs do not acquire the app's shared run lock; do not
+  run the CLI and web generation concurrently against the same folders.
+- A single legacy settlement with no content date is still accepted by the
+  CLI. Undated filenames alone do not prove source dates. Use the verified
+  app upload/date workflow rather than unverified standalone inputs.
+- Engine IIF output writes are not atomic; process interruption was not
+  fault-injection tested. App orchestration removes its owned stale artifact
+  and withholds failed runs, but standalone CLI artifacts require care.
+- Server Run History is not a durable external backup and is shared by app
+  sessions. Confirm private deployment access and use approved Finance backups.
+- AP explicit Save session stores extracted financial metadata in that browser
+  profile, visible to other users of it; it is not team storage or a backup.
+  Original PDF bytes are not persisted. Reattachment metadata is not a byte
+  authentication check.
+- No dependency CVE scan, penetration test, vendor/minified library source
+  audit, real multi-vendor PDF backtest, long-running OCR stress/cancellation
+  test, or live cloud/browser compatibility matrix was performed.
+- Existing Streamlit deprecation warnings remain (use_container_width and
+  components.v1.html). They are migration maintenance, not observed failures
+  on the tested Streamlit runtime.
+- Statement-total mismatch policy is unchanged: valid invoice evidence may
+  match while the document-level mismatch remains flagged.
+
+No Finance source files, credentials, deployed settings, or GitHub branches
+were changed by this audit. Changes remain on the isolated audit branch.

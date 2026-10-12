@@ -45,7 +45,7 @@ function correctionFixture() {
     rows: [{ id: 'qa-row', type: 'invoice', invoiceNumber: 'QA-1', amount: 10000, balance: 10000, page: 1, confidence: 99 }] };
   const rows = [{ ...doc.rows[0], amount: 20000, balance: 20000 }];
   const source = readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
-  const fn = source.slice(source.indexOf('function collectDoc(doc)'), source.indexOf('async function uploadPDFs'));
+  const fn = source.slice(source.indexOf('function collectDoc('), source.indexOf('async function uploadPDFs'));
   const fields = { '#doc-vendor': 'Changed vendor', '#doc-date': '2026-10-02', '#doc-total': 'bad total' };
   const context = { cents, collectRows: () => rows, document: { querySelector: key => ({ value: fields[key] }) } };
   return { doc, rows, source, fields, context, collect: vm.runInNewContext('(' + fn + ')', context) };

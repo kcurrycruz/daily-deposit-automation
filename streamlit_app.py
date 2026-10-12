@@ -1604,13 +1604,38 @@ def load_run_history() -> list[dict]:
         data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, list):
             return []
-        return sorted(data, key=lambda item: item.get("run_at", ""), reverse=True)
+        return sorted(
+            (item for item in data if isinstance(item, dict)),
+            key=lambda item: str(item.get("run_at") or ""), reverse=True,
+        )
     except Exception:
         return []
 
 def save_run_history(records: list[dict]) -> None:
+    import os
+    import tempfile
+
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+    if HISTORY_FILE.exists():
+        try:
+            existing = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("Run History is damaged. Preserve it and restore a backup before saving another run.") from exc
+        if not isinstance(existing, list):
+            raise ValueError("Run History has an invalid format. Preserve it and restore a backup before saving another run.")
+    encoded = json.dumps(records, indent=2, ensure_ascii=False, allow_nan=False)
+    pending = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=HISTORY_DIR,
+                                         prefix=".run_history_", suffix=".tmp", delete=False) as handle:
+            pending = Path(handle.name)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(pending, HISTORY_FILE)
+    finally:
+        if pending is not None:
+            pending.unlink(missing_ok=True)
 
 def _safe_history_name(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).name).strip("._")
@@ -2141,13 +2166,8 @@ def run_engine(
 
         resolved_iif_path = owned_iif_path
         if not resolved_iif_path.exists():
-            candidates = sorted(QB_IMPORT_DIR.glob("deposit_*.iif"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if candidates:
-                resolved_iif_path = candidates[0]
-
-        if not resolved_iif_path.exists():
             raise RuntimeError(
-                "The automation finished, but no IIF file was found in output/qb_imports.\n\n"
+                f"The automation finished, but the expected IIF {owned_iif_path.name} was not generated.\n\n"
                 + log_text[-4000:]
             )
 

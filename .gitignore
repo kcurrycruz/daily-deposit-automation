@@ -9,6 +9,8 @@ output/summaries/*
 !output/summaries/.gitkeep
 logs/*
 !logs/.gitkeep
+output/history/
+.streamlit/secrets.toml
 tmp/
 
 # Python

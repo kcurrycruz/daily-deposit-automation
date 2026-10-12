@@ -128,9 +128,13 @@ def _subdepartment_columns(report: SmsExport) -> tuple[int, dict[str, int]]:
             for detail_row in report.rows[row_index + 1 :]:
                 if _integer(_cell(detail_row, code)) is None:
                     continue
-                declared_amount = _money_number(_cell(detail_row, amount))
-                shifted_amount = _money_number(_cell(detail_row, amount - 1))
-                if declared_amount is None and shifted_amount is not None:
+                declared_value = _cell(detail_row, amount)
+                shifted_value = _cell(detail_row, amount - 1)
+                declared_blank = declared_value is None or str(declared_value).strip() == ""
+                shifted_blank = shifted_value is None or str(shifted_value).strip() == ""
+                if declared_blank and shifted_blank:
+                    continue
+                if declared_blank:
                     columns["amount"] -= 1
                     columns["quantity"] -= 1
                 break

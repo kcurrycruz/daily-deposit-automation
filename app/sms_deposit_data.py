@@ -85,6 +85,7 @@ def build_sms_deposit_data(bundle: SmsExportBundle) -> SmsDepositData:
         control_label="coupon distribution total",
         report_label="Coupon distribution",
         fallback_control_labels=("total",),
+        skip_blank_coupon_allocations=True,
         control_total_extractor=lambda amounts: _sum(
             amount for code, amount in amounts.items() if code != 3542
         ),
@@ -142,14 +143,25 @@ def _subdepartment_amounts(
     report_label: str,
     fallback_control_labels: tuple[str, ...] = (),
     control_total_extractor=None,
+    skip_blank_coupon_allocations: bool = False,
 ) -> tuple[dict[int, Decimal], Decimal]:
     header_index, columns = _find_subdepartment_header(report.rows, report_label)
     amounts: dict[int, Decimal] = {}
+    skipped_blank = False
     for row in report.rows[header_index + 1 :]:
         code = _integer(_cell(row, columns["code"]))
         if code is None:
             continue
-        amount = _required_money(_cell(row, columns["amount"]), f"{report_label} code {code}")
+        value = _cell(row, columns["amount"])
+        if (skip_blank_coupon_allocations and code != 3542
+                and (value is None or isinstance(value, str) and not value.strip())):
+            # SMS can print a quantity without a coupon allocation. Restore the
+            # pre-audit blank-row handling, but require the monetary control to
+            # reconcile before allowing the user to continue. Store Coupons
+            # (3542) is an authoritative total, not an optional allocation.
+            skipped_blank = True
+            continue
+        amount = _required_money(value, f"{report_label} code {code}")
         amounts[code] = _money(amounts.get(code, _ZERO) + amount)
 
     total = _sum(amounts.values())
@@ -161,7 +173,7 @@ def _subdepartment_amounts(
         report_label,
         amount_column=columns["amount"],
         control_amount_column=columns.get("control_amount"),
-        strict_amount_column=bool(columns["strict_amount"]),
+        strict_amount_column=bool(columns["strict_amount"]) or skipped_blank,
         fallback_control_labels=fallback_control_labels,
     )
     return amounts, total
@@ -427,10 +439,15 @@ def _find_subdepartment_header(
         for detail_row in rows[header_index + 1 :]:
             if _integer(_cell(detail_row, columns["code"])) is None:
                 continue
-            shifted_amount = _maybe_money(_cell(detail_row, columns["amount"] - 1))
+            shifted_value = _cell(detail_row, columns["amount"] - 1)
             declared_value = _cell(detail_row, columns["amount"])
             declared_blank = declared_value is None or str(declared_value).strip() == ""
-            if declared_blank and shifted_amount is not None:
+            shifted_blank = shifted_value is None or str(shifted_value).strip() == ""
+            if declared_blank and shifted_blank:
+                continue
+            # Choose the layout from occupied cells, not successful numeric
+            # conversion: corrupt occupied money must reach validation too.
+            if declared_blank:
                 columns["amount"] -= 1
             break
     return header_index, columns

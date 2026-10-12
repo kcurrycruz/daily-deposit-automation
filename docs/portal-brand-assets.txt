@@ -1,0 +1,34 @@
+Portal brand asset refinement - October 9, 2026
+
+User-requested edits to the approved co-op portal design:
+- Cropped, cleaned leaf cluster replaces the original generic sprout.
+- Simplified full logo replaces the top-left leaf badge.
+- Larger leaf detail remains unchanged; AP Statements remains in the middle.
+- Original supplied images remain untouched.
+
+Mode: built-in image_gen editing, genuine transparent PNG output.
+Workspace assets:
+app/assets/hwfc-leaf-modern.png
+app/assets/hwfc-logo-simplified.png
+
+Final full-logo prompt:
+Use case: style-transfer. Image 1 is the edit target: the supplied Honest Weight Food Co-op logo. Simplify and clean this same logo for a small finance-portal header badge. Preserve the familiar nearly circular taupe border, the seven-color botanical leaf cluster at upper left, stacked dark-brown serif words "Honest" and "Weight", and smaller green words "FOOD CO-OP" underneath. Keep the original composition and source colors. Remove all distressed chips, rough speckles and worn texture; use crisp smooth solid flat shapes and a slightly simpler serif for clarity. The inside of the round seal should be solid warm white. The outside around the seal and protruding leaves must be genuinely transparent, not black. Tight square crop with minimal transparent padding, entire seal and leaves visible. Clean flat 2D brand mark, no gradients, no glow, no shadow, no mockup, no new wording, no extra decorations. This is a cleaned simplified adaptation of the provided logo, not a new brand.
+
+Leaf prompt set:
+Crop only the seven-color leaf cluster from the upper-left of the provided
+Honest Weight logo. Preserve colors and arrangement, clean distressed chips,
+remove all text and circular border, use minimal transparent padding.
+Follow-up: remove glow, blur, gradients, highlights, shadows and translucent
+clouds; preserve leaf shapes, arrangement and colors; flat opaque leaf
+interiors, crisp antialiased edges, genuinely transparent empty space.
+
+Verification:
+- New embedded-image tests observed failing before implementation, then passing.
+- 310 Python tests pass; 24 AP Node tests pass.
+- Both emitted PNGs decode as RGBA with transparent pixels.
+- Header seal loads at 64x64 in the actual 803px-wide local browser preview.
+- Original native navigation and program action states retained.
+- Responsive viewport override did not apply to the selected preview tab;
+  no new mobile visual verification is claimed for the full-logo refinement.
+- No merge, push, production deploy or accounting operation performed.
+Preview: http://127.0.0.1:8502/

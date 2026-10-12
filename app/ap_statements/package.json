@@ -1,0 +1,13 @@
+{
+  "name": "hwfc-ap-statements-component",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "pdfjs-dist": "5.4.624",
+    "tesseract.js": "6.0.1",
+    "@tesseract.js-data/eng": "1.0.0",
+    "streamlit-component-lib": "1.4.0"
+  },
+  "devDependencies": { "esbuild": "0.25.0" }
+}

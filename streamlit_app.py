@@ -164,6 +164,7 @@ from app.ui_helpers import (
 )
 from app.program_hub_ui import (
     ACTIVE_PROGRAM_KEY,
+    AP_STATEMENTS,
     DAILY_DEPOSITS,
     activate_program,
     clear_daily_uploads,
@@ -185,6 +186,7 @@ from app.deposit_draft import (
     restore_deposit_draft,
     validate_draft_settlement,
 )
+from app.ap_statements_ui import render_ap_statements
 
 # ---------------------------------------------------------------------
 # Self-contained UI helpers and SOP content
@@ -2210,6 +2212,12 @@ if selected_program is None:
     if requested_program and activate_program(
         st.session_state, requested_program
     ):
+        st.rerun()
+    st.stop()
+
+if selected_program == AP_STATEMENTS:
+    if render_ap_statements(st):
+        return_to_program_hub(st.session_state)
         st.rerun()
     st.stop()
 

@@ -2,6 +2,39 @@
 
 This version wraps the existing Daily Deposit accounting engine in a Streamlit web interface.
 
+## AP Statements (BILL API disconnected)
+
+Choose **AP Statements → Open program** in the Finance Operations hub. Daily Deposits is unchanged; Credit Card Process remains Coming Soon.
+
+- Upload a batch of digital or scanned vendor statement PDFs (up to 150 files per batch, 50 MB and 100 pages per file). Processing and OCR happen in the browser using bundled assets. A failed file does not discard successful files.
+- Check the vendor, invoice references, signed credits/payments, dates, balances and printed total against each original. Unknown layouts require manual corrections. Confirm extracted rows before comparing. Extraction is a review aid, not proof of completeness across all vendor formats.
+- Without BILL records, invoices are **BILL unavailable**, not missing. Samples and generated comparisons are explicitly simulated. Optionally use **BILL connection → Import CSV** with an approved BILL export; use its template and check date/coverage. No live API, accounting writes, payment actions, or QuickBooks sync verification are implemented.
+- Add notes and review decisions. **Save session** explicitly saves extracted metadata and notes in this browser profile; original PDF files are never saved. Others using the same profile can see saved financial metadata. Browser storage is not encrypted by this app, shared team storage, or a backup. If storage fails, keep the workspace open and export the report.
+- Before **All Programs**, save and/or export. Choose **Stay** to keep working or **Leave** to return to the hub. Unsaved work is lost when the component closes or the page reloads. Reopening restores the last saved metadata; select the same original PDF files again to restore previews. Exported reports preserve comparison source and simulation labels and protect spreadsheet formula cells.
+- **Clear workspace** removes this app's saved session and vendor mappings from the browser, not source files or accounting records. If deletion fails, in-memory work is retained and the app reports it.
+
+### Component build and release
+
+Deployable frontend assets are committed under `app/ap_statements/frontend/`. Node is needed only by developers rebuilding assets, not by Streamlit Cloud:
+
+```powershell
+cd app/ap_statements
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm build
+```
+
+Dependencies are pinned; see `THIRD_PARTY_NOTICES.md` and bundled license files. Commit the rebuilt assets, not `node_modules`.
+
+Before merging/deploying, run Python regressions and browser-logic tests:
+
+```powershell
+python -m unittest discover -s tests -v
+node --test tests/ap_statements_core.test.mjs tests/ap_statements_bridge.test.mjs tests/ap_statements_session.test.mjs
+git diff --check
+```
+
+Keep the portal's existing access settings; confirm organizational approval and privacy before testing real finance data. No real statements or credentials belong in GitHub. After Streamlit Cloud deploys the approved branch to its configured entrypoint, verify AP opens from the hub, digital/scanned PDFs work, and Daily Deposits still works. The separate AP prototype Site/repository is not used as a hosted dependency.
+
 ## What users do
 
 1. Open the web app.

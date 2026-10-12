@@ -1,0 +1,55 @@
+AP Statements integration validation - October 9, 2026
+
+Local feature branch: feature/ap-statements-streamlit
+Portal repository: kcurrycruz/daily-deposit-automation
+No push, merge, live deployment or portal audience change performed.
+BILL API and QuickBooks verification remain disconnected.
+
+Automated evidence:
+- Original baseline: 294 Python regressions.
+- Final: 305 Python tests and 24 Node browser-logic tests pass.
+- Local component build and git diff --check pass.
+- Largest bundled asset under 5 MB; pinned dependency metadata and licenses included.
+- No real statement PDFs, CSV records, credentials or new financial fixtures committed.
+
+Browser evidence using fictional local PDFs and CSV:
+- Hub AP action opens repository-local component without ChatGPT Site login.
+- Digital and image-only scanned PDFs each extract 2 rows.
+- Invalid PDF in mixed batch reports named failure and preserves valid documents.
+- Confirmed rows without records show BILL unavailable, not missing or matched.
+- Corrections, review decisions, notes, explicit save and metadata restore exercised.
+- Original PDF reattachment restores preview.
+- CSV adapter reports 2 matches, labeled API offline; simulated records require
+  consent and remain visibly fictional.
+- Exit confirmation and Stay preserve unsaved marker and original PDF canvas.
+- Main menu Rerun preserves mounted workspace; Leave reaches hub and Daily opens.
+- At 390px, save/upload/export and navigation are available; body palette
+  overrides SDK-injected theme to preserve readable contrast.
+- Local missing PDF worker test reports failure, adds no failed statement and
+  retains 2 existing statements. Original worker URL restored afterward.
+
+Independent read-only review:
+- One Important finding: rejected corrections could mutate confirmed data and
+  delete review decisions. Fixed with atomic validation/commit.
+- Three regressions observed RED then GREEN; full suites passed after fix.
+- No Critical findings or deferred Minor findings.
+
+Pre-production verification gaps (not claimed as passed):
+- Browser harness did not expose network-payload inspection. Component interface
+  never sends financial props/values; this is static evidence, not a traffic audit.
+- CSV generation/formula protection and export success feedback checked, but
+  download wait timed out in in-app browser. Test file retrieval in normal browser.
+- Full Daily workbook/result retention is covered by exact Python state tests,
+  not a new full-workbook browser round trip.
+- Missing WASM runtime specifically was not fault-injected. Packaged assets and
+  failure propagation reviewed; worker failure was exercised.
+
+Workflow ruling:
+- Windows has no Bash; native worktree tool targets a different repository.
+  Used portal-local Git worktree and PowerShell ledger/test commands instead.
+  Risk if wrong: workflow bookkeeping portability, not intended app behavior.
+
+Before real finance data use:
+- Confirm organization approval and portal privacy.
+- Close the above verification gaps in the actual deployment/browser.
+- Never interpret simulated data or lack of connection as BILL presence/absence.

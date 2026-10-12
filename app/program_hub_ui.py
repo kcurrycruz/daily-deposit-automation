@@ -2,12 +2,15 @@
 
 from dataclasses import dataclass
 from hashlib import sha256
+from base64 import b64encode
 from html import escape
+from pathlib import Path
 from typing import MutableMapping
 
 
 ACTIVE_PROGRAM_KEY = "active_finance_program"
 DAILY_DEPOSITS = "daily_deposits"
+AP_STATEMENTS = "ap_statements"
 SIDEBAR_COLLAPSE_REQUEST_KEY = "_collapse_navigation_sidebar"
 DAILY_PROGRAM_SNAPSHOT_KEY = "_daily_program_widget_snapshot"
 DAILY_PROGRAM_UPLOADS_KEY = "_daily_program_preserved_uploads"
@@ -53,15 +56,15 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
         True,
     ),
     ProgramDefinition(
+        AP_STATEMENTS,
+        "AP Statements",
+        "Review and reconcile accounts-payable statements.",
+        True,
+    ),
+    ProgramDefinition(
         "credit_card_process",
         "Credit Card Process",
         "Process and verify credit-card activity.",
-        False,
-    ),
-    ProgramDefinition(
-        "ap_statements",
-        "AP Statements",
-        "Review and reconcile accounts-payable statements.",
         False,
     ),
 )
@@ -70,8 +73,23 @@ PROGRAMS: tuple[ProgramDefinition, ...] = (
 def program_card_html(program: ProgramDefinition) -> str:
     """Return safe, state-aware card markup for a finance program."""
     state_class = "is-available" if program.enabled else "is-coming-soon"
+    icon_path = {
+        DAILY_DEPOSITS: '<rect x="5" y="8" width="30" height="25" rx="5"/><path d="M5 15h30M12 23h7m-7 5h12M12 8V5m16 3V5"/><circle cx="29" cy="27" r="7"/><path d="m26 27 2 2 4-4"/>',
+        "credit_card_process": '<rect x="4" y="9" width="32" height="23" rx="5"/><path d="M4 17h32M10 25h8m5 0h5"/>',
+        AP_STATEMENTS: '<path d="M12 5h14l7 7v23H9V8a3 3 0 0 1 3-3Z"/><path d="M26 5v8h7M15 19h12M15 25h8M15 30h10"/>',
+    }.get(program.key, '<path d="M9 31C4 12 18 5 33 7c1 17-8 25-24 24Zm0 0L26 14"/>')
+    tone = {
+        DAILY_DEPOSITS: "sage",
+        "credit_card_process": "honey",
+        AP_STATEMENTS: "mist",
+    }.get(program.key, "sage")
+    status = "Ready to open" if program.enabled else "Planned"
     return (
         f'<section class="hwfc-program-card {state_class}">'
+        f'<div class="hwfc-program-card-top"><span class="hwfc-program-icon tone-{tone}">'
+        '<svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8"'
+        f' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{icon_path}</svg>'
+        f'</span><span class="hwfc-program-status">{status}</span></div>'
         f'<h2 class="hwfc-program-card-title">{escape(program.title)}</h2>'
         f'<p class="hwfc-program-card-copy">{escape(program.description)}</p>'
         "</section>"
@@ -80,11 +98,29 @@ def program_card_html(program: ProgramDefinition) -> str:
 
 def render_program_hub(ui) -> str | None:
     """Render program choices and return an enabled selected program key."""
+    hub_css = Path(__file__).with_name("program_hub.css").read_text(encoding="utf-8")
+    ui.markdown(f"<style>{hub_css}</style>", unsafe_allow_html=True)
+    leaf_path = Path(__file__).with_name("assets") / "hwfc-leaf-modern.png"
+    leaf_src = "data:image/png;base64," + b64encode(leaf_path.read_bytes()).decode("ascii")
+    logo_path = Path(__file__).with_name("assets") / "hwfc-logo-simplified.png"
+    logo_src = "data:image/png;base64," + b64encode(logo_path.read_bytes()).decode("ascii")
     ui.markdown(
-        """
+        f"""
         <div class="hwfc-hub-hero">
-          <div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
-          <div class="hwfc-hub-title">Finance Operations</div>
+          <div class="hwfc-hub-brand">
+            <span class="hwfc-hub-emblem" aria-hidden="true">
+              <img src="{logo_src}" alt="" width="64" height="64"/>
+            </span>
+            <div><div class="hwfc-hub-kicker">Honest Weight Food Co-op</div>
+            <div class="hwfc-hub-brand-note">Our co-op. Our workspace.</div></div>
+          </div>
+          <div class="hwfc-hub-heading-row">
+            <div><h1 class="hwfc-hub-title">Finance Operations</h1>
+            <p class="hwfc-hub-subtitle">A little less busywork. More room for good work.</p></div>
+            <span class="hwfc-hub-leaf" aria-hidden="true">
+              <img src="{leaf_src}" alt="" width="126" height="84"/>
+            </span>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -111,6 +147,11 @@ def render_program_hub(ui) -> str | None:
                 use_container_width=True,
             ) and program.enabled:
                 selected_key = program.key
+    ui.markdown(
+        '<div class="hwfc-hub-footer"><span>Rooted in community. Built for the everyday.</span>'
+        '<span>Honest Weight · Finance</span></div>',
+        unsafe_allow_html=True,
+    )
     return selected_key
 
 

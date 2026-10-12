@@ -1,0 +1,24 @@
+DD-v2 portal integration - October 12, 2026
+
+Streamlit deployment: daily-deposit-v2.streamlit.app
+Configured branch: DD-v2; entrypoint: streamlit_app.py.
+Previous DD-v2 tip: ed3c124b7f99e32d2427a4860d490541cdb1c18b.
+Merged source: main d1c59f878915fa3f13796f43767818f58b48f406.
+
+Preserved DD-v2's 63 divergent Daily Deposit/SMS/draft/inhouse commits.
+Resolved two import-list conflicts by retaining both branches' imports.
+No Daily processing, existing upload-state functions, requirements,
+Streamlit configuration or audience settings changed by this merge.
+AP Statements enabled in the middle of the refreshed co-op portal.
+
+Adapted the AP navigation test from the obsolete daily_workbook_0 fixture
+to current sms_reports_0 and card_settlement_0 uploads.
+Baseline: 440 Python tests passed.
+Merged verification: 456 Python tests and 24 AP JavaScript tests passed.
+Independent integration review: no remaining Critical/Important findings.
+Vendor bundle/license whitespace was left unchanged.
+
+Initial QA environment lacked xlrd and restricted test temporary directories;
+used an isolated temporary xlrd-enabled environment and escalated test runs.
+No real financial files or transactions used for deployment verification.
+Live deployment confirmation occurs after the authorized DD-v2 push.

@@ -158,6 +158,43 @@ class OperationsStatusModelTests(unittest.TestCase):
 
 
 class OperationsStatusRendererTests(unittest.TestCase):
+    def test_compact_sms_summary_retains_full_status_in_tooltip(self):
+        from html.parser import HTMLParser
+        from app.operations_status_ui import OperationsStatus, operations_status_html
+
+        class Values(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.values = []
+                self.current = None
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "span" and attrs.get("class") == "hwfc-ops-status-value":
+                    self.current = [attrs.get("title"), ""]
+
+            def handle_data(self, text):
+                if self.current is not None:
+                    self.current[1] += text
+
+            def handle_endtag(self, tag):
+                if tag == "span" and self.current is not None:
+                    self.values.append(tuple(self.current))
+                    self.current = None
+
+        for count in (0, 2, 6):
+            with self.subTest(count=count):
+                parser = Values()
+                parser.feed(operations_status_html(OperationsStatus(
+                    "Waiting for SMS reports",
+                    f"{count} of 6 SMS verified · Card Settlement needed",
+                    "Not ready", "waiting",
+                )))
+                self.assertEqual(parser.values[1], (
+                    f"{count} of 6 SMS verified · Card Settlement needed",
+                    f"{count}/6 SMS · Card Settlement\u00a0needed",
+                ))
+
     def test_html_has_three_escaped_status_items_and_state_wrapper(self):
         from app.operations_status_ui import OperationsStatus, operations_status_html
         status = OperationsStatus(

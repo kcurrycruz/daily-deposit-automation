@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Mapping
@@ -224,6 +225,10 @@ def _build_sms_operations_status(
 
 def operations_status_html(status: OperationsStatus) -> str:
     escape = lambda value: html.escape(str(value), quote=True)
+    # Compact presentation only; the underlying verification state is unchanged.
+    files_summary = re.sub(r"^(\d+) of (\d+) SMS verified · ", r"\1/\2 SMS · ", status.files)
+    if files_summary != status.files:
+        files_summary = files_summary.replace("Settlement needed", "Settlement\u00a0needed")
     items = (
         ("Deposit date", status.deposit_date, status.deposit_progress),
         ("Files", status.files, status.files_progress),
@@ -231,7 +236,8 @@ def operations_status_html(status: OperationsStatus) -> str:
     )
     rendered_items = "".join(
         f'<div class="hwfc-ops-status-item"><span class="hwfc-ops-status-label">'
-        f'{escape(label)}</span><span class="hwfc-ops-status-value">{escape(value)}</span>'
+        f'{escape(label)}</span><span class="hwfc-ops-status-value" title="{escape(value)}">'
+        f'{escape(files_summary if label == "Files" else value)}</span>'
         f'<div class="hwfc-ops-progress" role="progressbar" '
         f'aria-label="{escape(label)} progress" aria-valuemin="0" aria-valuemax="100" '
         f'aria-valuenow="{progress}"><span style="width: {progress}%"></span></div></div>'

@@ -1,5 +1,6 @@
 // Evaluate this read-only function in the rendered Daily page via browser tools.
-// Desktop: run where Files wraps; mobile: verify stacked items remain contained.
+// Desktop: verify aligned bars and a compact initial Files summary; mobile:
+// verify stacked items remain contained without a lone "needed" line.
 (() => {
     const grid = document.querySelector('#hwfc-daily-page') && document.querySelector('.hwfc-ops-status');
     if (!grid) throw new Error('Open Daily Deposits before checking its status row.');
@@ -22,8 +23,12 @@
     });
     const spread = key => Math.max(...geometry.map(item => item[key])) - Math.min(...geometry.map(item => item[key]));
     const horizontal = spread('itemTop') < 1;
-    if (horizontal && geometry.find(item => item.label === 'Files').textLines < 2)
-        throw new Error('Use a desktop width where Files wraps to exercise this regression.');
+    const filesValue = items[1].querySelector('.hwfc-ops-status-value');
+    if (horizontal && filesValue.clientWidth >= 250 && filesValue.textContent.includes('Card Settlement')
+        && filesValue.textContent.includes('needed') && geometry[1].textLines !== 1)
+        throw new Error('The compact Files summary should fit on one desktop line.');
+    if (filesValue.textContent.includes('needed') && !filesValue.textContent.includes('Settlement\u00a0needed'))
+        throw new Error('Keep Settlement and needed together on narrower screens.');
     if (horizontal && (spread('barTop') > 1 || spread('labelTop') > 1 || spread('valueTop') > 1))
         throw new Error('Status row is not aligned: ' + JSON.stringify(geometry));
     return { horizontal, geometry };

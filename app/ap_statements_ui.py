@@ -1,7 +1,10 @@
-"""Local AP component and navigation; no accounting data enters Python."""
+"""AP component and navigation, protected by server-side shared access."""
 
 from pathlib import Path
 from re import fullmatch
+from datetime import datetime, timezone
+from app.ap_shared.models import read_config
+from app.ap_shared.access import require_access, attempt_unlock, lock_access
 
 _EXIT_KEY = "_ap_exit_confirmation"
 _COMPONENT_KEY = "hwfc_ap_statements_workspace"
@@ -12,10 +15,45 @@ def ap_frontend_path() -> Path:
     return Path(__file__).resolve().parent / "ap_statements" / "frontend"
 
 
-def render_ap_statements(ui, *, component_renderer=None, frontend_path=None) -> bool:
+def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, config=None, limiter=None, now=None) -> bool:
     """Return True only after the user confirms leaving the AP workspace."""
     styles = Path(__file__).with_name("ap_statements.css").read_text(encoding="utf-8")
     ui.markdown(f'<style>{styles}</style><span id="hwfc-ap-page" aria-hidden="true"></span>', unsafe_allow_html=True)
+    now = now or datetime.now(timezone.utc)
+    try:
+        config = config or read_config(ui.secrets)
+    except Exception:
+        ui.title("AP Statements")
+        ui.error("Shared AP storage is not configured. Ask the app owner to finish the private Supabase and Streamlit Secrets setup.")
+        return ui.button("← All Programs", key="ap_gate_back", type="primary")
+    try:
+        require_access(ui.session_state, config, now)
+    except PermissionError:
+        if "_ap_authorization" in ui.session_state:
+            lock_access(ui.session_state)
+        ui.title("Unlock AP Statements")
+        if ui.button("← All Programs", key="ap_gate_back"):
+            return True
+        with ui.form("ap_unlock", clear_on_submit=True):
+            submitted = ui.text_input("Finance team password", type="password", key="_ap_password")
+            clicked = ui.form_submit_button("Open AP Statements")
+        if clicked:
+            if limiter is None:
+                try:
+                    from app.ap_shared.repository import create_repository
+                    limiter = create_repository(config)
+                except Exception:
+                    limiter = None
+            if limiter is not None and attempt_unlock(ui.session_state, submitted, config, limiter, now):
+                ui.rerun()
+            else:
+                ui.session_state.pop("_ap_password", None)
+                ui.warning("Unable to unlock AP. Check the password and try again later if access is temporarily limited or unavailable.")
+        return False
+    if ui.button("Lock AP", key="ap_lock_access"):
+        lock_access(ui.session_state)
+        ui.rerun()
+        return False
     path = Path(frontend_path) if frontend_path is not None else ap_frontend_path()
     missing_build = not (path / "index.html").is_file()
     if missing_build:

@@ -60,5 +60,15 @@ try {
     assert.ok(ticket); await query('select ap_finish_access_attempt($1::uuid,$2::uuid,$3::boolean)',[workspace,ticket,false]);
   }
   assert.equal((await query('select ap_begin_access_attempt($1::uuid,$2::uuid) as ticket',[workspace,nonce])).rows[0].ticket,null); count++;
+  const authWorkspace='00000000-0000-4000-8000-000000000099';
+  for(let i=0;i<100;i++) {
+    const ticket=(await query('select ap_begin_access_attempt($1::uuid,$2::uuid) as ticket',[authWorkspace,crypto.randomUUID()])).rows[0].ticket;
+    assert.ok(ticket); await query('select ap_finish_access_attempt($1::uuid,$2::uuid,$3::boolean)',[authWorkspace,ticket,false]);
+  }
+  assert.equal((await query('select ap_begin_access_attempt($1::uuid,$2::uuid) as ticket',[authWorkspace,crypto.randomUUID()])).rows[0].ticket,null); count++;
+  await query("update ap_access_limits set blocked_until=now()-interval '1 second',events='[]' where workspace_id=$1",[authWorkspace]);
+  const recovery=(await query('select ap_begin_access_attempt($1::uuid,$2::uuid) as ticket',[authWorkspace,nonce])).rows[0].ticket;
+  assert.ok(recovery); await query('select ap_finish_access_attempt($1::uuid,$2::uuid,$3::boolean)',[authWorkspace,recovery,true]);
+  assert.ok((await query('select events from ap_access_limits where workspace_id=$1',[authWorkspace])).rows.every(r=>r.events.length===0)); count++;
   console.log(`SQL behavior checks passed: ${count}; real Postgres engine, synthetic fixtures only.`);
 } finally { await db.close(); }

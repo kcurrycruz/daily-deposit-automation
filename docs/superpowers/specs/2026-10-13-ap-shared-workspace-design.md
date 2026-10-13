@@ -2,7 +2,7 @@
 
 **Date:** October 13, 2026
 
-**Status:** Draft for user review
+**Status:** Approved for implementation planning on October 13, 2026
 
 ## Purpose and agreed requirements
 
@@ -102,7 +102,7 @@ In two independent authorized browser sessions, verify a saved import and statem
 
 Prepare schema migrations and setup instructions without provisioning an external project or uploading financial files automatically. Activation requires a user-controlled Supabase project, the private bucket and schema, and credentials entered directly in Streamlit Secrets. Test with synthetic data before the user explicitly migrates existing financial data. Establish and test database and file backup and recovery procedures before relying on the archive; retention in a live bucket is not a backup.
 
-Application implementation, external setup, migration, merging, and pushing are separate later steps. This draft is for review before implementation planning.
+Application implementation, external setup, migration, merging, and pushing are separate later steps. This design was approved for implementation planning; approval does not mean shared storage is deployed.
 
 ## Technical references
 

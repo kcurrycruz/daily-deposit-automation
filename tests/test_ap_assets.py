@@ -34,7 +34,7 @@ class APAssetTests(unittest.TestCase):
                 self.assertTrue((FRONTEND / ref).is_file())
 
     def test_pdf_and_ocr_runtime_is_packaged(self):
-        for name in ("app.mjs", "core.mjs", "demo.mjs", "extraction.mjs",
+        for name in ("app.mjs", "core.mjs", "guide.mjs", "session.mjs", "bill-import.mjs", "extraction.mjs",
                      "vendor/pdf.mjs", "vendor/pdf.worker.mjs",
                      "vendor/tesseract.min.js", "vendor/worker.min.js",
                      "vendor/eng.traineddata.gz", "bridge.bundle.mjs"):

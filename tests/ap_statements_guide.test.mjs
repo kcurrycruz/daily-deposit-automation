@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { createDemo } from '../app/ap_statements/frontend/demo.mjs';
+import { createDemo } from './fixtures/legacy_ap_demo.mjs';
 import { saveSession, loadSession } from '../app/ap_statements/frontend/session.mjs';
 
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -78,7 +78,7 @@ test('a disconnected source cannot look like completed BILL comparison', async (
   assert.equal(guide.steps[2].complete, false);
 });
 
-test('sample workspace is optional and simulated matches never complete real comparison', async () => {
+test('legacy simulated sources never complete real BILL comparison', async () => {
   const { workflowGuide } = await module();
   const guide = workflowGuide({ ...createDemo(), mappings: {}, resolutions: {} });
   assert.equal(guide.current, 'source');

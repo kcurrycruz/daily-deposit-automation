@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDemo } from '../app/ap_statements/frontend/demo.mjs';
+import { createDemo } from './fixtures/legacy_ap_demo.mjs';
 import { loadSession, saveSession, clearSession, loadVendorMappings, saveVendorMappings } from '../app/ap_statements/frontend/session.mjs';
 
 function storage() {
@@ -8,7 +8,12 @@ function storage() {
   return { values, getItem: key => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
 }
-const fixture = () => ({ version: 1, ...createDemo(), resolutions: { row: { note: 'Reviewed', decision: 'Follow up', at: '2026-10-09' } } });
+const fixture = () => {
+  const data = createDemo();
+  data.statements.forEach(doc => { doc.demo = false; doc.layout = 'generic'; });
+  data.provider.simulated = false; data.provider.label = 'Test CSV records';
+  return { version: 1, ...data, resolutions: { row: { note: 'Reviewed', decision: 'Follow up', at: '2026-10-09' } } };
+};
 test('metadata round trip preserves rows, notes, provider and reviews', () => {
   const s = storage(), data = fixture();
   data.statements[0].notes = 'Fictional note';

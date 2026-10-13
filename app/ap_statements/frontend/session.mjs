@@ -42,14 +42,33 @@ function mappings(value) {
   if (!object(value) || !Object.values(value).every(v => typeof v === 'string')) throw Error('Invalid mappings');
   return Object.fromEntries(Object.entries(value));
 }
+export function reviewNotesOnly(resolutions) {
+  return Object.fromEntries(Object.entries(resolutions)
+    .filter(([, value]) => typeof value.note === 'string')
+    .map(([id, value]) => [id, { note: value.note }]));
+}
+function realDataOnly(value) {
+  const removed = value.statements.filter(doc => doc.demo === true);
+  const removedRows = new Set(removed.flatMap(doc => doc.rows.map(row => row.id)));
+  const simulated = value.provider.simulated;
+  if (!removed.length && !simulated) return { session: value, notice: null };
+  const statements = value.statements.filter(doc => doc.demo !== true);
+  const keptRows = new Set(statements.flatMap(doc => doc.rows.map(row => row.id)));
+  const resolutions = Object.fromEntries(Object.entries(value.resolutions)
+    .filter(([id]) => !removedRows.has(id) || keptRows.has(id))
+    .map(([id, resolution]) => [id, simulated ? { note: resolution.note || '' } : resolution]));
+  const provider = simulated ? { loaded: false, simulated: false, records: [], label: 'Not connected' } : value.provider;
+  return { session: { ...value, statements, provider, resolutions },
+    notice: `Older sample data was removed from this workspace (${removed.length} sample statements). Real statements and their notes are retained. ${simulated ? 'Simulated comparison records were disconnected; decisions based on them need review after importing BILL records.' : 'Your imported BILL records are unchanged.'} Use Save session to retain the cleaned workspace.` };
+}
 export function loadSession(storage) {
   try {
     const raw = storage.getItem(SESSION_KEY);
-    return { session: raw === null ? null : metadata(JSON.parse(raw)), error: null };
+    return { ...(raw === null ? { session: null, notice: null } : realDataOnly(metadata(JSON.parse(raw)))), error: null };
   } catch { return { session: null, error: 'Saved AP session could not be loaded. Browser storage may be blocked or corrupt. In-memory work still works; export your report before leaving.' }; }
 }
 export function saveSession(storage, session) {
-  try { storage.setItem(SESSION_KEY, JSON.stringify(metadata(session))); return { ok: true, error: null }; }
+  try { storage.setItem(SESSION_KEY, JSON.stringify(realDataOnly(metadata(session)).session)); return { ok: true, error: null }; }
   catch { return { ok: false, error: 'AP session was NOT saved. Check browser storage permissions or space; export your report before leaving. Your in-memory work remains available.' }; }
 }
 export function loadVendorMappings(storage) {

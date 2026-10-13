@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { reconcile, toCSV, importRecords } from '../app/ap_statements/frontend/core.mjs';
-import { saveSession, loadSession } from '../app/ap_statements/frontend/session.mjs';
+import { saveSession, loadSession, reviewNotesOnly } from '../app/ap_statements/frontend/session.mjs';
 
 async function importer() {
   const module = await import('../app/ap_statements/frontend/bill-import.mjs').catch(() => null);
@@ -150,7 +150,7 @@ test('actual import control applies native evidence and resets reviews only afte
   const state = { statements: [statement], resolutions: { r1: { decision: 'Preserve on failure' } }, provider: { label: 'old' } };
   let handler;
   const input = { addEventListener: (_, callback) => { handler = callback; } };
-  const context = { state, importBillSource, importRecords, document: { querySelector: selector => selector === '#csv-input' ? input : null }, render() {}, toast() {} };
+  const context = { state, importBillSource, importRecords, reviewNotesOnly, document: { querySelector: selector => selector === '#csv-input' ? input : null }, render() {}, toast() {} };
   vm.runInNewContext(block, context);
   await handler({ target: { files: [{ name: 'BILL.csv', text: async () => csv([row()]) }], value: 'BILL.csv' } });
   assert.equal(state.provider.sourceFormat, 'bill-native');

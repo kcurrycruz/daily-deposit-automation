@@ -60,7 +60,7 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None) -> 
             ui.session_state.pop(_EXIT_KEY, None)
             return True
     ui.caption(
-        "BILL API is disconnected. Sample matches are simulated; CSV matches "
+        "BILL API is disconnected. Comparisons use imported CSV records and "
         "depend on export coverage. This does not verify QuickBooks sync."
     )
     ui.caption(

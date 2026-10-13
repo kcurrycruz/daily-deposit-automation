@@ -14,6 +14,7 @@ export function importBillSource(text) {
   if (!native) {
     if (names.includes('vendorname') && !names.includes('invoice')) throw Error('This is a vendor directory. Import the Bills CSV export to compare invoices.');
     const records = importRecords(text);
+    if (!records.length) throw Error('No BILL records are in this template. Import a populated Bills export or add real records to the template.');
     return { records, summary: { format: 'template', inputRows: rows.length, collapsedRows: 0, excludedRows: 0, issues: [] } };
   }
   const get = (row, column) => (row[names.indexOf(headerKey(column))] ?? '').trim();

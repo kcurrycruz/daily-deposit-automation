@@ -1,4 +1,5 @@
-import { uid } from './core.mjs';
+// Test-only fixture for compatibility with older saved demo sessions.
+import { uid } from '../../app/ap_statements/frontend/core.mjs';
 export function createDemo() {
   const definitions = [
     ['Northfield Produce', 'northfield-september.pdf', [['NP-2101', 34500, 'matched'], ['NP-2102', 18275, 'missing'], ['NP-2103', 42000, 'matched'], ['NP-2104', 9700, 'amount']]],

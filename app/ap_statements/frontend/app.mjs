@@ -2,6 +2,7 @@ import { money, cents, uid, totals, groupInvoices, reconcile, statuses, toCSV, v
 import { importBillSource } from './bill-import.mjs';
 import { loadSession, loadVendorMappings, reviewNotesOnly } from './session.mjs';
 import {createSharedWorkspace} from './shared-workspace.mjs';
+import {completionPayload,historyFilters,historyView,nyTimestamp} from './history.mjs';
 import { backButtonHtml, requestProgramHub } from './navigation.mjs';
 import { emptyWorkspace, workflowGuide } from './guide.mjs';
 
@@ -38,9 +39,11 @@ const overlay = document.querySelector('#overlay-root');
 const browserStorage = () => { try { return window.localStorage; } catch { return null; } };
 let restoredNotice = '';
 let shared,saveState='loading',retryOperation=null,sharedError=null;
+let historyPage={items:[],nextCursor:null},historySelection=null,activeHistoryFilters={};
+const comparisonsFor=doc=>shared?.state.details.get(doc.id)?.readOnly?shared.state.details.get(doc.id).results:reconcile(doc,state.provider,state.mappings);
 const dirty=new Set();
 function ready(){if(!shared?.state.ready)throw Error('Shared workspace is not ready. Finish setup or retry loading.');}
-function sharedStatus(status,error){saveState=status;sharedError=error||null;retryOperation=error?.retry||null;const badge=document.querySelector('#shared-save-status');if(badge)badge.textContent=({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[status]||status;}
+function sharedStatus(status,error){saveState=status;sharedError=error||null;retryOperation=error?.retry||null;const badge=document.querySelector('#shared-save-status');if(badge)badge.textContent=({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[status]||status;overlay.querySelectorAll?.('input,textarea,select,button[data-action="resolve"],button[data-action="save-extraction"],button[data-action="confirm-extraction"],button[data-action="save-notes"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=status==='saving'||!!shared?.state.details.get(state.selected)?.readOnly;});}
 function receiveShared(snapshot){state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();}
 async function startShared(){if(shared||!window.hwfcSharedClient)return;shared=createSharedWorkspace(window.hwfcSharedClient,{onState:receiveShared,onSaveState:sharedStatus});try{await shared.load();sharedStatus('saved');render();}catch(error){sharedError=error;retryOperation=()=>shared.load();sharedStatus('not_saved',error);render();}}
 window.addEventListener('hwfc:shared-ready',startShared);
@@ -48,6 +51,7 @@ window.addEventListener('pagehide',()=>{shared?.dispose();files.clear();state.st
 async function persistDoc(doc){ready();const detail=shared.state.details.get(doc.id);const result=await shared.saveStatement(doc,detail.version,{resolutions:state.resolutions});dirty.delete(doc.id);return result;}
 function markDirty(){if(state.selected){dirty.add(state.selected);sharedStatus('unsaved');}}
 function decorateSharedUi(){
+  const nav=document.querySelector('.nav');if(nav)nav.insertAdjacentHTML('beforeend',`<button data-action="history-view" class="${state.view==='history'?'active':''}">${icon('clock')}Previous Statements</button><button data-action="migration-preview">${icon('upload')}Import old browser work</button>`);
   const note=document.querySelector('.local-note');if(note)note.innerHTML=`${icon('shield')}<strong>Private shared workspace</strong>Original PDFs, BILL imports and acknowledged saves are kept for your team. Initials are self-reported. Unsaved edits remain in this tab.`;
   const profile=document.querySelector('.profile small');if(profile)profile.textContent='Shared AP workspace';
   for(const button of document.querySelectorAll('[data-action="save-session"]'))button.innerHTML=`${icon('save')}Save changes`;
@@ -56,8 +60,11 @@ function decorateSharedUi(){
   const prep=document.querySelector('.guide-preparation');if(prep&&state.statements.length)prep.innerHTML='<strong>Keep your progress</strong><p>Save changes to retain corrections and notes for the team.</p><small>Original PDFs are saved privately. Wait for a save acknowledgement before leaving.</small>';
   const content=document.querySelector('.content');if(content&&sharedError)content.insertAdjacentHTML('afterbegin',`<div class="notice amber"><div><strong>${sharedError.code==='conflict'?'Conflict':'Not saved'}</strong><p>${esc(sharedError.message)}</p><button class="button small" data-action="retry-shared">Retry same operation</button> <button class="button small" data-action="reload-latest">Reload latest (discards unsaved edits)</button></div></div>`);
   const vendorHelp=document.querySelector('.wide-panel p');if(state.view==='vendors'&&vendorHelp)vendorHelp.textContent='Map statement names to the exact vendor names in BILL. Acknowledged mappings are shared with the team.';
+  if(state.view==='history'&&content){const heading=content.querySelector('.heading h1');if(heading)heading.textContent='Previous Statements';const subtitle=content.querySelector('.heading p');if(subtitle)subtitle.textContent='Find completed work and open the exact evidence saved by your team.';content.querySelector('.connection-layout')?.remove();content.insertAdjacentHTML('beforeend',historyPanel());}
   for(const button of document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]'))if(!shared?.state.ready||saveState==='saving')button.disabled=true;
 }
+function historyPanel(){return `<section class="panel wide-panel history-filters"><div class="form-grid">${[['vendor','Vendor','text'],['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><button class="button primary" data-action="history-search">Search previous work</button></section>${historyView(historyPage)}`;}
+async function refreshHistory(more=false){ready();const page=await shared.history(historyFilters(activeHistoryFilters),more?historyPage.nextCursor:null);historyPage={items:more?[...historyPage.items,...page.items]:page.items,nextCursor:page.nextCursor};render();}
 const results = () => state.statements.flatMap(statement => reconcile(statement, state.provider, state.mappings));
 const reviewDecision = id => state.resolutions[id]?.decision ? state.resolutions[id] : null;
 const isAttention = row => row.status !== 'matched' && !reviewDecision(row.id);
@@ -212,12 +219,12 @@ function modal(title, body, action, label = 'Continue') {
   overlay.querySelector('button')?.focus();
 }
 function closeOverlay() { overlay.innerHTML = ''; state.selected = null; state.selectedRow = null; priorFocus?.focus?.(); renderToken++; }
-function getDoc() { return state.statements.find(d => d.id === state.selected); }
+function getDoc() { return state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc; }
 function openDoc(id, row = null) { priorFocus = document.activeElement; state.selected = id; state.selectedRow = row; state.drawerTab = row ? 'review' : 'extraction'; state.page = row ? reconcile(getDoc(), state.provider, state.mappings).find(r => r.id === row)?.page || 1 : 1; renderDrawer(); overlay.querySelector('.close')?.focus(); }
 function renderDrawer() {
   const doc = getDoc(); if (!doc) return;
   const check = totals(doc);
-  const reviewRows = reconcile(doc, state.provider, state.mappings);
+  const reviewRows = comparisonsFor(doc);
   const row = reviewRows.find(r => r.id === state.selectedRow) || reviewRows.find(isAttention) || reviewRows[0];
   if (row && !state.selectedRow) state.selectedRow = row.id;
   const warnings = [...doc.warnings];
@@ -227,6 +234,9 @@ function renderDrawer() {
   if (state.drawerTab !== 'notes') previewPDF(doc);
   overlay.querySelectorAll('input,textarea').forEach(input=>input.addEventListener('input',markDirty));
   const noteLabel=overlay.querySelector('#review-note')?.parentElement;if(noteLabel)noteLabel.firstChild.textContent='Review note (optional)';
+  const detail=shared?.state.details.get(doc.id),body=overlay.querySelector('.drawer-body');
+  if(detail?.readOnly){body.insertAdjacentHTML('afterbegin',`<div class="notice blue"><div><strong>Saved revision · read-only</strong><p>${esc(historySelection?.initials||'')} · ${esc(nyTimestamp(historySelection?.completedAt))} · ${esc(detail.ruleVersion)} · Import ${esc(detail.importId||'none')}</p><p>These are the original saved comparisons, not results recalculated against the latest import.</p><button class="button" data-action="reopen-statement">Reopen current statement as a draft</button> <button class="button" data-action="export">Export saved evidence</button></div></div>`);overlay.querySelectorAll('input,textarea,select,[data-action="save-extraction"],[data-action="confirm-extraction"],[data-action="save-notes"],[data-action="resolve"],[data-action="reopen"],[data-action="add-row"],[data-action="delete-row"],[data-action="remove-doc"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=true;});}
+  else if(body)body.insertAdjacentHTML('beforeend','<div class="action-row"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');
 }
 function extractionView(doc, check, warnings) {
   return `${warnings.length ? `<div class="notice amber">${icon('info')}<div>${warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div></div>` : `<div class="notice">${icon('check')}<div>Extracted activity agrees with the statement total. Verify invoice numbers before confirming.</div></div>`}<div class="form-grid"><label class="field">Statement vendor<input id="doc-vendor" value="${esc(doc.vendor)}"></label><label class="field">Statement date<input type="date" id="doc-date" value="${esc(doc.statementDate)}"></label><label class="field">Printed statement total (USD)<input id="doc-total" value="${doc.declaredTotal == null ? '' : (doc.declaredTotal / 100).toFixed(2)}" inputmode="decimal"></label><label class="field">Extracted activity total<input readonly value="${money(check.sum)}"></label></div><div class="source-layout"><div><div class="page-control"><strong>Extracted transactions · ${doc.rows.length}</strong><button class="button small" data-action="add-row">${icon('plus')}Add row</button></div><div class="table-wrap"><table class="edit-table"><thead><tr><th>Reference</th><th>Type</th><th>Amount</th><th>Invoice balance</th><th>Page</th><th></th></tr></thead><tbody>${doc.rows.map(row => `<tr data-row="${row.id}"><td><input class="ref" name="reference" value="${esc(row.invoiceNumber)}" aria-label="Invoice reference"></td><td><select name="type" aria-label="Transaction type">${['invoice','credit','payment','opening'].map(type => `<option ${row.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td><td><input name="amount" value="${(row.amount / 100).toFixed(2)}" inputmode="decimal" aria-label="Original amount"></td><td><input name="balance" value="${row.balance == null ? '' : (row.balance / 100).toFixed(2)}" inputmode="decimal" aria-label="Invoice outstanding balance"></td><td><input class="small-col" name="page" type="number" min="1" max="${doc.pageCount}" value="${row.page}" aria-label="Source page"></td><td><button data-action="delete-row" data-id="${row.id}" aria-label="Remove row">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div><p style="font-size:10px;line-height:1.7;color:#849277">Amounts are signed: invoices positive, credits and payments negative. Leave invoice balance blank when only a running account balance is supplied. Reference numbers remain text.</p><div class="action-row"><button class="button" data-action="save-extraction">Save corrections</button><button class="button primary" data-action="confirm-extraction">${icon('check')}Confirm extracted rows</button></div><details style="margin-top:20px;font-size:11px;color:#748967"><summary>Extracted source text</summary><pre class="raw-text">${esc(doc.rawText || doc.rows.map(r => r.source).join('\n'))}</pre></details></div>${pdfPanel(doc)}</div>`;
@@ -315,7 +325,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'page-select') { state.page = Number(e.target.value); previewPDF(getDoc()); }
-  if (e.target.id === 'row-select') { state.selectedRow = e.target.value; const row = reconcile(getDoc(), state.provider, state.mappings).find(r => r.id === state.selectedRow); state.page = row?.page || 1; renderDrawer(); }
+  if (e.target.id === 'row-select') { state.selectedRow = e.target.value; const row = comparisonsFor(getDoc()).find(r => r.id === state.selectedRow); state.page = row?.page || 1; renderDrawer(); }
   if (e.target.id === 'provider-date') state.provider.asOf = e.target.value;
 });
 document.addEventListener('click', async e => {
@@ -323,6 +333,14 @@ document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const action = target.dataset.action;
   try {
+    if(state.selected&&shared?.state.details.get(state.selected)?.readOnly&&['save-extraction','confirm-extraction','add-row','delete-row','save-notes','resolve','reopen','remove-doc'].includes(action))throw Error('This saved revision is read-only. Explicitly reopen the current statement to continue work.');
+    if(action==='history-view'){state.view='history';historySelection=null;await refreshHistory();}
+    if(action==='history-search'){for(const key of ['vendor','statementDate','initials','status','completedFrom','completedTo'])activeHistoryFilters[key]=document.querySelector(`#history-${key}`).value;await refreshHistory();}
+    if(action==='history-more')await refreshHistory(true);
+    if(action==='history-open'){historySelection=historyPage.items.find(item=>item.id===target.dataset.event);const detail=await shared.statement(historySelection.statementId,historySelection.revisionId);shared.state.details.set(detail.doc.id,detail);Object.assign(state.resolutions,detail.resolutions);openDoc(detail.doc.id);}
+    if(action==='complete-dialog'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save corrections or notes before marking reviewed.');completionPayload({doc,results:comparisonsFor(doc),resolutions:state.resolutions,initials:'AP',expectedVersion:shared.state.details.get(doc.id).version});modal('Mark statement reviewed',`<p>This records your review, not verified payment settlement or QuickBooks sync.</p><label class="field">Reviewer initials<input id="completion-initials" maxlength="10" placeholder="e.g. KC" required></label><label class="field">Completion note (optional)<textarea id="completion-note"></textarea></label>`,'complete-statement','Mark reviewed');state.selected=doc.id;}
+    if(action==='complete-statement'){const doc=getDoc();const payload=completionPayload({doc,results:comparisonsFor(doc),resolutions:state.resolutions,initials:document.querySelector('#completion-initials').value,notes:document.querySelector('#completion-note').value,expectedVersion:shared.state.details.get(doc.id).version});await shared.completeStatement(payload);closeOverlay();state.view='history';await refreshHistory();toast('Review completed and saved.');}
+    if(action==='reopen-statement'){const id=state.selected;const latest=await shared.statement(id);if(!latest.completed){shared.adopt(latest);receiveShared(shared.state);openDoc(id);toast('A colleague already reopened this statement. Loaded the current draft.');}else{await shared.reopenStatement(id,latest.version);state.view='statements';historySelection=null;openDoc(id);}}
     if (action === 'back-to-programs') modal('Go back to programs?', '<p>Save changes or export your report before leaving.</p><p>Unsaved edits will be lost. Acknowledged revisions and original PDFs remain in your private shared workspace.</p>', 'confirm-back-to-programs', 'Go back to programs');
     if (action === 'retry-shared') {if(retryOperation)await retryOperation();render();if(state.selected)renderDrawer();}
     if (action === 'reload-latest') modal('Reload latest shared work?','<p>This discards unsaved edits in this tab. Shared records are retained.</p>','confirm-reload','Reload latest');
@@ -377,8 +395,9 @@ document.addEventListener('click', async e => {
     if (action === 'confirm-remove') { const doc = getDoc();await shared.archiveStatement(doc.id,shared.state.details.get(doc.id).version);files.delete(doc.id);closeOverlay();render(); }
     if (action === 'template') download('bill-record-template.csv', toCSV([['vendor','invoiceNumber','amount','kind','currency','clearedPaymentAmount','scheduledAmount','creditAmount','paymentDate','id']]));
     if (action === 'export') {
-      const header = ['vendor','statement','statementDate','invoiceNumber','activityType','originalAmount','statementOutstanding','result','reason','source','simulated','reviewDecision','reviewNote','assignedReviewer'];
-      const rows = results().map(r => { const doc = state.statements.find(d => d.id === r.statementId); const resolution = reviewDecision(r.id); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),statuses[r.status].label,r.reason,state.provider.label || 'No BILL data',r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',state.resolutions[r.id]?.note || '',doc.assignee || '']; });
+      const header = ['vendor','statement','statementDate','invoiceNumber','activityType','originalAmount','statementOutstanding','result','reason','source','simulated','reviewDecision','reviewNote','assignedReviewer','importId','ruleVersion','reviewerInitials','completedAtUTC'];
+      const reportRows=state.selected&&shared?.state.details.get(state.selected)?.readOnly?comparisonsFor(getDoc()):results();
+      const rows = reportRows.map(r => { const detail=shared?.state.details.get(r.statementId);const doc = state.statements.find(d => d.id === r.statementId)||detail.doc; const resolution = reviewDecision(r.id); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),statuses[r.status].label,r.reason,detail?.readOnly?'Frozen saved comparison':state.provider.label || 'No BILL data',r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',state.resolutions[r.id]?.note || '',doc.assignee || '',detail?.importId||'',detail?.ruleVersion||'ap-match-v2',detail?.readOnly?historySelection?.initials||'':'',detail?.readOnly?historySelection?.completedAt||'':'']; });
       download('statement-reconciliation.csv', toCSV([header,...rows])); toast('Report exported with source and review notes.');
     }
   } catch(error) { sharedError=error;retryOperation=error.retry||null;toast(error.message || 'This action could not be completed.', true);decorateSharedUi(); }

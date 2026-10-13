@@ -45,3 +45,14 @@ test('a reload without explicit replacement preserves unsaved in-memory correcti
   await workspace.load();workspace.state.statements.push(doc());await workspace.load();assert.equal(reads,1);assert.equal(workspace.state.statements[0].notes,'Keep this note');
   workspace.dispose();assert.equal(workspace.state.statements.length,0);assert.equal(workspace.state.provider.records.length,0);
 });
+test('historical revisions stay read-only against their frozen import and results',async()=>{
+  const original=doc(),frozen={doc:original,version:8,revisionVersion:3,results:[{id:original.rows[0].id,status:'possible'}],importId:'old-import',mappingSnapshot:{Alpha:'Old Alpha'},completed:false};
+  const workspace=createSharedWorkspace({dispose(){},async request(){return frozen;}});workspace.state.importId='new-import';workspace.state.provider={loaded:true,records:[]};
+  const detail=await workspace.statement(original.id,crypto.randomUUID());assert.equal(detail.readOnly,true);assert.equal(detail.importId,'old-import');assert.equal(detail.results[0].status,'possible');assert.equal(workspace.state.importId,'new-import');
+});
+test('completion acknowledgement retry preserves identity and removes completed work only on acknowledgement',async()=>{
+  const original=doc();let fail=true;const ids=[],workspace=createSharedWorkspace({dispose(){},async request(action,payload,{requestId}){ids.push(requestId);if(fail)throw Object.assign(Error('lost acknowledgement'),{code:'timeout'});return {version:3};}});
+  workspace.state.statements=[original];workspace.state.details.set(original.id,{doc:original,version:2});let failure;
+  try{await workspace.completeStatement({statement_id:original.id,expected_version:2,initials:'KC',notes:''});}catch(error){failure=error;}
+  assert.equal(workspace.state.statements.length,1);fail=false;await failure.retry();assert.equal(ids[0],ids[1]);assert.equal(workspace.state.statements.length,0);assert.equal(workspace.state.details.get(original.id).readOnly,true);
+});

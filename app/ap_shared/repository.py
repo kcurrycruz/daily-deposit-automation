@@ -122,7 +122,9 @@ class ApRepository:
         query=self._table('ap_statement_revisions').eq('statement_id',statement_id)
         query=query.eq('id',require_uuid(revision)) if revision else query.eq('id',item['current_revision_id'])
         data=self._one(query)
+        source=self.import_info(workspace_id,data['import_id']) if data['import_id'] else None
         return {'doc':data['doc'],'version':item['version'],'revisionVersion':data['version'],'revisionId':data['id'],
+                'importLabel':source['metadata'].get('label','') if source else '',
                 'resolutions':data['resolutions'],'results':data['results'],'importId':data['import_id'],
                 'mappingSnapshot':data['mapping_snapshot'],'ruleVersion':data['rule_version'],
                 'completed':item['completed'],'archived':item['archived'],'originalAvailable':bool(item.get('original_object_key'))}

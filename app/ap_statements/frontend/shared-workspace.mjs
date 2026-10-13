@@ -110,8 +110,11 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
   return {state,load,loadProvider,importBills,uploadStatement,saveStatement,saveMapping,originalPdf,
+    completeStatement(payload){const frozen=clone(payload);return write(async request=>{const reply=await request('complete_revision',frozen);const detail=state.details.get(frozen.statement_id);if(detail)Object.assign(detail,{completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
+    history(filters={},cursor=null){return client.request('history_page',{filters,cursor,limit:50});},
+    reopenStatement(id,expectedVersion){return write(async request=>{await request('reopen_statement',{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     archiveStatement(id,expectedVersion){return write(async request=>{const reply=await request('archive_statement',{statement_id:id,expected_version:expectedVersion});state.statements=state.statements.filter(doc=>doc.id!==id);emit();return reply;});},
-    async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return detail;},
+    async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return {...detail,readOnly:!!revisionId||detail.completed};},
     write,adopt,
     dispose(){disposed=true;client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
 }

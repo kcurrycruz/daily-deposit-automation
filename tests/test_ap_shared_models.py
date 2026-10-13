@@ -92,4 +92,14 @@ class SharedModelsTests(unittest.TestCase):
         with self.assertRaises(ApValidationError):
             validate_request({'version':1,'request_id':str(uuid4()),'action':[],'payload':{}})
 
+    def test_review_note_may_be_omitted(self):
+        from app.ap_shared.models import validate_resolution
+        self.assertEqual(validate_resolution({'decision':'Reviewed — no action needed'})['note'],'')
+
+    def test_import_metadata_can_be_validated_before_record_batches(self):
+        from app.ap_shared.models import validate_provider_metadata,ApValidationError
+        meta={'loaded':True,'simulated':False,'label':'synthetic.csv','sourceFormat':'bill-native'}
+        self.assertEqual(validate_provider_metadata(meta)['label'],'synthetic.csv')
+        with self.assertRaises(ApValidationError):validate_provider_metadata({**meta,'password':'Synthetic'})
+
 if __name__ == '__main__': unittest.main()

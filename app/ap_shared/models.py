@@ -43,6 +43,7 @@ class Authorization:
 class SharedSnapshot(TypedDict):
     activeImport: JsonObject | None
     mappings: dict[str, str]
+    mappingVersions: dict[str, int]
     statements: list[JsonObject]
     nextCursor: str | None
 
@@ -127,7 +128,8 @@ def validate_request(value: object) -> JsonObject:
     return out
 
 def validate_resolution(value: object) -> JsonObject:
-    out=allowed(value,'note decision at','note')
+    out=allowed(value,'note decision at')
+    out.setdefault('note','')
     text(out['note'],maximum=16384)
     if 'decision' in out and (type(out['decision']) is not str or out['decision'] not in DECISIONS): raise ApValidationError('Choose a valid review decision.')
     if 'at' in out: text(out['at'],maximum=40)
@@ -196,6 +198,17 @@ def validate_provider(value: object) -> JsonObject:
     if out['loaded'] is not True or out['simulated'] is not False: raise ApValidationError('Only imported company records can be stored.')
     if type(out['records']) is not list or not 1 <= len(out['records']) <= MAX_RECORDS: raise ApValidationError('Import record count is invalid.')
     out['records']=[validate_record(row) for row in out['records']]
+    for key in ('label','refreshedAt','sourceFormat','importNotes'):
+        if key in out: text(out[key],maximum=512*1024 if key=='importNotes' else 1024)
+    if 'asOf' in out: date_value(out['asOf'])
+    for key in ('importedRowCount','collapsedRowCount','excludedRowCount','sourceIssueCount'):
+        if key in out: integer(out[key],minimum=0)
+    return out
+
+def validate_provider_metadata(value: object) -> JsonObject:
+    keys='loaded simulated label refreshedAt asOf sourceFormat importedRowCount collapsedRowCount excludedRowCount sourceIssueCount importNotes'
+    out=allowed(value,keys,'loaded simulated')
+    if out['loaded'] is not True or out['simulated'] is not False: raise ApValidationError('Only imported company records can be stored.')
     for key in ('label','refreshedAt','sourceFormat','importNotes'):
         if key in out: text(out[key],maximum=512*1024 if key=='importNotes' else 1024)
     if 'asOf' in out: date_value(out['asOf'])

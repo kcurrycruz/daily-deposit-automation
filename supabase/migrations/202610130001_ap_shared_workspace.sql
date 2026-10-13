@@ -40,6 +40,7 @@ create table public.ap_completion_events (
   id uuid primary key default gen_random_uuid(), workspace_id uuid not null, statement_id uuid not null,
   revision_id uuid not null, event text not null check(event in ('completed','reopened')),
   initials text check(initials ~ '^[A-Z]{1,10}$'), status text not null, note text not null default '',
+  vendor text, statement_date date,
   created_at timestamptz not null default now(),
   foreign key(workspace_id,statement_id) references public.ap_statements(workspace_id,id),
   foreign key(workspace_id,revision_id) references public.ap_statement_revisions(workspace_id,id),
@@ -91,6 +92,7 @@ returns jsonb language plpgsql security definer set search_path=public,pg_temp a
 declare
   cached ap_requests%rowtype; item ap_statements%rowtype; previous ap_statement_revisions%rowtype;
   source ap_bill_imports%rowtype; mapped ap_vendor_mappings%rowtype;
+  upload ap_uploads%rowtype; old_chunk jsonb; part integer;
   sid uuid; rid uuid; iid uuid; reply jsonb; next_version integer; doc_value jsonb; result_status text;
 begin
   if p_payload_hash !~ '^[0-9a-f]{64}$' or jsonb_typeof(p_data)<>'object' then raise exception 'validation'; end if;
@@ -101,7 +103,38 @@ begin
     if cached.payload_hash<>p_payload_hash then raise exception 'request_conflict'; end if;
     return cached.response;
   end if;
-  if p_operation='register_statement' then
+  if p_operation='begin_upload' then
+    if coalesce(p_data->'metadata'->>'kind','') not in ('pdf','csv') or
+       coalesce(p_data->'metadata'->>'file_hash','') !~ '^[0-9a-f]{64}$' or
+       (p_data->'metadata'->>'size')::integer not between 1 and 20971520 then raise exception 'validation'; end if;
+    sid=(p_data->>'upload_id')::uuid;
+    insert into ap_uploads(id,workspace_id,session_nonce,metadata)
+      values(sid,p_workspace,(p_data->>'session_nonce')::uuid,p_data->'metadata');
+    reply=jsonb_build_object('upload_id',sid,'state','staging');
+  elsif p_operation in ('put_chunk','finish_upload') then
+    sid=(p_data->>'upload_id')::uuid;
+    select * into upload from ap_uploads where id=sid and workspace_id=p_workspace for update;
+    if not found or upload.session_nonce is distinct from (p_data->>'session_nonce')::uuid then raise exception 'upload_denied'; end if;
+    if p_operation='put_chunk' then
+      if upload.state<>'staging' then raise exception 'upload_immutable'; end if;
+      part=(p_data->>'index')::integer;
+      if part not between 0 and 79 or part*262144 >= (upload.metadata->>'size')::integer or
+         coalesce(p_data->>'chunk_hash','') !~ '^[0-9a-f]{64}$' or
+         (p_data->>'size')::integer is distinct from least(262144,(upload.metadata->>'size')::integer-part*262144)
+         then raise exception 'validation'; end if;
+      old_chunk=upload.chunks->part::text;
+      if old_chunk is not null and old_chunk<>jsonb_build_object('hash',p_data->>'chunk_hash','size',(p_data->>'size')::integer) then raise exception 'request_conflict'; end if;
+      if old_chunk is null and part<>(select count(*) from jsonb_object_keys(upload.chunks)) then raise exception 'chunk_order'; end if;
+      if (select coalesce(sum((e.value->>'size')::integer),0) from jsonb_each(upload.chunks) e)+(case when old_chunk is null then (p_data->>'size')::integer else 0 end)>(upload.metadata->>'size')::integer then raise exception 'validation'; end if;
+      update ap_uploads set chunks=chunks||jsonb_build_object(part::text,jsonb_build_object('hash',p_data->>'chunk_hash','size',(p_data->>'size')::integer)) where id=sid;
+      reply=jsonb_build_object('upload_id',sid,'index',part);
+    else
+      if coalesce(p_data->>'object_key','')<>p_workspace::text||'/'||(upload.metadata->>'kind')||'/'||(upload.metadata->>'file_hash')||'.'||(upload.metadata->>'kind') then raise exception 'validation'; end if;
+      if (select coalesce(sum((e.value->>'size')::integer),0) from jsonb_each(upload.chunks) e)<>(upload.metadata->>'size')::integer then raise exception 'upload_incomplete'; end if;
+      update ap_uploads set state='ready',object_key=p_data->>'object_key' where id=sid;
+      reply=jsonb_build_object('upload_id',sid,'state','ready');
+    end if;
+  elsif p_operation='register_statement' then
     if p_data->>'file_hash' !~ '^[0-9a-f]{64}$' or nullif(p_data->>'original_object_key','') is null then raise exception 'validation'; end if;
     select * into item from ap_statements where workspace_id=p_workspace and file_hash=p_data->>'file_hash';
     if found then
@@ -131,7 +164,8 @@ begin
       doc_value=p_data->'doc';
       if jsonb_typeof(doc_value)<>'object' or doc_value->>'id'<>sid::text then raise exception 'validation'; end if;
       insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,resolutions,import_id,mapping_snapshot,results,rule_version)
-        values(rid,p_workspace,sid,next_version,doc_value,coalesce(p_data->'resolutions','{}'),iid,
+        values(rid,p_workspace,sid,next_version,doc_value,
+               (select coalesce(jsonb_object_agg(e.key,case when e.value->>'decision' is not null then (e.value-'at')||jsonb_build_object('at',now()) else e.value-'at' end),'{}') from jsonb_each(coalesce(p_data->'resolutions','{}')) e),iid,
                coalesce(p_data->'mapping_snapshot','{}'),coalesce(p_data->'results','[]'),p_data->>'rule_version');
     elsif p_operation='complete_revision' then
       if item.completed then raise exception 'completed_revision'; end if;
@@ -140,14 +174,14 @@ begin
       if exists(select 1 from jsonb_array_elements(previous.results) r where r->>'status'<>'matched' and
         (previous.resolutions->(r->>'id')->>'decision' is null or previous.resolutions->(r->>'id')->>'decision' not in
         ('Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'))) then raise exception 'review_required'; end if;
-      doc_value=previous.doc||jsonb_build_object('notes',coalesce(p_data->>'notes',previous.doc->>'notes',''));
+      doc_value=previous.doc;
       insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,resolutions,import_id,mapping_snapshot,results,rule_version)
         values(rid,p_workspace,sid,next_version,doc_value,previous.resolutions,previous.import_id,previous.mapping_snapshot,previous.results,previous.rule_version);
       result_status=case when not exists(select 1 from jsonb_array_elements(previous.results) r where r->>'status'<>'matched') then 'reconciled'
         when exists(select 1 from jsonb_each(previous.resolutions) r where r.value->>'decision'<>'Reviewed — no action needed') then 'follow_up'
         else 'reviewed' end;
-      insert into ap_completion_events(workspace_id,statement_id,revision_id,event,initials,status,note)
-        values(p_workspace,sid,rid,'completed',p_data->>'initials',result_status,coalesce(p_data->>'notes',''));
+      insert into ap_completion_events(workspace_id,statement_id,revision_id,event,initials,status,note,vendor,statement_date)
+        values(p_workspace,sid,rid,'completed',p_data->>'initials',result_status,coalesce(p_data->>'notes',''),doc_value->>'vendor',nullif(doc_value->>'statementDate','')::date);
       update ap_statements set completed=true where id=sid;
     elsif p_operation='reopen_statement' then
       if not item.completed then raise exception 'not_completed'; end if;
@@ -207,6 +241,9 @@ $$;
 
 -- Fixed operations expose the same transactional contract to the server adapter.
 create function public.ap_register_statement(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('register_statement',$1,$2,$3,$4)$$;
+create function public.ap_begin_upload(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('begin_upload',$1,$2,$3,$4)$$;
+create function public.ap_put_chunk(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('put_chunk',$1,$2,$3,$4)$$;
+create function public.ap_finish_upload(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('finish_upload',$1,$2,$3,$4)$$;
 create function public.ap_save_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('save_revision',$1,$2,$3,$4)$$;
 create function public.ap_complete_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('complete_revision',$1,$2,$3,$4)$$;
 create function public.ap_reopen_statement(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('reopen_statement',$1,$2,$3,$4)$$;

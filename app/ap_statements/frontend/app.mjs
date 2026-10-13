@@ -2,6 +2,7 @@ import { money, cents, uid, totals, groupInvoices, reconcile, statuses, importRe
 import { createDemo, simulateRecords } from './demo.mjs';
 import { loadSession, saveSession, clearSession, loadVendorMappings, saveVendorMappings } from './session.mjs';
 import { backButtonHtml, requestProgramHub } from './navigation.mjs';
+import { emptyWorkspace, workflowGuide } from './guide.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -24,7 +25,7 @@ const icons = {
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.ledger}</svg>`;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const initial = createDemo();
+const initial = emptyWorkspace();
 const state = { ...initial, view: 'statements', filter: 'all', query: '', mappings: {}, resolutions: {}, selected: null, selectedRow: null, drawerTab: 'review', page: 1, busy: false, progress: '', fraction: 0, errors: [] };
 const files = new Map();
 let extractor;
@@ -67,10 +68,41 @@ function docSummary(doc) {
 }
 function render() {
   const data = stats();
-  const title = { statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', connection: 'Connect your accounting source' }[state.view];
-  const subtitle = { statements: 'Upload statements. Match invoices. Spend your time on the exceptions.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', connection: 'Try the workflow today. Connect your live BILL account after approval.' }[state.view];
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Exceptions',data.attention],['vendors','users','Vendors',''],['connection','plug','BILL connection','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${state.view === 'statements' || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${state.provider.simulated ? `<div class="notice">${icon('info')}<div><strong>You’re exploring a demonstration.</strong> BILL records and match results are simulated. Uploaded invoices have not been checked against your actual account.</div><div class="notice-actions"><button class="mini-link" data-action="view" data-view="connection">About the connection ${icon('arrow')}</button></div></div>` : !state.provider.loaded ? `<div class="notice blue">${icon('plug')}<div><strong>BILL is not connected yet.</strong> You can extract and review PDFs now. Invoice matching needs imported records or a live connection.</div></div>` : `<div class="notice blue">${icon('info')}<div><strong>Comparing against imported CSV records.</strong> ${esc(state.provider.label)} · ${state.provider.records.length} records. Coverage and historical balances require review.</div></div>`}${state.view === 'statements' || state.view === 'exceptions' ? `${metrics(data)}<div class="workspace-grid"><section class="panel">${state.view === 'statements' ? statementPanel(data) : exceptionPanel(data)}</section><aside class="right-rail">${rail(data)}</aside></div>` : state.view === 'vendors' ? vendorsPanel() : connectionPanel()}</div></main></div>`;
+  const title = { statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', connection: 'Add BILL records for comparison' }[state.view];
+  const subtitle = { statements: 'Follow the guide below. We’ll show you what to do next.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Exceptions',data.attention],['vendors','users','Vendors',''],['connection','plug','BILL connection','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${state.provider.simulated ? `<div class="notice">${icon('info')}<div><strong>You’re exploring a demonstration.</strong> BILL records and match results are simulated. Uploaded invoices have not been checked against your actual account.</div><div class="notice-actions"><button class="mini-link" data-action="view" data-view="connection">About the connection ${icon('arrow')}</button></div></div>` : !state.provider.loaded ? `<div class="notice blue">${icon('plug')}<div><strong>BILL is not connected yet.</strong> You can extract and review PDFs now. Invoice matching needs imported records or a live connection.</div></div>` : `<div class="notice blue">${icon('info')}<div><strong>Comparing against imported CSV records.</strong> ${esc(state.provider.label)} · ${state.provider.records.length} records. Coverage and historical balances require review.</div></div>`}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : connectionPanel()}</div></main></div>`;
   bindDropzone();
+}
+function guidePanel() {
+  const guide = workflowGuide(state);
+  return `<section class="guide-panel" aria-label="Statement checking guide">
+    <div class="guide-top"><span class="eyebrow">Your statement check · Step ${guide.index + 1} of 4</span><span class="guide-help">One step at a time</span></div>
+    <ol class="guide-steps">${guide.steps.map((step, index) => `<li class="${step.id === guide.current ? 'is-current' : step.complete ? 'is-complete' : 'is-pending'}"><button data-action="guide-step" data-step="${step.id}" ${step.id === guide.current ? 'aria-current="step"' : ''} ${!state.statements.length && ['extraction','review'].includes(step.id) ? 'disabled' : ''}><span class="guide-number">${step.complete ? '✓' : index + 1}</span><span><strong>${step.title}</strong><small>${step.detail}</small></span></button></li>`).join('')}</ol>
+    <div class="guide-next"><div><span class="eyebrow">What to do next</span><h2>${guide.heading}</h2><p>${guide.body}</p>
+      ${state.busy ? `<p class="guide-progress" role="status">Reading your PDFs… ${esc(state.progress)}</p>` : ''}
+      <div class="action-row"><button class="button primary guide-primary" data-action="guide-next" ${state.busy ? 'disabled' : ''}>${icon(guide.action === 'upload' ? 'upload' : guide.action === 'export' ? 'down' : 'arrow')}${guide.label}</button>
+      ${guide.current === 'review' ? `<button class="button" data-action="save-session">${icon('save')}Save session</button>` : ''}
+      ${!state.statements.length ? `<button class="button subtle" data-action="demo">Try a sample first</button>` : ''}</div></div>
+      ${!state.statements.length ? `<aside class="guide-preparation"><strong>What you’ll need</strong><p>1. Your vendor statement PDFs</p><p>2. A BILL invoice export for comparison</p><small>No BILL API access needed to start. Sample data is optional and fictional.</small></aside>` : `<aside class="guide-preparation"><strong>Keep your progress</strong><p>Save session keeps extracted rows and review notes in this browser.</p><small>Original PDFs are not saved. Keep them available and export your report.</small></aside>`}
+    </div></section>`;
+}
+function workflowBody(data) {
+  const guide = state.view === 'statements' ? guidePanel() : '';
+  if (!state.statements.length && state.view === 'statements')
+    return guide + state.errors.map(error => `<div class="file-error">${esc(error)}</div>`).join('');
+  return `${guide}${metrics(data)}<div class="workspace-grid"><section class="panel">${state.view === 'statements' ? statementPanel(data) : exceptionPanel(data)}</section><aside class="right-rail">${rail(data)}</aside></div>`;
+}
+function goToGuideStep(step) {
+  if (step === 'upload') document.querySelector('#pdf-input').click();
+  if (step === 'source') { state.view = 'connection'; render(); }
+  if (step === 'extraction' && state.statements.length) {
+    openDoc(workflowGuide(state).documentId);
+  }
+  if (step === 'review' && state.statements.length) {
+    const next = results().find(isAttention);
+    if (next) openDoc(next.statementId, next.id);
+    else { state.view = 'exceptions'; state.filter = 'all'; state.query = ''; render(); }
+  }
 }
 function metrics(data) {
   return `<div class="metrics">${[
@@ -104,7 +136,30 @@ function vendorsPanel() {
   return `<section class="panel"><div class="panel-title"><h2>Vendor name mappings</h2><small>${vendors.length} vendors</small></div><div class="wide-panel"><p>Statement names and BILL vendor names can differ. Enter the exact name from your imported records. Mappings are saved in this browser.</p></div><div class="table-wrap"><table class="vendor-table"><thead><tr><th>Statement vendor</th><th>BILL vendor name</th><th>Statements</th><th></th></tr></thead><tbody>${vendors.map((vendor,i) => `<tr><td><strong>${esc(vendor)}</strong></td><td><input id="mapping-${i}" value="${esc(state.mappings[vendor] || vendor)}" aria-label="BILL vendor name for ${esc(vendor)}"></td><td>${state.statements.filter(d => d.vendor === vendor).length}</td><td><button class="button small" data-action="mapping" data-vendor="${esc(vendor)}" data-input="mapping-${i}">Save mapping</button></td></tr>`).join('')}</tbody></table></div>${vendors.length ? '' : '<div class="empty">Upload a statement to add its vendor.</div>'}</section>`;
 }
 function connectionPanel() {
-  return `<div class="connection-layout"><section class="panel wide-panel"><div class="eyebrow">Your accounting source</div><h2 style="margin-top:10px">BILL, when you’re ready</h2><p>The prototype is ready to demonstrate statement extraction and exception review. Your live BILL account will be connected after your administrator approves production API access.</p><div class="connection-illustration"><span class="connection-node">Statement Desk</span>${icon('plug')}<span class="connection-node" style="color:#ed683e">BILL</span></div><div class="notice amber">${icon('info')}<div><strong>Live API connection is not implemented in this prototype.</strong> No credentials are collected. Production access needs a server-side connector and administrator setup.</div></div><h3 style="font-size:13px">Current data source</h3><p><strong>${esc(state.provider.label || 'None connected')}</strong><br>${state.provider.loaded ? `${state.provider.records.length} records · ${state.provider.simulated ? 'simulated' : 'imported CSV'}` : 'Upload PDFs to review extraction. Matching will remain unverified.'}</p><div class="action-row"><button class="button" data-action="disconnect">Use extraction only</button><button class="button primary" data-action="simulate" ${state.statements.length ? '' : 'disabled'}>Try simulated matching</button></div></section><section class="panel wide-panel"><h2>Test with your own records</h2><p>If your team can already export BILL data, a CSV lets you test actual invoice matching before API access is approved. This is optional.</p><ol class="steps"><li><span class="step-number">1</span><div><strong>Download the record template</strong>Keep invoice numbers as text, including leading zeros.</div></li><li><span class="step-number">2</span><div><strong>Prepare your BILL records</strong>Include paid and unpaid invoices, credits, and payment amounts. Confirm the export covers your statement dates.</div></li><li><span class="step-number">3</span><div><strong>Import and compare</strong>The import replaces the current sample record source.</div></li></ol><div class="action-row"><button class="button small" data-action="template">${icon('down')}CSV template</button><button class="button primary small" data-action="import">Import records</button></div><label class="field">Record snapshot date (optional)<input type="date" id="provider-date" value="${esc(state.provider.asOf || '')}"></label><p style="font-size:10px">Scheduled payments are displayed separately from cleared payments. Current data alone cannot prove balances at an earlier statement date.</p></section></div>`;
+  return `<div class="connection-layout">
+    <section class="panel wide-panel">
+      <div class="eyebrow">Step 3 · Compare with BILL</div>
+      <h2 style="margin-top:10px">Import your BILL invoice records</h2>
+      <p>You do not need API access for this step. Use a CSV export of your BILL records to compare invoice numbers, amounts, and outstanding balances.</p>
+      <ol class="steps">
+        <li><span class="step-number">1</span><div><strong>Download the CSV template</strong>It shows the columns this app needs. Keep invoice numbers as text so leading zeros are preserved.</div></li>
+        <li><span class="step-number">2</span><div><strong>Prepare your records</strong>Include the vendors and dates covered by your statements. Add cleared payments and credits when available; scheduled payments are not settled payments.</div></li>
+        <li><span class="step-number">3</span><div><strong>Import, then return to the guide</strong>Your confirmed statement rows will be compared automatically.</div></li>
+      </ol>
+      <div class="action-row"><button class="button" data-action="template">${icon('down')}Download CSV template</button><button class="button primary" data-action="import">${icon('upload')}Import BILL CSV</button></div>
+      <label class="field">Record snapshot date (optional)<input type="date" id="provider-date" value="${esc(state.provider.asOf || '')}"></label>
+      <p style="font-size:11px">Import replaces the current record source and clears previous invoice review decisions. Your PDFs and statement corrections stay intact. Check the export's date range and coverage.</p>
+      <button class="button" data-action="view" data-view="statements">Return to step guide ${icon('arrow')}</button>
+    </section>
+    <section class="panel wide-panel">
+      <h2>Current comparison source</h2>
+      <p><strong>${esc(state.provider.label || 'No records imported')}</strong><br>${state.provider.loaded ? `${state.provider.records.length} records · ${state.provider.simulated ? 'fictional sample' : 'imported CSV'}` : 'PDF extraction can be reviewed now. Invoice matching remains unverified until records are imported.'}</p>
+      <div class="notice amber">${icon('info')}<div><strong>Live BILL API is not connected.</strong> This prototype uses imported records or fictional examples. No API credentials are collected, and this does not verify QuickBooks sync.</div></div>
+      <h3 style="font-size:13px">Optional ways to explore</h3>
+      <p>You can check PDF extraction without a comparison source, or practice the review workflow with simulated records. Simulated results do not check your real BILL account.</p>
+      <div class="action-row"><button class="button small" data-action="disconnect">Use extraction only</button><button class="button small" data-action="simulate" ${state.statements.length ? '' : 'disabled'}>Try simulated matching</button></div>
+    </section>
+  </div>`;
 }
 function toast(message, error = false) {
   const node = document.querySelector('#toast'); node.textContent = message; node.className = error ? 'toast-error' : ''; node.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.style.display = 'none'; }, 6500);
@@ -186,7 +241,7 @@ async function uploadPDFs(fileList) {
       const existing = state.statements.find(d => d.filename === file.name && d.fileSize === file.size && d.fileModified === file.lastModified);
       if (existing) { files.set(existing.id, file); toast(`Original PDF attached again: ${file.name}`); continue; }
       try {
-        const doc = await extractor.extractPDF(file, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const node = document.querySelector('.progress'); if (node) node.innerHTML = `<span class="spinner"></span>${esc(state.progress)}<div class="progress-bar"><span style="width:${Math.round(state.fraction*100)}%"></span></div>`; });
+        const doc = await extractor.extractPDF(file, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const status = document.querySelector('.guide-progress'); if (status) status.textContent = `Reading your PDFs… ${state.progress}`; const node = document.querySelector('.progress'); if (node) node.innerHTML = `<span class="spinner"></span>${esc(state.progress)}<div class="progress-bar"><span style="width:${Math.round(state.fraction*100)}%"></span></div>`; });
         doc.fileSize = file.size; doc.fileModified = file.lastModified; state.statements.push(doc); files.set(doc.id, file);
       } catch (error) { state.errors.push(`${file.name}: ${error.message}`); }
       render();
@@ -226,6 +281,12 @@ document.addEventListener('click', async e => {
     if (action === 'view') { state.view = target.dataset.view; state.filter = state.view === 'exceptions' ? 'attention' : 'all'; state.query = ''; render(); }
     if (action === 'filter') { state.filter = target.dataset.filter; render(); }
     if (action === 'upload') document.querySelector('#pdf-input').click();
+    if (action === 'guide-step') goToGuideStep(target.dataset.step);
+    if (action === 'guide-next') {
+      const next = workflowGuide(state);
+      if (next.action === 'export') document.querySelector('[data-action="export"]').click();
+      else goToGuideStep(next.action);
+    }
     if (action === 'import') document.querySelector('#csv-input').click();
     if (action === 'open-doc') openDoc(target.dataset.id);
     if (action === 'open-result') openDoc(target.dataset.doc, target.dataset.id);

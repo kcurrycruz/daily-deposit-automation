@@ -175,11 +175,12 @@ function reportedMoney(value, currency) {
   return currency === 'USD' ? money(value) : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value / 100);
 }
 function candidateSummary(bill) {
-  return bill.comparisonScope === 'invoice-only'
-    ? `${bill.id}: ${reportedMoney(bill.amount, bill.currency)} (${bill.currency || 'currency not supplied'})`
-    : `${bill.id}: ${money(bill.amount)}`;
+  return `${bill.vendor} · ${bill.invoiceNumber}: ${bill.comparisonScope === 'invoice-only' ? `${reportedMoney(bill.amount, bill.currency)} (${bill.currency || 'currency not supplied'})` : money(bill.amount)}`;
 }
 function billEvidence(bill) {
+  return [['Vendor',bill.vendor], ...billDetails(bill)];
+}
+function billDetails(bill) {
   if (bill.comparisonScope !== 'invoice-only') return [['Reference', bill.invoiceNumber], ['Original amount', money(bill.amount)], ['Applied credits', money(bill.creditAmount || 0)], ['Cleared payments', money(bill.clearedPaymentAmount || 0)], ['Scheduled payments', money(bill.scheduledAmount || 0)]];
   return [['Reference', bill.invoiceNumber], ['Export source rows', bill.sourceRows], ['Original numeric amount', reportedMoney(bill.amount, bill.currency)], ['Currency', bill.currency || 'Not supplied'], ['BILL status (reported)', bill.status], ['Paid amount (reported)', reportedMoney(bill.reportedPaidAmount, bill.currency)], ['Amount due (reported)', reportedMoney(bill.reportedAmountDue, bill.currency)], ['Credits (reported)', reportedMoney(bill.reportedCreditAmount, bill.currency)], ['Full payment date (reported)', bill.reportedFullPaymentDate || 'Not supplied'], ['Comparison scope', 'Invoice presence only; settlement and balance not verified']];
 }

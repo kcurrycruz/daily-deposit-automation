@@ -240,22 +240,36 @@ export const statuses = {
   unverified: { label: 'BILL unavailable', tone: 'gray' }, credit: { label: 'Credit review', tone: 'blue' },
   history: { label: 'History needed', tone: 'amber' }, presence: { label: 'Invoice found', tone: 'blue' },
   source: { label: 'Check BILL export', tone: 'amber' },
+  possible: { label: 'Possible match', tone: 'amber' }, vendor: { label: 'Check vendor', tone: 'amber' },
 };
 export function reconcile(statement, provider, mappings = {}) {
   const vendor = vendorKey(mappings[statement.vendor] || statement.vendor);
   const records = provider.records ?? [];
   return groupInvoices(statement).map(row => {
-    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
+    let matchMethod = null;
+    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
     if (row.kind === 'opening') return result('history', 'Carried-forward balance: older invoice detail is needed. It is not a new invoice.');
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
     if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
     if (!provider.loaded) return result('unverified', 'No BILL records are connected or imported. This does not mean the invoice is missing.');
-    const candidates = records.filter(r => vendorKey(r.vendor) === vendor && invoiceKey(r.invoiceNumber) === invoiceKey(row.invoiceNumber) && (r.kind ?? 'invoice') === row.kind);
-    if (candidates.length > 1) return result('ambiguous', 'Multiple BILL records have this vendor and reference. Review candidates.', candidates);
+    const kindRecords = records.filter(r => (r.kind ?? 'invoice') === row.kind);
+    const references = kindRecords.filter(r => invoiceKey(row.invoiceNumber) && invoiceKey(r.invoiceNumber) === invoiceKey(row.invoiceNumber));
+    let candidates = references.filter(r => vendorKey(r.vendor) === vendor);
+    if (candidates.length) matchMethod = 'reference';
+    else if (references.length) {
+      matchMethod = 'reference';
+      return result('vendor', 'Invoice reference found under another or unresolved vendor. Verify the BILL vendor and save a vendor mapping before accepting it.', references);
+    } else {
+      if (records.length && (!vendor || !records.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'The statement vendor is not mapped to a vendor in this export. Save a vendor mapping before searching amounts.');
+      candidates = kindRecords.filter(r => vendorKey(r.vendor) === vendor && Number.isSafeInteger(row.originalAmount) && Number.isSafeInteger(r.amount) && r.amount === row.originalAmount);
+      if (candidates.length) matchMethod = 'amount';
+    }
+    if (candidates.length > 1) return result('ambiguous', matchMethod === 'amount' ? 'Multiple invoices for this vendor have the same original amount. Review all candidates; no invoice has been selected.' : 'Multiple BILL records have this vendor and reference. Review candidates.', candidates);
     if (!candidates.length) return result('missing', provider.simulated ? 'No match in the simulated BILL dataset.' : 'No match in the imported BILL records. Verify export coverage before treating this as missing.');
     const bill = candidates[0];
     if (bill.sourceIssues) return result('source', `BILL export row(s) ${bill.sourceRows}: ${bill.sourceIssues}`, candidates);
     if (bill.currency && bill.currency !== 'USD') return result('amount', 'Currency differs from this USD statement. Review currency before comparing amounts.', candidates);
+    if (matchMethod === 'amount') return result('possible', 'Invoice number was not found. The original numeric amount agrees with another reference for the same vendor. Verify both references against the originals; this is a suggestion, not a verified invoice or balance.', candidates);
     if (row.kind === 'credit') return result('credit', 'Credit reference found. Verify the credited amount and where it was applied.', candidates);
     if (row.originalAmount !== bill.amount) return result('amount', bill.comparisonScope === 'invoice-only' && !bill.currency
       ? `Statement original amount ${money(row.originalAmount)}; BILL export original numeric amount ${(bill.amount / 100).toFixed(2)} (currency not supplied).`

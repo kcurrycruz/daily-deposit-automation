@@ -12,7 +12,9 @@ const statement = () => ({ id: 's', vendor: 'A&B Supply', layout: 'demo', statem
 const record = vendor => ({ vendor, invoiceNumber: 'INV123', amount: 10000 });
 
 test('distinct punctuated vendors cannot match automatically', () => {
-  assert.equal(reconcile(statement(), { loaded: true, records: [record('AB Supply')] })[0].status, 'missing');
+  const result = reconcile(statement(), { loaded: true, records: [record('AB Supply')] })[0];
+  assert.equal(result.status, 'vendor');
+  assert.equal(result.candidates[0].vendor, 'AB Supply');
 });
 
 test('vendor identity supports case and repeated whitespace plus explicit aliases', () => {

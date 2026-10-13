@@ -1,0 +1,55 @@
+# AP shared workspace setup
+
+The AP upgrade needs an owner-controlled Supabase project before it can be released. Set up a separate synthetic test project first, run the release checklist, then authorize production setup. Daily Deposits and Credit Cards do not require these credentials.
+
+## Create the private workspace
+
+1. In your Supabase account, create a test project. Keep its database password and secret API key out of chat and Git. Share only the project URL when asking for help.
+2. In the SQL Editor, review and apply `supabase/migrations/202610130001_ap_shared_workspace.sql` once to the new project. It creates AP tables, private permissions and transaction functions. Do not apply it over existing tables or remove tables to make it run.
+3. Create one workspace using the SQL below. Copy the returned UUID into Streamlit Secrets.
+
+```sql
+insert into public.ap_workspaces(id) values(gen_random_uuid()) returning id;
+```
+
+4. In Storage, create `hwfc-ap-private` with **Public disabled** and a 20 MiB file limit. Allow `application/pdf`, `text/csv`, and `application/octet-stream` (for bounded staging chunks). Do not create anonymous or authenticated Storage policies for this bucket. Check existing broad policies if the project is shared with other apps. [Supabase private bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals).
+5. Verify direct browser-facing requests cannot read AP tables, call AP functions, download private objects or mint signed links. A publishable key must not provide access. The runtime also refuses financial operations if the bucket is public.
+
+## Enter Streamlit Secrets
+
+Open the deployed app's settings and enter the values directly in Secrets. Replace each placeholder; never paste actual credentials into a source file, chat or screenshot. [Streamlit secrets guide](https://docs.streamlit.io/deploy/concepts/secrets).
+
+```toml
+[ap]
+password = "REPLACE_WITH_A_NEW_TEAM_PASSWORD"
+supabase_url = "https://YOUR_PROJECT.supabase.co"
+supabase_secret_key = "REPLACE_WITH_SERVER_SECRET_KEY"
+workspace_id = "REPLACE_WITH_WORKSPACE_UUID"
+bucket = "hwfc-ap-private"
+```
+
+Use the server secret key, not a publishable key. Choose a new team password before production use because the earlier value was posted in chat. A password or backend credential change invalidates existing sessions on their next operation. Access expires after eight hours; Lock AP ends access immediately. Previously downloaded files and already-issued five-minute links cannot be recalled.
+
+## First use
+
+Unlock AP, import the original Bills CSV once, then upload statement PDFs. Up to twenty PDFs may be selected together; each PDF or CSV must be at most 20 MiB. An import supports up to 100,000 normalized records. All pages load before matching. Each new export is a complete snapshot, not an incremental merge.
+
+Check the extraction, confirm invoice rows, review unresolved comparisons, then mark reviewed with your initials. Notes are optional. Amount-only suggestions and native BILL exports retain their limitations after completion; review does not verify QuickBooks sync. Previous Statements opens frozen review evidence. Reopen starts further work without rewriting earlier completed evidence.
+
+Use Import old browser work only when you want to migrate existing notes and corrections. It creates unconfirmed drafts, excludes demo data, and leaves browser data intact. Attach each original PDF and confirm it again. Select the original Bills CSV once to store the shared source; browser metadata alone cannot recreate its original bytes. Do not migrate company data until production access and backups have been approved.
+
+## Administrative cleanup
+
+Ordinary reset reloads the local view; archive hides a working statement without deleting its revisions or original. No ordinary user action permanently deletes shared history.
+
+For staging cleanup, first pause uploads and take a backup. List expired `ap_uploads` rows older than an agreed retention period (at least twenty-four hours). Inspect the exact workspace/upload UUIDs and their object manifests. Delete only staging objects under those exact expired upload prefixes, after confirming no live upload uses them. Ready originals under `pdf/` and `csv/` are not staging objects. Never remove a referenced original or completion event automatically. Unreferenced original-file cleanup needs a separate administrator review comparing both statement/import references and upload metadata. Avoid wildcard bucket deletion.
+
+## Back up and restore
+
+Keep an encrypted database backup and a separate encrypted object-file backup with a manifest of object keys, byte counts and SHA-256 hashes. Restrict access to both and keep a copy outside the live project. Database backups do **not** include Storage file bytes. [Supabase backup scope](https://supabase.com/docs/guides/platform/backups).
+
+Before relying on this archive, restore both backups into a separate authorized test project. Preserve UUIDs, revisions, import ordinals and file hashes. Recreate the private bucket, restore object bytes at the manifest keys, restore database contents, and verify anonymous denial, invoice counts, historical revisions and reopened original PDFs. Compare every restored file hash with its manifest. Record the restore date and results. Do not restore over production or disable immutable-history protections as a shortcut.
+
+## Release gate
+
+Follow `docs/ap-shared-workspace-validation.md`. Merge/push, test-project writes, production configuration and financial-data migration are separate approvals. Local unit tests alone do not prove cloud persistence or backup recovery.

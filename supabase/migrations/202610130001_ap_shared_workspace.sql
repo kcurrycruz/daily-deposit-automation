@@ -134,6 +134,30 @@ begin
       update ap_uploads set state='ready',object_key=p_data->>'object_key' where id=sid;
       reply=jsonb_build_object('upload_id',sid,'state','ready');
     end if;
+  elsif p_operation='migrate_legacy' then
+    sid=(p_data->>'statement_id')::uuid;
+    select * into item from ap_statements where id=sid and workspace_id=p_workspace;
+    if not found then
+      rid=gen_random_uuid();doc_value=p_data->'doc';
+      if doc_value->>'id'<>sid::text or doc_value->>'confirmed'<>'false' then raise exception 'validation';end if;
+      insert into ap_statements(id,workspace_id,filename) values(sid,p_workspace,doc_value->>'filename');
+      insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,resolutions,rule_version)
+        values(rid,p_workspace,sid,1,doc_value,coalesce(p_data->'resolutions','{}'),'ap-match-v2');
+      update ap_statements set version=1,current_revision_id=rid where id=sid;
+    end if;
+    reply=jsonb_build_object('statement_id',sid,'version',coalesce(item.version,1),'original_object_id',null);
+  elsif p_operation='attach_original' then
+    sid=(p_data->>'statement_id')::uuid;
+    select * into item from ap_statements where id=sid and workspace_id=p_workspace for update;
+    if not found or item.version is distinct from (p_data->>'expected_version')::integer or item.completed or item.original_object_key is not null then raise exception 'conflict';end if;
+    if coalesce(p_data->>'file_hash','') !~ '^[0-9a-f]{64}$' or p_data->>'original_object_key'<>p_workspace::text||'/pdf/'||(p_data->>'file_hash')||'.pdf' then raise exception 'validation';end if;
+    if exists(select 1 from ap_statements where workspace_id=p_workspace and file_hash=p_data->>'file_hash') then raise exception 'conflict';end if;
+    select * into previous from ap_statement_revisions where id=item.current_revision_id and workspace_id=p_workspace;
+    rid=gen_random_uuid();next_version=item.version+1;
+    insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,resolutions,import_id,mapping_snapshot,results,rule_version)
+      values(rid,p_workspace,sid,next_version,previous.doc,previous.resolutions,previous.import_id,previous.mapping_snapshot,previous.results,previous.rule_version);
+    update ap_statements set file_hash=p_data->>'file_hash',original_object_key=p_data->>'original_object_key',version=next_version,current_revision_id=rid,updated_at=now() where id=sid;
+    reply=jsonb_build_object('statement_id',sid,'version',next_version,'duplicate',false);
   elsif p_operation='register_statement' then
     if p_data->>'file_hash' !~ '^[0-9a-f]{64}$' or nullif(p_data->>'original_object_key','') is null then raise exception 'validation'; end if;
     select * into item from ap_statements where workspace_id=p_workspace and file_hash=p_data->>'file_hash';
@@ -169,6 +193,7 @@ begin
                coalesce(p_data->'mapping_snapshot','{}'),coalesce(p_data->'results','[]'),p_data->>'rule_version');
     elsif p_operation='complete_revision' then
       if item.completed then raise exception 'completed_revision'; end if;
+      if item.original_object_key is null then raise exception 'original_required'; end if;
       if p_data->>'initials' !~ '^[A-Z]{1,10}$' or p_data->>'initials' is null then raise exception 'initials_required'; end if;
       if coalesce(previous.doc->>'confirmed','false')<>'true' or jsonb_array_length(previous.doc->'rows')=0 or jsonb_array_length(previous.results)=0 then raise exception 'extraction_unconfirmed'; end if;
       if exists(select 1 from jsonb_array_elements(previous.results) r where r->>'status'<>'matched' and
@@ -244,6 +269,8 @@ create function public.ap_register_statement(p_workspace uuid,p_request_id uuid,
 create function public.ap_begin_upload(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('begin_upload',$1,$2,$3,$4)$$;
 create function public.ap_put_chunk(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('put_chunk',$1,$2,$3,$4)$$;
 create function public.ap_finish_upload(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('finish_upload',$1,$2,$3,$4)$$;
+create function public.ap_migrate_legacy(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('migrate_legacy',$1,$2,$3,$4)$$;
+create function public.ap_attach_original(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('attach_original',$1,$2,$3,$4)$$;
 create function public.ap_save_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('save_revision',$1,$2,$3,$4)$$;
 create function public.ap_complete_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('complete_revision',$1,$2,$3,$4)$$;
 create function public.ap_reopen_statement(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $$select public.ap_mutate('reopen_statement',$1,$2,$3,$4)$$;

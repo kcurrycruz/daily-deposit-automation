@@ -113,7 +113,8 @@ class ApService:
             self.repository.write_bytes(workspace,self._part_key(data['upload_id'],index,digest),raw,'application/octet-stream')
             return self._tx('put_chunk',{'upload_id':data['upload_id'],'session_nonce':authorization.session_nonce,'index':index,'chunk_hash':digest,'size':len(raw)},request_id,authorization)
         if action=='upload_finish':
-            data=allowed(payload,'upload_id','upload_id'); upload=self._upload(data['upload_id'],authorization)
+            data=allowed(payload,'upload_id statement_id expected_version','upload_id'); upload=self._upload(data['upload_id'],authorization)
+            if 'statement_id' in data:require_uuid(data['statement_id']);integer(data.get('expected_version'),minimum=1)
             meta=upload['metadata']; key=f'{workspace}/{meta["kind"]}/{meta["file_hash"]}.{meta["kind"]}'
             if upload['state']!='ready':
                 parts=[]
@@ -139,6 +140,9 @@ class ApService:
             self._tx('finish_upload',{'upload_id':data['upload_id'],'session_nonce':authorization.session_nonce,'object_key':key},request_id,authorization,step='finish-upload')
             reply={'upload_id':data['upload_id'],'kind':meta['kind'],'file_hash':meta['file_hash']}
             if meta['kind']=='pdf':
+                if 'statement_id' in data:
+                    reply.update(self._tx('attach_original',{'statement_id':data['statement_id'],'expected_version':data['expected_version'],'file_hash':meta['file_hash'],'original_object_key':key},request_id,authorization,step='attach-original'))
+                    return reply
                 statement_id=str(uuid5(UUID(data['upload_id']),'statement'))
                 doc={'id':statement_id,'vendor':'Unidentified vendor','filename':meta['filename'],'layout':'generic',
                      'statementDate':'','declaredTotal':None,'confirmed':False,'pageCount':1,'rows':[],
@@ -188,4 +192,32 @@ class ApService:
             if action=='complete_revision':
                 data['initials']=normalize_initials(data.get('initials','')); data['notes']=text(data.get('notes',''),maximum=16384)
             return self._tx(action,data,request_id,authorization)
+        if action=='migrate_legacy':
+            data=allowed(payload,'confirmed statements','confirmed statements')
+            if data['confirmed'] is not True or type(data['statements']) is not list or not 1<=len(data['statements'])<=20:
+                raise ApValidationError('Explicitly confirm a migration of up to twenty statements.')
+            prepared=[];seen=set()
+            for item in data['statements']:
+                item=allowed(item,'doc resolutions','doc resolutions');original=dict(item['doc'])
+                old_id=text(original.get('id'),maximum=256,blank=False)
+                if old_id in seen:raise ApValidationError('Duplicate legacy statement identifiers.')
+                seen.add(old_id)
+                digest=hashlib.sha256(json.dumps(original,sort_keys=True,allow_nan=False).encode()).hexdigest()
+                sid=str(uuid5(UUID(workspace),'legacy:'+old_id+':'+digest));original['id']=sid;original['confirmed']=False
+                old_rows={};seen_rows=set()
+                for row in original['rows']:
+                    old_row=text(row.get('id'),maximum=256,blank=False)
+                    if old_row in seen_rows:raise ApValidationError('Duplicate legacy row identifiers.')
+                    seen_rows.add(old_row);old_rows[old_row]=str(uuid5(UUID(sid),old_row))
+                original['rows']=[{**row,'id':old_rows[row['id']]} for row in original['rows']]
+                original['warnings']=[*original['warnings'],'Migrated draft. Original PDF not attached; extraction and comparisons must be confirmed again.']
+                doc=validate_statement(original)
+                if type(item['resolutions']) is not dict:raise ApValidationError('Invalid legacy notes.')
+                notes={}
+                for row_id,resolution in item['resolutions'].items():
+                    value=validate_resolution(resolution)
+                    if row_id in old_rows:notes[old_rows[row_id]]={'note':value['note']}
+                prepared.append({'statement_id':sid,'doc':doc,'resolutions':notes})
+            replies=[self._tx('migrate_legacy',item,request_id,authorization,step='legacy-'+str(index)) for index,item in enumerate(prepared)]
+            return {'migrated_count':len(replies),'statements':replies}
         raise ApValidationError('This shared operation is not available.')

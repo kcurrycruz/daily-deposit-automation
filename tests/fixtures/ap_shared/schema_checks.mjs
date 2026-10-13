@@ -68,6 +68,12 @@ try {
   const reopened=await call('ap_reopen_statement',{statement_id:statement,expected_version:3});
   assert.equal(reopened.version,4); assert.equal((await query('select count(*)::int as n from ap_completion_events')).rows[0].n,2); count++;
   const nonce='00000000-0000-4000-8000-000000000004';
+  const legacy=crypto.randomUUID();
+  await call('ap_migrate_legacy',{statement_id:legacy,doc:{...doc,id:legacy,confirmed:false},resolutions:{r:{note:'Preserved without a completion'}}});
+  assert.equal((await query('select count(*)::int as n from ap_completion_events')).rows[0].n,2);count++;
+  await assert.rejects(call('ap_complete_revision',{statement_id:legacy,expected_version:1,initials:'KC'}),/original_required/);count++;
+  await call('ap_attach_original',{statement_id:legacy,expected_version:1,file_hash:'6'.repeat(64),original_object_key:workspace+'/pdf/'+'6'.repeat(64)+'.pdf'});
+  assert.equal((await query('select original_object_key from ap_statements where id=$1',[legacy])).rows[0].original_object_key,workspace+'/pdf/'+'6'.repeat(64)+'.pdf');count++;
   for(let i=0;i<5;i++) {
     const ticket=(await query('select ap_begin_access_attempt($1::uuid,$2::uuid) as ticket',[workspace,nonce])).rows[0].ticket;
     assert.ok(ticket); await query('select ap_finish_access_attempt($1::uuid,$2::uuid,$3::boolean)',[workspace,ticket,false]);

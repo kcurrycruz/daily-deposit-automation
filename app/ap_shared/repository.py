@@ -4,6 +4,7 @@ from functools import wraps
 import base64
 import hashlib
 import json
+import logging
 import re
 from urllib.parse import urlparse
 from .models import (ApConfig, JsonObject, SharedSnapshot, require_uuid, integer,
@@ -27,7 +28,7 @@ def safe_backend(method):
             message=getattr(error,'message','')
             code=getattr(error,'code','')
             mapped='conflict' if message in ('conflict','request_conflict','completed_revision','import_immutable') else (
-                'denied' if code=='42501' else 'validation' if message in ('validation','review_required','initials_required','extraction_unconfirmed') else 'unavailable')
+                'denied' if code=='42501' or message=='upload_denied' else 'validation' if message in ('validation','review_required','initials_required','extraction_unconfirmed','original_required') else 'unavailable')
             raise ApStoreError(mapped) from None
     return guarded
 
@@ -41,8 +42,15 @@ def create_repository(config: ApConfig):
     except Exception:
         raise ApStoreError() from None
 
+class _PrivateNetworkLogs(logging.Filter):
+    def filter(self,record):return False
+
 class ApRepository:
     def __init__(self,client,config: ApConfig):
+        # SDK request diagnostics can contain financial filters or signed paths.
+        for name in ('httpx','httpcore','supabase','postgrest','storage3'):
+            logger=logging.getLogger(name)
+            if not any(isinstance(f,_PrivateNetworkLogs) for f in logger.filters):logger.addFilter(_PrivateNetworkLogs())
         self.client=client
         self.config=config
 
@@ -168,7 +176,7 @@ class ApRepository:
     @safe_backend
     def transact(self,operation,workspace_id,request_id,payload_hash,data):
         self._workspace(workspace_id); self._private_bucket(); require_uuid(request_id)
-        operations={'register_statement','save_revision','complete_revision','reopen_statement','archive_statement','begin_import','append_records','activate_import','save_mapping','begin_upload','put_chunk','finish_upload'}
+        operations={'register_statement','save_revision','complete_revision','reopen_statement','archive_statement','begin_import','append_records','activate_import','save_mapping','begin_upload','put_chunk','finish_upload','migrate_legacy','attach_original'}
         if operation not in operations: raise ApStoreError('validation')
         response=self.client.rpc('ap_'+operation,{'p_workspace':workspace_id,'p_request_id':request_id,
                     'p_payload_hash':payload_hash,'p_data':data}).execute().data

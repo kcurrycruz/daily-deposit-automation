@@ -67,6 +67,14 @@ def make_repository(transport):
     return ApRepository(client,CONFIG)
 
 class RepositoryTests(unittest.TestCase):
+    def test_sdk_diagnostics_do_not_log_financial_query_values(self):
+        import logging
+        logger=logging.getLogger('httpx');previous=logger.level;logger.setLevel(logging.INFO)
+        try:
+            repo=make_repository(BackendTransport())
+            with self.assertNoLogs('httpx',level='INFO'):
+                repo.history_page(CONFIG.workspace_id,{'vendor':'Synthetic Sensitive Vendor'})
+        finally:logger.setLevel(previous)
     def test_pagination_restores_all_records_with_stable_ids(self):
         for count in (1001,5610):
             with self.subTest(count=count):

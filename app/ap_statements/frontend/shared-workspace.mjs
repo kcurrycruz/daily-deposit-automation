@@ -5,6 +5,11 @@ const clone=value=>JSON.parse(JSON.stringify(value));
 const unloaded=()=>({loaded:false,simulated:false,records:[],label:'Loading shared BILL records…'});
 const fields=(value,names)=>Object.fromEntries(names.split(' ').filter(k=>value[k]!==undefined).map(k=>[k,value[k]]));
 export function comparisonSnapshot(doc,provider,mappings){return reconcile(doc,provider,mappings).map(row=>fields(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod statementId vendor simulated'));}
+export function legacyMigrationPreview(session,mappings={}){
+  const real=(session?.statements||[]).filter(doc=>!doc.demo);
+  return {statements:real.map(doc=>({doc:{...clone(doc),confirmed:false},resolutions:reviewNotesOnly(Object.fromEntries(Object.entries(session.resolutions||{}).filter(([id])=>doc.rows.some(row=>row.id===id))))})),
+    originalsAvailable:0,importMetadata:session?.provider?.loaded&&!session.provider.simulated?fields(session.provider,'label asOf refreshedAt sourceFormat'):null,mappings:clone(mappings)};
+}
 export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
   const state={ready:false,provider:unloaded(),importId:null,statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map();let disposed=false,loaded=false;
@@ -61,13 +66,13 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       state.ready=true;loaded=true;emit();return state;
     }catch(error){if(!loaded){state.ready=false;state.provider=unloaded();emit();}throw error;}
   }
-  async function upload(file,kind,request){
+  async function upload(file,kind,request,attachment={}){
     if(!file||!Number.isInteger(file.size)||file.size<1||file.size>LIMITS.file)throw Error('Each PDF or CSV must be at most 20 MiB.');
     const bytes=new Uint8Array(await file.arrayBuffer());check();
     const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
     const begun=await request('upload_begin',{kind,filename:file.name,size:bytes.length,file_hash:hash});
     for(let at=0;at<bytes.length;at+=LIMITS.chunk){let binary='';for(const byte of bytes.subarray(at,at+LIMITS.chunk))binary+=String.fromCharCode(byte);await request('upload_chunk',{upload_id:begun.upload_id,index:at/LIMITS.chunk,data:btoa(binary)});}
-    return request('upload_finish',{upload_id:begun.upload_id});
+    return request('upload_finish',{upload_id:begun.upload_id,...attachment});
   }
   function saveData(doc,expectedVersion,resolutions){
     const rows=groupInvoices(doc),ids=new Set(rows.map(r=>r.id));
@@ -110,6 +115,8 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
   return {state,load,loadProvider,importBills,uploadStatement,saveStatement,saveMapping,originalPdf,
+    attachOriginal(file,id,expectedVersion){return write(async request=>{await upload(file,'pdf',request,{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
+    migrateLegacy(preview,confirmed=false){if(!confirmed)return Promise.resolve({cancelled:true});const items=clone(preview.statements);if(!items.length)return Promise.reject(Error('No real legacy statements to migrate.'));return write(async request=>{const results=[];for(const item of items)results.push(await request('migrate_legacy',{confirmed:true,statements:[item]}));await load({replace:true});return results;});},
     completeStatement(payload){const frozen=clone(payload);return write(async request=>{const reply=await request('complete_revision',frozen);const detail=state.details.get(frozen.statement_id);if(detail)Object.assign(detail,{completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
     history(filters={},cursor=null){return client.request('history_page',{filters,cursor,limit:50});},
     reopenStatement(id,expectedVersion){return write(async request=>{await request('reopen_statement',{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},

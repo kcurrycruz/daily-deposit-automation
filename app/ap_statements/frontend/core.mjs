@@ -177,6 +177,7 @@ export const statuses = {
   ambiguous: { label: 'Multiple matches', tone: 'amber' }, extraction: { label: 'Check extraction', tone: 'amber' },
   unverified: { label: 'BILL unavailable', tone: 'gray' }, credit: { label: 'Credit review', tone: 'blue' },
   history: { label: 'History needed', tone: 'amber' }, presence: { label: 'Invoice found', tone: 'blue' },
+  source: { label: 'Check BILL export', tone: 'amber' },
 };
 export function reconcile(statement, provider, mappings = {}) {
   const vendor = vendorKey(mappings[statement.vendor] || statement.vendor);
@@ -191,9 +192,16 @@ export function reconcile(statement, provider, mappings = {}) {
     if (candidates.length > 1) return result('ambiguous', 'Multiple BILL records have this vendor and reference. Review candidates.', candidates);
     if (!candidates.length) return result('missing', provider.simulated ? 'No match in the simulated BILL dataset.' : 'No match in the imported BILL records. Verify export coverage before treating this as missing.');
     const bill = candidates[0];
+    if (bill.sourceIssues) return result('source', `BILL export row(s) ${bill.sourceRows}: ${bill.sourceIssues}`, candidates);
     if (bill.currency && bill.currency !== 'USD') return result('amount', 'Currency differs from this USD statement. Review currency before comparing amounts.', candidates);
     if (row.kind === 'credit') return result('credit', 'Credit reference found. Verify the credited amount and where it was applied.', candidates);
-    if (row.originalAmount !== bill.amount) return result('amount', `Statement original amount ${money(row.originalAmount)}; BILL original amount ${money(bill.amount)}.`, candidates);
+    if (row.originalAmount !== bill.amount) return result('amount', bill.comparisonScope === 'invoice-only' && !bill.currency
+      ? `Statement original amount ${money(row.originalAmount)}; BILL export original numeric amount ${(bill.amount / 100).toFixed(2)} (currency not supplied).`
+      : `Statement original amount ${money(row.originalAmount)}; BILL original amount ${money(bill.amount)}.`, candidates);
+    if (bill.comparisonScope === 'invoice-only') {
+      if (bill.status === 'Scheduled') return result('scheduled', 'BILL export reports a scheduled payment. Settlement and outstanding balance are not verified.', candidates);
+      return result('presence', `Invoice number and original numeric amount agree. BILL export status: ${bill.status}. Outstanding balance, payment settlement${bill.currency ? '' : ', and currency'} are not verified by this comparison.`, candidates);
+    }
     const outstanding = bill.amount - (bill.creditAmount ?? 0) - (bill.clearedPaymentAmount ?? 0);
     if (bill.scheduledAmount > 0) return result('scheduled', `${money(bill.scheduledAmount)} is scheduled, not confirmed settled. Review vendor receipt and statement timing.`, candidates);
     if (row.outstanding == null) return result('presence', 'Invoice number and original amount agree. This statement does not establish an invoice-level outstanding balance.', candidates);

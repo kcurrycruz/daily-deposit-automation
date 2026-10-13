@@ -28,11 +28,11 @@ function metadata(value) {
     result.warnings = [...doc.warnings];
     return result;
   });
-  const provider = fields(value.provider, 'loaded simulated label refreshedAt asOf');
+  const provider = fields(value.provider, 'loaded simulated label refreshedAt asOf sourceFormat importedRowCount collapsedRowCount excludedRowCount sourceIssueCount importNotes');
   if (typeof provider.loaded !== 'boolean' || typeof provider.simulated !== 'boolean') throw Error('Invalid provider');
   provider.records = value.provider.records.map(row => {
     if (!object(row) || typeof row.vendor !== 'string' || typeof row.invoiceNumber !== 'string') throw Error('Invalid record');
-    return fields(row, 'id vendor invoiceNumber amount kind currency clearedPaymentAmount scheduledAmount creditAmount paymentDate status');
+    return fields(row, 'id vendor invoiceNumber amount kind currency clearedPaymentAmount scheduledAmount creditAmount paymentDate status comparisonScope sourceRows sourceIssues invoiceDate reportedPaidAmount reportedAmountDue reportedCreditAmount reportedPaidOn reportedFullPaymentDate');
   });
   const resolutions = Object.fromEntries(Object.entries(value.resolutions).map(([key, resolution]) =>
     [key, fields(resolution, 'note decision at')]));

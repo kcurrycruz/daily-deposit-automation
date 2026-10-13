@@ -1,4 +1,5 @@
-import { money, cents, uid, totals, groupInvoices, reconcile, statuses, importRecords, toCSV, vendorKey } from './core.mjs';
+import { money, cents, uid, totals, groupInvoices, reconcile, statuses, toCSV, vendorKey } from './core.mjs';
+import { importBillSource } from './bill-import.mjs';
 import { createDemo, simulateRecords } from './demo.mjs';
 import { loadSession, saveSession, clearSession, loadVendorMappings, saveVendorMappings } from './session.mjs';
 import { backButtonHtml, requestProgramHub } from './navigation.mjs';
@@ -107,7 +108,9 @@ function goToGuideStep(step) {
 function metrics(data) {
   return `<div class="metrics">${[
     ['Statements uploaded', state.statements.length, `${new Set(state.statements.map(d => d.vendor)).size} vendors in this workspace`, 'folder', ''],
-    ['Matched invoices', data.matched, state.provider.simulated ? 'Against simulated BILL records' : 'Invoice and balance agree', 'check', 'good'],
+    state.provider.sourceFormat === 'bill-native'
+      ? ['Original amounts agree', data.rows.filter(row => ['presence', 'scheduled'].includes(row.status)).length, 'Invoice found · balances unverified', 'check', '']
+      : ['Matched invoices', data.matched, state.provider.simulated ? 'Against simulated BILL records' : 'Invoice and balance agree', 'check', 'good'],
     ['Needs attention', data.attention, `${data.reviewed} items reviewed by your team`, 'flag', 'warn'],
     ['Statement balances', money(data.balance), 'Reported totals across uploaded statements', 'ledger', ''],
   ].map(([label, value, detail, glyph, tone]) => `<div class="metric"><div class="metric-top">${label}<span class="metric-icon">${icon(glyph)}</span></div><div class="metric-value">${value}</div><div class="metric-detail ${tone}">${detail}</div></div>`).join('')}</div>`;
@@ -140,10 +143,10 @@ function connectionPanel() {
     <section class="panel wide-panel">
       <div class="eyebrow">Step 3 · Compare with BILL</div>
       <h2 style="margin-top:10px">Import your BILL invoice records</h2>
-      <p>You do not need API access for this step. Use a CSV export of your BILL records to compare invoice numbers, amounts, and outstanding balances.</p>
+      <p>You do not need API access for this step. Import the original Bills CSV to check invoice numbers and original numeric amounts. Native exports do not verify outstanding balances or settled payments.</p>
       <ol class="steps">
-        <li><span class="step-number">1</span><div><strong>Download the CSV template</strong>It shows the columns this app needs. Keep invoice numbers as text so leading zeros are preserved.</div></li>
-        <li><span class="step-number">2</span><div><strong>Prepare your records</strong>Include the vendors and dates covered by your statements. Add cleared payments and credits when available; scheduled payments are not settled payments.</div></li>
+        <li><span class="step-number">1</span><div><strong>Export Bills from BILL</strong>Import the original Bills CSV directly. Column names are recognized automatically. Vendor names are already included; the separate Vendors export is not required for this comparison.</div></li>
+        <li><span class="step-number">2</span><div><strong>Check the export coverage</strong>Include paid and unpaid bills and older invoices carried forward on your statements. Keep invoice numbers as text. Native exports check invoice presence and original numeric amounts, not settled balances.</div></li>
         <li><span class="step-number">3</span><div><strong>Import, then return to the guide</strong>Your confirmed statement rows will be compared automatically.</div></li>
       </ol>
       <div class="action-row"><button class="button" data-action="template">${icon('down')}Download CSV template</button><button class="button primary" data-action="import">${icon('upload')}Import BILL CSV</button></div>
@@ -154,12 +157,31 @@ function connectionPanel() {
     <section class="panel wide-panel">
       <h2>Current comparison source</h2>
       <p><strong>${esc(state.provider.label || 'No records imported')}</strong><br>${state.provider.loaded ? `${state.provider.records.length} records · ${state.provider.simulated ? 'fictional sample' : 'imported CSV'}` : 'PDF extraction can be reviewed now. Invoice matching remains unverified until records are imported.'}</p>
+      ${importSummaryHTML()}
       <div class="notice amber">${icon('info')}<div><strong>Live BILL API is not connected.</strong> This prototype uses imported records or fictional examples. No API credentials are collected, and this does not verify QuickBooks sync.</div></div>
       <h3 style="font-size:13px">Optional ways to explore</h3>
       <p>You can check PDF extraction without a comparison source, or practice the review workflow with simulated records. Simulated results do not check your real BILL account.</p>
       <div class="action-row"><button class="button small" data-action="disconnect">Use extraction only</button><button class="button small" data-action="simulate" ${state.statements.length ? '' : 'disabled'}>Try simulated matching</button></div>
     </section>
   </div>`;
+}
+function importSummaryHTML() {
+  if (state.provider.sourceFormat !== 'bill-native') return '';
+  const provider = state.provider;
+  return `<div class="notice amber"><div><strong>Native BILL export · invoice checks only</strong><p>${provider.importedRowCount} source rows · ${provider.collapsedRowCount} repeated line-item rows combined · ${provider.excludedRowCount} rows excluded · ${provider.sourceIssueCount} source warnings.</p><p>Invoice found means the reference and original numeric amount agree. Currency, payment settlement, outstanding balance, and QuickBooks sync are not verified. Paid amounts and credits are shown as reported evidence only.</p></div></div>${provider.importNotes ? `<details><summary>Review import warnings and excluded source rows</summary><pre class="raw-text">${esc(provider.importNotes)}</pre></details>` : ''}`;
+}
+function reportedMoney(value, currency) {
+  if (value == null) return 'Not supplied';
+  return currency === 'USD' ? money(value) : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value / 100);
+}
+function candidateSummary(bill) {
+  return bill.comparisonScope === 'invoice-only'
+    ? `${bill.id}: ${reportedMoney(bill.amount, bill.currency)} (${bill.currency || 'currency not supplied'})`
+    : `${bill.id}: ${money(bill.amount)}`;
+}
+function billEvidence(bill) {
+  if (bill.comparisonScope !== 'invoice-only') return [['Reference', bill.invoiceNumber], ['Original amount', money(bill.amount)], ['Applied credits', money(bill.creditAmount || 0)], ['Cleared payments', money(bill.clearedPaymentAmount || 0)], ['Scheduled payments', money(bill.scheduledAmount || 0)]];
+  return [['Reference', bill.invoiceNumber], ['Export source rows', bill.sourceRows], ['Original numeric amount', reportedMoney(bill.amount, bill.currency)], ['Currency', bill.currency || 'Not supplied'], ['BILL status (reported)', bill.status], ['Paid amount (reported)', reportedMoney(bill.reportedPaidAmount, bill.currency)], ['Amount due (reported)', reportedMoney(bill.reportedAmountDue, bill.currency)], ['Credits (reported)', reportedMoney(bill.reportedCreditAmount, bill.currency)], ['Full payment date (reported)', bill.reportedFullPaymentDate || 'Not supplied'], ['Comparison scope', 'Invoice presence only; settlement and balance not verified']];
 }
 function toast(message, error = false) {
   const node = document.querySelector('#toast'); node.textContent = message; node.className = error ? 'toast-error' : ''; node.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.style.display = 'none'; }, 6500);
@@ -192,7 +214,7 @@ function pdfPanel(doc) { return `<div><div class="page-control"><strong>Original
 function reviewView(doc, row, rows) {
   const bill = row.candidates[0];
   const resolution = reviewDecision(row.id);
-  return `<label class="field">Select invoice or account activity<select id="row-select">${rows.map(r => `<option value="${r.id}" ${r.id === row.id ? 'selected' : ''}>${esc(r.invoiceNumber || r.kind)} · ${statuses[r.status].label}</option>`).join('')}</select></label><div class="notice ${row.status === 'matched' ? '' : 'amber'}">${icon(row.status === 'matched' ? 'check' : 'info')}<div>${badge(row.status)}<div style="margin-top:7px">${esc(row.reason)}</div>${row.simulated ? '<div><strong>Simulated result — not verified against your BILL account.</strong></div>' : ''}</div></div><div class="evidence-grid"><div class="evidence-card"><h3>Vendor statement</h3>${[['Reference',row.invoiceNumber || 'Account activity'],['Original amount',money(row.originalAmount)],['Outstanding balance',money(row.outstanding)],['Statement date',doc.statementDate || 'Not identified'],['Source page',row.page]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div><div class="evidence-card"><h3>${state.provider.simulated ? 'Simulated BILL record' : 'Imported BILL record'}</h3>${bill ? [['Reference',bill.invoiceNumber],['Original amount',money(bill.amount)],['Applied credits',money(bill.creditAmount || 0)],['Cleared payments',money(bill.clearedPaymentAmount || 0)],['Scheduled payments',money(bill.scheduledAmount || 0)]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('') : `<p style="font-size:11px;line-height:1.8;color:#829175">${state.provider.loaded ? 'No matching record available in this dataset.' : 'No BILL records connected. This invoice has not been checked.'}</p>`}${row.candidates.length > 1 ? `<p style="font-size:11px;color:#a47a3f">${row.candidates.length} candidates: ${row.candidates.map(b => esc(`${b.id}: ${money(b.amount)}`)).join(' · ')}</p>` : ''}</div></div><div class="source-layout"><div><h3 style="font-size:12px">Statement activity for this reference</h3>${row.activity.map(a => `<div class="activity-list"><div>${esc(a.type)} · ${esc(a.invoiceNumber || 'account')}<small>${esc(a.date || 'Date not supplied')} · page ${a.page}</small></div><strong>${money(a.amount)}</strong></div>`).join('')}<label class="field">Review decision<select id="review-decision">${['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'].map(v => `<option ${resolution?.decision === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="field">Review note<textarea id="review-note" placeholder="Explain your decision or next step…">${esc(state.resolutions[row.id]?.note || '')}</textarea></label><div class="action-row"><button class="button primary" data-action="resolve">${icon('check')}Save review decision</button>${resolution ? '<button class="button" data-action="reopen">Reopen item</button>' : ''}</div>${resolution ? `<p style="font-size:10px;color:#7e916c">Reviewed ${esc(new Date(resolution.at).toLocaleString())}. The original matching result is preserved.</p>` : ''}</div>${pdfPanel(doc)}</div>`;
+  return `<label class="field">Select invoice or account activity<select id="row-select">${rows.map(r => `<option value="${r.id}" ${r.id === row.id ? 'selected' : ''}>${esc(r.invoiceNumber || r.kind)} · ${statuses[r.status].label}</option>`).join('')}</select></label><div class="notice ${row.status === 'matched' ? '' : 'amber'}">${icon(row.status === 'matched' ? 'check' : 'info')}<div>${badge(row.status)}<div style="margin-top:7px">${esc(row.reason)}</div>${row.simulated ? '<div><strong>Simulated result — not verified against your BILL account.</strong></div>' : ''}</div></div><div class="evidence-grid"><div class="evidence-card"><h3>Vendor statement</h3>${[['Reference',row.invoiceNumber || 'Account activity'],['Original amount',money(row.originalAmount)],['Outstanding balance',money(row.outstanding)],['Statement date',doc.statementDate || 'Not identified'],['Source page',row.page]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div><div class="evidence-card"><h3>${state.provider.simulated ? 'Simulated BILL record' : 'Imported BILL record'}</h3>${bill ? billEvidence(bill).map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('') : `<p style="font-size:11px;line-height:1.8;color:#829175">${state.provider.loaded ? 'No matching record available in this dataset.' : 'No BILL records connected. This invoice has not been checked.'}</p>`}${row.candidates.length > 1 ? `<p style="font-size:11px;color:#a47a3f">${row.candidates.length} candidates: ${row.candidates.map(b => esc(candidateSummary(b))).join(' · ')}</p>` : ''}</div></div><div class="source-layout"><div><h3 style="font-size:12px">Statement activity for this reference</h3>${row.activity.map(a => `<div class="activity-list"><div>${esc(a.type)} · ${esc(a.invoiceNumber || 'account')}<small>${esc(a.date || 'Date not supplied')} · page ${a.page}</small></div><strong>${money(a.amount)}</strong></div>`).join('')}<label class="field">Review decision<select id="review-decision">${['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'].map(v => `<option ${resolution?.decision === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="field">Review note<textarea id="review-note" placeholder="Explain your decision or next step…">${esc(state.resolutions[row.id]?.note || '')}</textarea></label><div class="action-row"><button class="button primary" data-action="resolve">${icon('check')}Save review decision</button>${resolution ? '<button class="button" data-action="reopen">Reopen item</button>' : ''}</div>${resolution ? `<p style="font-size:10px;color:#7e916c">Reviewed ${esc(new Date(resolution.at).toLocaleString())}. The original matching result is preserved.</p>` : ''}</div>${pdfPanel(doc)}</div>`;
 }
 function notesView(doc) { return `<label class="field">Assigned reviewer<input id="assignee" value="${esc(doc.assignee)}" placeholder="Name or initials"></label><label class="field">Statement notes<textarea id="doc-notes" style="min-height:170px" placeholder="Vendor follow-up, unresolved opening balances, or review context…">${esc(doc.notes)}</textarea></label><button class="button primary" data-action="save-notes">Save notes</button><p style="font-size:11px;line-height:1.8;color:#879578">Use Save session to retain this workspace and notes in this browser. This prototype does not share assignments between devices.</p>`; }
 async function previewPDF(doc) {
@@ -259,7 +281,14 @@ function bindDropzone() {
 document.querySelector('#pdf-input').addEventListener('change', e => uploadPDFs(e.target.files));
 document.querySelector('#csv-input').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
-  try { const records = importRecords(await file.text()); state.provider = { loaded: true, simulated: false, records, label: file.name, refreshedAt: new Date().toISOString(), asOf: document.querySelector('#provider-date')?.value || '' }; state.resolutions = {}; render(); toast(`${records.length} BILL records imported. Check date and export coverage.`); }
+  try {
+    const { records, summary } = importBillSource(await file.text());
+    state.provider = { loaded: true, simulated: false, records, label: file.name, refreshedAt: new Date().toISOString(), asOf: document.querySelector('#provider-date')?.value || '', sourceFormat: summary.format,
+      importedRowCount: summary.inputRows, collapsedRowCount: summary.collapsedRows, excludedRowCount: summary.excludedRows, sourceIssueCount: summary.issues.length,
+      importNotes: summary.issues.map(issue => `CSV row(s) ${issue.rows}: ${issue.reason}`).join('\n') };
+    state.resolutions = {}; render();
+    toast(`${records.length} BILL comparison records imported. ${summary.excludedRows} rows excluded; ${summary.issues.length} source warnings. Check export coverage.`, summary.issues.length > 0);
+  }
   catch(error) { toast(error.message, true); }
   e.target.value = '';
 });

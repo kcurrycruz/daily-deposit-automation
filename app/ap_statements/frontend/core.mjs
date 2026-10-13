@@ -19,7 +19,7 @@ export const invoiceKey = value => String(value ?? '').trim().toUpperCase().repl
 export const vendorKey = value => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 export const uid = () => globalThis.crypto?.randomUUID?.() ?? `r${Date.now()}${Math.random().toString(36).slice(2)}`;
 const datePattern = /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/;
-const moneyPattern = /(?:-\s*\$?\s*|\$\s*|\(\s*\$?\s*)?\d[\d,]*\.\d{2}\)?-?/g;
+const moneyPattern = /(?:-\s*\$?\s*|\$\s*|\(\s*\$?\s*)?\d[\d,]*\.\d{2}(?![\d.])\)?-?/g;
 export function dateISO(value) {
   const raw = String(value ?? '').trim();
   let result = raw;
@@ -38,13 +38,55 @@ export const layouts = [
   { id: 'antonucci', vendor: 'Antonucci Foods', pattern: /antonucci/i, amount: [.38, .54], balance: [.63, .79] },
   { id: 'argyle', vendor: 'Argyle Cheese Farmers', pattern: /argyle/i, amount: [.45, .59], balance: [.59, .75] },
   { id: 'bakemark', vendor: 'BakeMark', pattern: /bake\s*mark/i, amount: [.62, .80], balance: [.80, .96] },
-  { id: 'rinella', vendor: 'A.J. Rinella', pattern: /rinella/i, amount: [.38, .51], balance: [.74, .86] },
+  { id: 'rinella', vendor: 'A.J. Rinella', pattern: /rinella|(?=[\s\S]*\bajproduce\s*@\s*aol\.com\b)(?=[\s\S]*\b518[\s-]*465[\s-]*4581\b)/i, amount: [.38, .51], balance: [.74, .86] },
 ];
+// Join only spacing introduced by OCR, never substitute letters or guess digits.
+function readingText(text) {
+  return text.replace(/\b(\d(?:\s*\d)?)\s*\/\s*(\d(?:\s*\d)?)\s*\/\s*(\d{2}(?:\d{2})?)\b/g, (_, month, day, year) => `${month.replace(/\s/g, '')}/${day.replace(/\s/g, '')}/${year}`)
+    .replace(/\b(\d[\d,]*\.)\s+(\d{2})(?!\d)/g, '$1$2');
+}
+function labeledDate(lines, index) {
+  const line = lines[index], text = readingText(line.text.trim());
+  const explicit = /statement\s*date|as of|\bdate\s*:/i.test(text);
+  if (!explicit && !(line.y < .4 && /^date\b/i.test(text))) return '';
+  if (/\binvoice\b.*\bamount\b/i.test(text)) return '';
+  const sameLine = [...text.matchAll(new RegExp(datePattern.source, 'g'))];
+  if (sameLine.length === 1) return dateISO(sameLine[0][0]);
+  if (sameLine.length > 1) return '';
+  const label = line.words?.find(word => /^date:?$/i.test(word.text));
+  for (const next of lines.slice(index + 1, index + 3)) {
+    if (next.y <= line.y || next.y - line.y > .05) continue;
+    if (label && next.words?.length) {
+      const candidates = next.words.flatMap((word, at, words) => {
+        if (Math.abs(word.x - label.x) > .12) return [];
+        const found = readingText(words.slice(at, at + 5).map(w => w.text).join(' ')).match(new RegExp(`^${datePattern.source}`));
+        const date = dateISO(found?.[0]);
+        return date ? [date] : [];
+      });
+      const unique = [...new Set(candidates)];
+      if (unique.length === 1) return unique[0];
+    } else {
+      const candidate = readingText(next.text.trim());
+      if (new RegExp(`^${datePattern.source}$`).test(candidate)) return dateISO(candidate);
+    }
+  }
+  return '';
+}
 const values = text => [...text.matchAll(moneyPattern)].map(m => cents(m[0])).filter(n => n !== null);
 function positionedMoney(line) {
-  return (line.words ?? []).flatMap(word => {
-    return [...word.text.matchAll(moneyPattern)].map(m => ({ value: cents(m[0]), x: word.x + ((word.width ?? .03) * (m.index + m[0].length / 2) / Math.max(word.text.length, 1)) }));
-  }).filter(item => item.value !== null);
+  const words = line.words ?? [], found = [];
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index], next = words[index + 1];
+    let text = readingText(word.text), width = word.width ?? .03;
+    if (/^\$?\d[\d,]*\.$/.test(text) && /^\d{2}$/.test(next?.text ?? '') && next.x - (word.x + width) <= .025 && next.x >= word.x) {
+      text += next.text; width = next.x + (next.width ?? .02) - word.x; index++;
+    }
+    for (const match of text.matchAll(moneyPattern)) {
+      const value = cents(match[0]);
+      if (value != null) found.push({value, x: word.x + width * (match.index + match[0].length / 2) / Math.max(text.length, 1)});
+    }
+  }
+  return found;
 }
 function column(line, range) {
   if (!range) return null;
@@ -65,9 +107,8 @@ export function parseStatement(pages, filename = 'statement.pdf') {
     const lines = page.lines;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const text = line.text.trim();
-      if (!statementDate && /statement\s*date|as of|\bdate\s*:/i.test(text)) statementDate = dateISO(text.match(datePattern)?.[0]);
-      if (!statementDate && /\bdate\b/i.test(text) && line.y < .4) statementDate = dateISO(text.match(datePattern)?.[0]);
+      const text = readingText(line.text.trim());
+      if (!statementDate) statementDate = labeledDate(lines, i);
       if (/total\s*(?:amount\s*)?due|grand\s*total|invoice\s*total|^total\s*\$?/i.test(text) && !/subtotal|past due total|total balance/i.test(text)) {
         const found = values(text);
         if (found.length) declaredTotal = found.at(-1);
@@ -116,9 +157,18 @@ export function parseStatement(pages, filename = 'statement.pdf') {
         balance = column(line, layout.balance);
         if (layout.id === 'ace' && (/-0A$/i.test(invoiceNumber) || column(line, layout.credit) < 0)) {
           type = 'credit'; amount = column(line, layout.credit) ?? amounts[0]; balance = amount;
-        } else if (amount === null) amount = amounts[0];
+        } else if (amount === null) {
+          if (layout.id === 'rinella' && line.words?.length) {
+            warnings.push(`Page ${page.page}: original amount for invoice ${invoiceNumber} was unreadable. Check the PDF and add or correct that row manually.`);
+            continue;
+          }
+          amount = amounts[0];
+        }
         if (layout.id === 'bakemark' && balance === null) balance = amounts.at(-1);
-        if (layout.id === 'rinella' && balance === null) balance = amounts.length > 1 ? amounts[1] : amount;
+        if (layout.id === 'rinella' && balance === null) {
+          if (!line.words?.length) balance = amounts.length > 1 ? amounts[1] : amount;
+          else warnings.push(`Page ${page.page}: invoice balance for ${invoiceNumber} was unreadable. Verify it against the PDF; the running total was not substituted.`);
+        }
       } else {
         // Conservative fallback: explicit Invoice reference or dated invoice-table row only.
         const explicit = text.match(/\binvoice\s*#?\s*([A-Za-z0-9-]{2,})/i);
@@ -129,6 +179,18 @@ export function parseStatement(pages, filename = 'statement.pdf') {
       }
       if (amount == null) continue;
       rows.push({ id: uid(), invoiceNumber, type, date: layout.id === 'aif' ? '' : dateISO(dates[0]), dueDate: layout.id === 'aif' ? dateISO(dates[0]) : (layout.id === 'bakemark' ? dateISO(dates[1]) : ''), amount, balance, page: page.page, source: text, confidence: line.confidence ?? 99 });
+    }
+  }
+  if (layout.id === 'rinella') {
+    for (const page of pages.filter(p => p.ocr)) {
+      const fields = page.ocrFields;
+      if (!statementDate && fields?.statementDate?.confidence >= 80) {
+        statementDate = dateISO(readingText(fields.statementDate.text.trim()).replace(/^date\s*:?\s*/i, ''));
+      }
+      if (declaredTotal == null && fields?.printedTotal?.confidence >= 80) {
+        const text = readingText(fields.printedTotal.text.trim()).replace(/^invoice\s*total\s*/i, '');
+        if (/^\$?\d[\d,]*\.\d{2}$/.test(text)) declaredTotal = cents(text);
+      }
     }
   }
   if (!rows.length) warnings.push('No transaction rows were identified. Review the PDF and add rows manually.');
@@ -163,7 +225,7 @@ export function groupInvoices(statement) {
       id: invoices[0]?.id ?? activity[0].id, invoiceNumber: invoices[0]?.invoiceNumber ?? activity[0].invoiceNumber,
       kind: isInvoice ? 'invoice' : activity[0].type, activity, page: activity[0].page,
       originalAmount: isInvoice ? invoices.reduce((s, r) => s + r.amount, 0) : activity.reduce((s, r) => s + r.amount, 0),
-      outstanding: lastBalance?.balance ?? (statement.layout === 'argyle' || statement.layout === 'generic' ? null : activity.reduce((s, r) => s + r.amount, 0)),
+      outstanding: lastBalance?.balance ?? (['argyle', 'generic', 'rinella'].includes(statement.layout) ? null : activity.reduce((s, r) => s + r.amount, 0)),
       date: invoices[0]?.date ?? activity[0].date, confidence: Math.min(...activity.map(r => r.confidence ?? 99)),
       duplicate: invoices.length > 1, key,
     };

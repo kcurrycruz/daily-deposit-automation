@@ -10,12 +10,14 @@ const vendor = resolve(frontend, 'vendor');
 const require = createRequire(import.meta.url);
 const packageDir = name => dirname(require.resolve(name + '/package.json'));
 await mkdir(resolve(vendor, 'licenses'), { recursive: true });
+await mkdir(resolve(vendor, 'legacy'), { recursive: true });
 for (const [from, to] of [
   ['pdfjs-dist/build/pdf.mjs', 'pdf.mjs'],
   ['pdfjs-dist/build/pdf.worker.mjs', 'pdf.worker.mjs'],
   ['tesseract.js/dist/tesseract.min.js', 'tesseract.min.js'],
   ['tesseract.js/dist/worker.min.js', 'worker.min.js'],
   ['@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz', 'eng.traineddata.gz'],
+  ['@tesseract.js-data/eng/4.0.0/eng.traineddata.gz', 'legacy/eng.traineddata.gz'],
 ]) await cp(resolve(root, 'node_modules', from), resolve(vendor, to));
 const tesseractRequire = createRequire(await realpath(resolve(packageDir('tesseract.js'), 'package.json')));
 const core = dirname(tesseractRequire.resolve('tesseract.js-core/package.json'));

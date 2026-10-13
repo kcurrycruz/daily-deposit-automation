@@ -15,7 +15,7 @@ def ap_frontend_path() -> Path:
     return Path(__file__).resolve().parent / "ap_statements" / "frontend"
 
 
-def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, config=None, limiter=None, now=None) -> bool:
+def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, config=None, limiter=None, now=None, service=None) -> bool:
     """Return True only after the user confirms leaving the AP workspace."""
     styles = Path(__file__).with_name("ap_statements.css").read_text(encoding="utf-8")
     ui.markdown(f'<style>{styles}</style><span id="hwfc-ap-page" aria-hidden="true"></span>', unsafe_allow_html=True)
@@ -27,7 +27,7 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
         ui.error("Shared AP storage is not configured. Ask the app owner to finish the private Supabase and Streamlit Secrets setup.")
         return ui.button("← All Programs", key="ap_gate_back", type="primary")
     try:
-        require_access(ui.session_state, config, now)
+        authorization = require_access(ui.session_state, config, now)
     except PermissionError:
         if "_ap_authorization" in ui.session_state:
             lock_access(ui.session_state)
@@ -65,9 +65,8 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
     with ui.container():
         if ui.session_state.get(_EXIT_KEY):
             ui.warning(
-                "Before leaving, use Save session and/or export your report in the "
-                "workspace below. Unsaved rows and notes will be lost; original "
-                "PDFs must be selected again. Browser saving is not a backup."
+                "Before leaving, save your changes and/or export your report. "
+                "Unacknowledged edits are not saved. Shared originals and saved revisions remain available."
             )
             if ui.button("Stay in AP Statements", key="ap_stay", type="primary"):
                 ui.session_state.pop(_EXIT_KEY, None)
@@ -82,9 +81,9 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
         import streamlit.components.v1 as components
 
         component_renderer = components.declare_component("hwfc_ap_statements", path=str(path))
-    # Only a new, navigation-only request may return to the hub.
-    # No financial props are sent to or returned from the component.
-    value = component_renderer(key=_COMPONENT_KEY)
+    # Stable during reruns; a fresh unlock mounts a fresh financial component.
+    value = component_renderer(key=f'{_COMPONENT_KEY}_{authorization.session_nonce}',
+                               shared_reply=ui.session_state.get('_ap_shared_reply'))
     if (
         type(value) is dict
         and value.keys() == {"action", "request_id"}
@@ -97,14 +96,35 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
             ui.session_state[_LAST_EXIT_REQUEST_KEY] = request_id
             ui.session_state.pop(_EXIT_KEY, None)
             return True
+    elif type(value) is dict and 'version' in value:
+        import hashlib
+        import json
+        from app.ap_shared.protocol import dispatch_request
+        from app.ap_shared.models import validate_request, ApValidationError
+        try:
+            validate_request(value)
+            fingerprint=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+        except (ApValidationError,TypeError,ValueError):
+            fingerprint='invalid'
+        if fingerprint != ui.session_state.get('_ap_shared_last_request'):
+            if service is None:
+                try:
+                    from app.ap_shared.repository import create_repository
+                    from app.ap_shared.service import ApService
+                    clock=lambda:datetime.now(timezone.utc)
+                    service=ApService(create_repository(config),config,clock,
+                        lambda:require_access(ui.session_state,config,clock()))
+                except Exception:
+                    service=None
+            ui.session_state['_ap_shared_reply']=dispatch_request(value,ui.session_state,config,service,now)
+            ui.session_state['_ap_shared_last_request']=fingerprint
+            ui.rerun()
     ui.caption(
         "BILL API is disconnected. Comparisons use imported CSV records and "
         "depend on export coverage. This does not verify QuickBooks sync."
     )
     ui.caption(
-        "Save session keeps extracted rows and notes in this browser profile, "
-        "visible to others using it. Original PDFs are not saved: select your "
-        "original PDFs again after leaving. Use Save session or export your "
-        "report before switching programs."
+        "Shared AP records and original PDFs are private. Save acknowledgements confirm storage; "
+        "unsaved edits remain in this browser tab only. Reviewer initials are self-reported."
     )
     return False

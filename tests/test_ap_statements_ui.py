@@ -66,9 +66,11 @@ class ApRendererTests(unittest.TestCase):
         renderer = lambda **kwargs: calls.append(kwargs)
         self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
         self.assertFalse(render_ap_statements(ui, component_renderer=renderer))
-        self.assertEqual(calls, [{"key": "hwfc_ap_statements_workspace"}] * 2)
+        self.assertEqual(calls[0],calls[1])
+        self.assertTrue(calls[0]['key'].startswith('hwfc_ap_statements_workspace_'))
+        self.assertIsNone(calls[0]['shared_reply'])
         text = " ".join(ui.messages)
-        for phrase in ["browser profile", "original PDFs", "Save session", "BILL"]:
+        for phrase in ["Shared AP", "original PDFs", "Save acknowledgements", "BILL"]:
             self.assertIn(phrase, text)
         self.assertEqual(ui.session_state["run_result"], "retained")
         self.assertEqual([call['key'] for call in ui.button_calls], ['ap_lock_access', 'ap_lock_access'])

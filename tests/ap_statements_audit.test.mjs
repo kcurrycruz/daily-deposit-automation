@@ -130,18 +130,19 @@ for (const action of ['delete-row', 'add-row']) {
   });
 }
 
-test('confirmation retains reopened notes without reusing the old review decision', () => {
+test('confirmation retains reopened notes without reusing the old review decision', async () => {
   const { doc, state, context } = deletionFixture('200.00', 'add-row');
   context.action = 'confirm-extraction';
   context.render = context.toast = () => {};
-  vm.runInNewContext(source.slice(source.indexOf("if (action === 'save-extraction'"), source.indexOf("if (action === 'add-row'")), context);
+  context.persistDoc=async()=>{};
+  await vm.runInNewContext('(async()=>{'+source.slice(source.indexOf("if (action === 'save-extraction'"), source.indexOf("if (action === 'add-row'"))+'})()', context);
   assert.equal(doc.confirmed, true);
   assert.equal(state.resolutions.r?.note, 'Reviewed original $100 evidence');
   assert.equal(state.resolutions.r?.decision, undefined);
   assert.equal(state.resolutions.unrelated.decision, 'Follow up with vendor');
 });
 
-test('changing a vendor mapping reopens changed evidence while retaining review notes', () => {
+test('changing a vendor mapping reopens changed evidence while retaining review notes', async () => {
   const doc = statement();
   const state = { statements: [doc], mappings: {}, resolutions: {
     r: { decision: 'Reviewed — no action needed', note: 'Prior vendor comparison', at: '2026-10-01' },
@@ -151,7 +152,8 @@ test('changing a vendor mapping reopens changed evidence while retaining review 
     document: { getElementById: () => ({ value: 'Other vendor' }) }, saveVendorMappings: () => ({ ok: true }),
     browserStorage() {}, render() {}, toast() {} };
   vm.runInNewContext(source.slice(source.indexOf('const reviewDecision ='), source.indexOf('function stats()')), context);
-  vm.runInNewContext(source.slice(source.indexOf("if (action === 'mapping'"), source.indexOf("if (action === 'save-session'")), context);
+  context.ready=()=>{};context.shared={state:{mappingVersions:{}},saveMapping:async()=>({version:1})};
+  await vm.runInNewContext('(async()=>{'+source.slice(source.indexOf("if (action === 'mapping'"), source.indexOf("if (action === 'save-session'"))+'})()', context);
   assert.equal(state.resolutions.r.note, 'Prior vendor comparison');
   assert.equal(state.resolutions.r.decision, undefined);
   assert.equal(state.resolutions.r.at, undefined);
@@ -160,7 +162,7 @@ test('changing a vendor mapping reopens changed evidence while retaining review 
   assert.equal(vm.runInNewContext("isAttention({ id: 'r', status: 'amount' })", context), true);
 });
 
-test('saving equivalent vendor spelling retains the existing review decision', () => {
+test('saving equivalent vendor spelling retains the existing review decision', async () => {
   const doc = statement();
   const prior = { decision: 'Follow up with vendor', note: 'Current evidence', at: '2026-10-01' };
   const state = { statements: [doc], mappings: {}, resolutions: { r: prior } };
@@ -168,7 +170,8 @@ test('saving equivalent vendor spelling retains the existing review decision', (
     document: { getElementById: () => ({ value: ' a&b   supply ' }) }, saveVendorMappings: () => ({ ok: true }),
     browserStorage() {}, render() {}, toast() {} };
   vm.runInNewContext(source.slice(source.indexOf('const reviewDecision ='), source.indexOf('function stats()')), context);
-  vm.runInNewContext(source.slice(source.indexOf("if (action === 'mapping'"), source.indexOf("if (action === 'save-session'")), context);
+  context.ready=()=>{};context.shared={state:{mappingVersions:{}},saveMapping:async()=>({version:1})};
+  await vm.runInNewContext('(async()=>{'+source.slice(source.indexOf("if (action === 'mapping'"), source.indexOf("if (action === 'save-session'"))+'})()', context);
   assert.deepEqual(state.resolutions.r, prior);
 });
 

@@ -27,3 +27,4 @@ html body{background:#fff}.main{background:#fff}
 .program-back{display:flex;align-items:center;gap:9px;width:100%;padding:12px 10px;margin:0 0 22px;border:1px solid #dce3d8;border-radius:8px;background:#fff;color:#205845;text-align:left;font-size:12px;min-height:44px}
 .program-back:hover{background:#e8f2e9}
 @media(max-width:700px){.sidebar{flex-wrap:wrap}.program-back{width:auto;margin:0;padding:9px;flex-shrink:0}.program-back span{display:inline}.nav{flex-basis:100%;justify-content:space-between}.program-back .icon{width:17px}}
+#shared-save-status{font-size:11px;color:#52694e;max-width:190px;line-height:1.5}

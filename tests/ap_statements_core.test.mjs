@@ -56,11 +56,11 @@ test('rejected printed total leaves confirmed invoice and review decisions untou
   assert.throws(() => fixture.collect(fixture.doc), /valid printed statement total/);
   assert.deepEqual(fixture.doc, before);
 });
-test('failed correction does not remove recorded review decisions', () => {
+test('failed correction does not remove recorded review decisions', async () => {
   const fixture = correctionFixture();
   const state = { resolutions: { existing: { note: 'Keep prior decision' } } };
   const action = fixture.source.slice(fixture.source.indexOf("if (action === 'save-extraction'"), fixture.source.indexOf("if (action === 'add-row'"));
-  assert.throws(() => vm.runInNewContext(action, { ...fixture.context, action: 'save-extraction', getDoc: () => fixture.doc,
+  await assert.rejects(vm.runInNewContext('(async()=>{'+action+'})()', { ...fixture.context, action: 'save-extraction', getDoc: () => fixture.doc,
     state, groupInvoices: () => [{ id: 'existing' }], collectDoc: fixture.collect }), /valid printed statement total/);
   assert.deepEqual(state.resolutions, { existing: { note: 'Keep prior decision' } });
 });

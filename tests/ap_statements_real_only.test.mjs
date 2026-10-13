@@ -72,9 +72,14 @@ function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
   const context = { ...core, ...session, ...guide, importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
-    window: { localStorage }, document: { activeElement: null, querySelector: selector => nodes[selector] ?? null,
+    window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
   vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, ''), context);
+  // Tests of controls supply an acknowledged synthetic shared snapshot,
+  // never an implicit localStorage restore.
+  if(data){context.fixtureSession=session.loadSession(localStorage).session;vm.runInNewContext('Object.assign(state,fixtureSession)',context);}
+  context.cloud={state:{ready:true},async importBills(file,provider){const current=vm.runInNewContext('state',context);current.provider=provider;current.resolutions=session.reviewNotesOnly(current.resolutions);}};
+  vm.runInNewContext('shared=cloud',context);
   return { nodes, context, events, state: vm.runInNewContext('state', context) };
 }
 test('the rendered workspace and connection page offer no sample or simulation actions', () => {
@@ -93,11 +98,11 @@ test('legacy demo action names cannot generate data or replace imported BILL rec
     assert.equal(app.nodes['#overlay-root'].innerHTML, '');
   }
 });
-test('actual app initialization cleans the old workspace without losing the real CSV', () => {
+test('actual initialization never restores legacy data or demos without explicit migration', () => {
   const data = realSession(); data.statements.push(createDemo().statements[0]);
-  const app = browserApp(data);
-  assert.equal(app.state.statements.length, 1);
-  assert.equal(app.state.provider.records[0].invoiceNumber, '000123');
+  const app = browserApp();
+  assert.equal(app.state.statements.length, 0);
+  assert.equal(app.state.provider.loaded, false);
   assert.doesNotMatch(app.nodes['#app'].innerHTML, /Northfield Produce/);
 });
 test('multi-PDF upload continues to retain the imported BILL source and existing real notes', async () => {
@@ -105,6 +110,7 @@ test('multi-PDF upload continues to retain the imported BILL source and existing
   const files = new Map(), input = { value: 'selected' };
   const context = { state, files, extractor: { extractPDF: async file => ({ ...realDoc(), id: file.name, filename: file.name }), stopOCR: async () => {} },
     document: { querySelector: selector => selector === '#pdf-input' ? input : null }, render() {}, toast() {} };
+  context.ready=()=>{};context.shared={async uploadStatement(file,extract){const doc=await extract(file);state.statements.push(doc);return {doc};}};
   vm.runInNewContext(source.slice(source.indexOf('async function uploadPDFs('), source.indexOf('function bindDropzone(')), context);
   await vm.runInNewContext("uploadPDFs([{name:'vendor-a.pdf',size:1,lastModified:1},{name:'vendor-b.pdf',size:2,lastModified:2}])", context);
   assert.equal(state.statements.length, 3);

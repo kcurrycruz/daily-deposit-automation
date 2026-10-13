@@ -29,7 +29,7 @@ test('new workspace has no fictional vendors or accounting source', async () => 
   assert.equal(state.provider.simulated, false);
 });
 
-test('saved statements, provider, and notes survive the new initial state', async () => {
+test('legacy statements remain available for explicit migration but are not restored implicitly', async () => {
   const { emptyWorkspace } = await module();
   const session = { version: 1, ...workspace({ resolutions: { r1: { note: 'Retain this note' } } }) };
   const values = new Map();
@@ -37,11 +37,11 @@ test('saved statements, provider, and notes survive the new initial state', asyn
   assert.equal(saveSession(storage, session).ok, true);
   const context = { emptyWorkspace, createDemo, loadSession, browserStorage: () => storage };
   vm.runInNewContext(source.slice(source.indexOf('const initial ='), source.indexOf('const files =')), context);
-  vm.runInNewContext(source.slice(source.indexOf('const saved ='), source.indexOf('const savedMappings =')), context);
   const state = vm.runInNewContext('state', context);
-  assert.equal(state.statements[0].id, 'doc1');
-  assert.equal(state.provider.records[0].invoiceNumber, '000123');
-  assert.equal(state.resolutions.r1.note, 'Retain this note');
+  assert.equal(state.statements.length,0);
+  const legacy=loadSession(storage).session;
+  assert.equal(legacy.statements[0].id,'doc1');
+  assert.equal(legacy.resolutions.r1.note,'Retain this note');
 });
 
 test('empty workspace recommends PDF upload rather than a sample dashboard', async () => {

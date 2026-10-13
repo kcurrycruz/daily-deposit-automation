@@ -151,6 +151,7 @@ test('actual import control applies native evidence and resets reviews only afte
   let handler;
   const input = { addEventListener: (_, callback) => { handler = callback; } };
   const context = { state, importBillSource, importRecords, reviewNotesOnly, document: { querySelector: selector => selector === '#csv-input' ? input : null }, render() {}, toast() {} };
+  context.ready=()=>{};context.shared={async importBills(file,provider){state.provider=provider;state.resolutions=reviewNotesOnly(state.resolutions);}};
   vm.runInNewContext(block, context);
   await handler({ target: { files: [{ name: 'BILL.csv', text: async () => csv([row()]) }], value: 'BILL.csv' } });
   assert.equal(state.provider.sourceFormat, 'bill-native');

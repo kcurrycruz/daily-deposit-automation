@@ -1,6 +1,7 @@
 import { money, cents, uid, totals, groupInvoices, reconcile, statuses, toCSV, vendorKey } from './core.mjs';
 import { importBillSource } from './bill-import.mjs';
-import { loadSession, saveSession, clearSession, loadVendorMappings, saveVendorMappings, reviewNotesOnly } from './session.mjs';
+import { loadSession, loadVendorMappings, reviewNotesOnly } from './session.mjs';
+import {createSharedWorkspace} from './shared-workspace.mjs';
 import { backButtonHtml, requestProgramHub } from './navigation.mjs';
 import { emptyWorkspace, workflowGuide } from './guide.mjs';
 
@@ -35,12 +36,28 @@ let renderToken = 0;
 const app = document.querySelector('#app');
 const overlay = document.querySelector('#overlay-root');
 const browserStorage = () => { try { return window.localStorage; } catch { return null; } };
-const saved = loadSession(browserStorage());
-if (saved.session) Object.assign(state, saved.session, { view: 'statements', selected: null });
-let restoredNotice = saved.notice || '';
-const savedMappings = loadVendorMappings(browserStorage());
-state.mappings = savedMappings.mappings;
-for (const error of [saved.error, savedMappings.error]) if (error) state.errors.push(error);
+let restoredNotice = '';
+let shared,saveState='loading',retryOperation=null,sharedError=null;
+const dirty=new Set();
+function ready(){if(!shared?.state.ready)throw Error('Shared workspace is not ready. Finish setup or retry loading.');}
+function sharedStatus(status,error){saveState=status;sharedError=error||null;retryOperation=error?.retry||null;const badge=document.querySelector('#shared-save-status');if(badge)badge.textContent=({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[status]||status;}
+function receiveShared(snapshot){state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();}
+async function startShared(){if(shared||!window.hwfcSharedClient)return;shared=createSharedWorkspace(window.hwfcSharedClient,{onState:receiveShared,onSaveState:sharedStatus});try{await shared.load();sharedStatus('saved');render();}catch(error){sharedError=error;retryOperation=()=>shared.load();sharedStatus('not_saved',error);render();}}
+window.addEventListener('hwfc:shared-ready',startShared);
+window.addEventListener('pagehide',()=>{shared?.dispose();files.clear();state.statements=[];state.resolutions={};state.provider=emptyWorkspace().provider;overlay.innerHTML='';app.innerHTML='';},{once:true});
+async function persistDoc(doc){ready();const detail=shared.state.details.get(doc.id);const result=await shared.saveStatement(doc,detail.version,{resolutions:state.resolutions});dirty.delete(doc.id);return result;}
+function markDirty(){if(state.selected){dirty.add(state.selected);sharedStatus('unsaved');}}
+function decorateSharedUi(){
+  const note=document.querySelector('.local-note');if(note)note.innerHTML=`${icon('shield')}<strong>Private shared workspace</strong>Original PDFs, BILL imports and acknowledged saves are kept for your team. Initials are self-reported. Unsaved edits remain in this tab.`;
+  const profile=document.querySelector('.profile small');if(profile)profile.textContent='Shared AP workspace';
+  for(const button of document.querySelectorAll('[data-action="save-session"]'))button.innerHTML=`${icon('save')}Save changes`;
+  for(const button of document.querySelectorAll('[data-action="clear"]'))button.textContent='Reset local view';
+  const actions=document.querySelector('.top-actions');if(actions)actions.insertAdjacentHTML('afterbegin',`<span id="shared-save-status" role="status">${esc(({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[saveState])}</span>`);
+  const prep=document.querySelector('.guide-preparation');if(prep&&state.statements.length)prep.innerHTML='<strong>Keep your progress</strong><p>Save changes to retain corrections and notes for the team.</p><small>Original PDFs are saved privately. Wait for a save acknowledgement before leaving.</small>';
+  const content=document.querySelector('.content');if(content&&sharedError)content.insertAdjacentHTML('afterbegin',`<div class="notice amber"><div><strong>${sharedError.code==='conflict'?'Conflict':'Not saved'}</strong><p>${esc(sharedError.message)}</p><button class="button small" data-action="retry-shared">Retry same operation</button> <button class="button small" data-action="reload-latest">Reload latest (discards unsaved edits)</button></div></div>`);
+  const vendorHelp=document.querySelector('.wide-panel p');if(state.view==='vendors'&&vendorHelp)vendorHelp.textContent='Map statement names to the exact vendor names in BILL. Acknowledged mappings are shared with the team.';
+  for(const button of document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]'))if(!shared?.state.ready||saveState==='saving')button.disabled=true;
+}
 const results = () => state.statements.flatMap(statement => reconcile(statement, state.provider, state.mappings));
 const reviewDecision = id => state.resolutions[id]?.decision ? state.resolutions[id] : null;
 const isAttention = row => row.status !== 'matched' && !reviewDecision(row.id);
@@ -73,6 +90,7 @@ function render() {
   const subtitle = { statements: 'Follow the guide below. We’ll show you what to do next.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
   app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Exceptions',data.attention],['vendors','users','Vendors',''],['connection','plug','BILL connection','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${!state.provider.loaded ? `<div class="notice blue">${icon('plug')}<div><strong>BILL is not connected yet.</strong> You can extract and review PDFs now. Invoice matching needs imported records or a live connection.</div></div>` : `<div class="notice blue">${icon('info')}<div><strong>Comparing against imported CSV records.</strong> ${esc(state.provider.label)} · ${state.provider.records.length} records. Coverage and historical balances require review.</div></div>`}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : connectionPanel()}</div></main></div>`;
   bindDropzone();
+  decorateSharedUi();
 }
 function guidePanel() {
   const guide = workflowGuide(state);
@@ -207,21 +225,23 @@ function renderDrawer() {
   if (check.difference === null) warnings.push('No statement total was identified. Enter it or verify completeness manually.');
   overlay.innerHTML = `<div class="overlay"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-head"><div><div class="eyebrow">Statement review</div><h2 id="drawer-title">${esc(doc.vendor)}</h2><small>${esc(doc.filename)} · ${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · scanned PDF' : ''}</small></div><button class="close" data-action="close" aria-label="Close statement">${icon('close')}</button></header><div class="drawer-body"><div class="drawer-tabs"><button class="button ${state.drawerTab === 'extraction' ? 'primary' : ''}" data-action="drawer-tab" data-tab="extraction">1. Check extraction</button><button class="button ${state.drawerTab === 'review' ? 'primary' : ''}" data-action="drawer-tab" data-tab="review">2. Compare & review</button><button class="button ${state.drawerTab === 'notes' ? 'primary' : ''}" data-action="drawer-tab" data-tab="notes">Notes & assignment</button><button class="button subtle danger" data-action="remove-doc">Remove statement</button></div>${state.drawerTab === 'extraction' ? extractionView(doc, check, warnings) : state.drawerTab === 'notes' ? notesView(doc) : row ? reviewView(doc, row, reviewRows) : '<div class="empty">No rows extracted. Add transaction rows in Check extraction.</div>'}</div></section></div>`;
   if (state.drawerTab !== 'notes') previewPDF(doc);
+  overlay.querySelectorAll('input,textarea').forEach(input=>input.addEventListener('input',markDirty));
+  const noteLabel=overlay.querySelector('#review-note')?.parentElement;if(noteLabel)noteLabel.firstChild.textContent='Review note (optional)';
 }
 function extractionView(doc, check, warnings) {
   return `${warnings.length ? `<div class="notice amber">${icon('info')}<div>${warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div></div>` : `<div class="notice">${icon('check')}<div>Extracted activity agrees with the statement total. Verify invoice numbers before confirming.</div></div>`}<div class="form-grid"><label class="field">Statement vendor<input id="doc-vendor" value="${esc(doc.vendor)}"></label><label class="field">Statement date<input type="date" id="doc-date" value="${esc(doc.statementDate)}"></label><label class="field">Printed statement total (USD)<input id="doc-total" value="${doc.declaredTotal == null ? '' : (doc.declaredTotal / 100).toFixed(2)}" inputmode="decimal"></label><label class="field">Extracted activity total<input readonly value="${money(check.sum)}"></label></div><div class="source-layout"><div><div class="page-control"><strong>Extracted transactions · ${doc.rows.length}</strong><button class="button small" data-action="add-row">${icon('plus')}Add row</button></div><div class="table-wrap"><table class="edit-table"><thead><tr><th>Reference</th><th>Type</th><th>Amount</th><th>Invoice balance</th><th>Page</th><th></th></tr></thead><tbody>${doc.rows.map(row => `<tr data-row="${row.id}"><td><input class="ref" name="reference" value="${esc(row.invoiceNumber)}" aria-label="Invoice reference"></td><td><select name="type" aria-label="Transaction type">${['invoice','credit','payment','opening'].map(type => `<option ${row.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td><td><input name="amount" value="${(row.amount / 100).toFixed(2)}" inputmode="decimal" aria-label="Original amount"></td><td><input name="balance" value="${row.balance == null ? '' : (row.balance / 100).toFixed(2)}" inputmode="decimal" aria-label="Invoice outstanding balance"></td><td><input class="small-col" name="page" type="number" min="1" max="${doc.pageCount}" value="${row.page}" aria-label="Source page"></td><td><button data-action="delete-row" data-id="${row.id}" aria-label="Remove row">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div><p style="font-size:10px;line-height:1.7;color:#849277">Amounts are signed: invoices positive, credits and payments negative. Leave invoice balance blank when only a running account balance is supplied. Reference numbers remain text.</p><div class="action-row"><button class="button" data-action="save-extraction">Save corrections</button><button class="button primary" data-action="confirm-extraction">${icon('check')}Confirm extracted rows</button></div><details style="margin-top:20px;font-size:11px;color:#748967"><summary>Extracted source text</summary><pre class="raw-text">${esc(doc.rawText || doc.rows.map(r => r.source).join('\n'))}</pre></details></div>${pdfPanel(doc)}</div>`;
 }
-function pdfPanel(doc) { return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${files.has(doc.id) ? '<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading page…</div></div>' : `<div class="no-source">${icon('ledger')}<br>PDF previews are kept only for this browser session. Re-upload the original PDF to preview it again.</div>`}</div>`; }
+function pdfPanel(doc) { const available=files.has(doc.id)||shared?.state.details.get(doc.id)?.originalAvailable;return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${available?'<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading private original…</div></div>':`<div class="no-source">${icon('ledger')}<br>Original PDF not attached. This migrated draft is incomplete.</div>`}</div>`; }
 function reviewView(doc, row, rows) {
   const bill = row.candidates[0];
   const resolution = reviewDecision(row.id);
   return `<label class="field">Select invoice or account activity<select id="row-select">${rows.map(r => `<option value="${r.id}" ${r.id === row.id ? 'selected' : ''}>${esc(r.invoiceNumber || r.kind)} · ${statuses[r.status].label}</option>`).join('')}</select></label><div class="notice ${row.status === 'matched' ? '' : 'amber'}">${icon(row.status === 'matched' ? 'check' : 'info')}<div>${badge(row.status)}<div style="margin-top:7px">${esc(row.reason)}</div></div></div><div class="evidence-grid"><div class="evidence-card"><h3>Vendor statement</h3>${[['Reference',row.invoiceNumber || 'Account activity'],['Original amount',money(row.originalAmount)],['Outstanding balance',money(row.outstanding)],['Statement date',doc.statementDate || 'Not identified'],['Source page',row.page]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div><div class="evidence-card"><h3>Imported BILL record</h3>${bill ? billEvidence(bill).map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('') : `<p style="font-size:11px;line-height:1.8;color:#829175">${state.provider.loaded ? 'No matching record available in this dataset.' : 'No BILL records connected. This invoice has not been checked.'}</p>`}${row.candidates.length > 1 ? `<p style="font-size:11px;color:#a47a3f">${row.candidates.length} candidates: ${row.candidates.map(b => esc(candidateSummary(b))).join(' · ')}</p>` : ''}</div></div><div class="source-layout"><div><h3 style="font-size:12px">Statement activity for this reference</h3>${row.activity.map(a => `<div class="activity-list"><div>${esc(a.type)} · ${esc(a.invoiceNumber || 'account')}<small>${esc(a.date || 'Date not supplied')} · page ${a.page}</small></div><strong>${money(a.amount)}</strong></div>`).join('')}<label class="field">Review decision<select id="review-decision">${['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'].map(v => `<option ${resolution?.decision === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="field">Review note<textarea id="review-note" placeholder="Explain your decision or next step…">${esc(state.resolutions[row.id]?.note || '')}</textarea></label><div class="action-row"><button class="button primary" data-action="resolve">${icon('check')}Save review decision</button>${resolution ? '<button class="button" data-action="reopen">Reopen item</button>' : ''}</div>${resolution ? `<p style="font-size:10px;color:#7e916c">Reviewed ${esc(new Date(resolution.at).toLocaleString())}. The original matching result is preserved.</p>` : ''}</div>${pdfPanel(doc)}</div>`;
 }
-function notesView(doc) { return `<label class="field">Assigned reviewer<input id="assignee" value="${esc(doc.assignee)}" placeholder="Name or initials"></label><label class="field">Statement notes<textarea id="doc-notes" style="min-height:170px" placeholder="Vendor follow-up, unresolved opening balances, or review context…">${esc(doc.notes)}</textarea></label><button class="button primary" data-action="save-notes">Save notes</button><p style="font-size:11px;line-height:1.8;color:#879578">Use Save session to retain this workspace and notes in this browser. This prototype does not share assignments between devices.</p>`; }
+function notesView(doc) { return `<label class="field">Assigned reviewer (optional)<input id="assignee" value="${esc(doc.assignee)}" placeholder="Name or initials"></label><label class="field">Statement notes (optional)<textarea id="doc-notes" style="min-height:170px" placeholder="Vendor follow-up, unresolved opening balances, or review context…">${esc(doc.notes)}</textarea></label><button class="button primary" data-action="save-notes">Save notes</button><p style="font-size:11px;line-height:1.8;color:#879578">Acknowledged saves retain notes in the private shared workspace.</p>`; }
 async function previewPDF(doc) {
-  const canvas = document.querySelector('#pdf-canvas'); if (!canvas || !files.has(doc.id)) return;
+  const canvas = document.querySelector('#pdf-canvas'); if (!canvas) return;
   const token = ++renderToken;
-  try { extractor ??= await import('./extraction.mjs'); if (token !== renderToken) return; await extractor.renderPage(files.get(doc.id), state.page, canvas); if (token === renderToken) document.querySelector('#pdf-loading')?.remove(); }
+  try { extractor ??= await import('./extraction.mjs'); const original=files.get(doc.id)||await shared.originalPdf(doc.id); if (token !== renderToken) return; await extractor.renderPage(original, state.page, canvas); if (token === renderToken) document.querySelector('#pdf-loading')?.remove(); }
   catch(error) { if (token === renderToken) { const loading = document.querySelector('#pdf-loading'); if (loading) loading.textContent = `Preview unavailable: ${error.message}`; } }
 }
 function collectRows(doc, excludedRow = null) {
@@ -250,20 +270,18 @@ function collectDoc(doc, excludedRow = null) {
   Object.assign(doc, { rows, vendor, statementDate, declaredTotal: total ? cents(total) : null, confirmed: false });
 }
 async function uploadPDFs(fileList) {
+  ready();
   if (state.busy) return;
   const pdfs = [...fileList].filter(file => file.name.toLowerCase().endsWith('.pdf'));
   if (!pdfs.length) { toast('Choose PDF statement files.', true); return; }
-  if (pdfs.length > 150) { toast('Upload at most 150 PDFs in one batch.', true); return; }
+  if (pdfs.length > 20) { toast('Upload at most 20 PDFs in one batch, up to 20 MiB each.', true); return; }
   state.busy = true; state.errors = []; state.query = ''; state.filter = 'all'; state.view = 'statements'; render();
   try {
-    extractor ??= await import('./extraction.mjs');
     for (let i = 0; i < pdfs.length; i++) {
       const file = pdfs[i];
-      const existing = state.statements.find(d => d.filename === file.name && d.fileSize === file.size && d.fileModified === file.lastModified);
-      if (existing) { files.set(existing.id, file); toast(`Original PDF attached again: ${file.name}`); continue; }
       try {
-        const doc = await extractor.extractPDF(file, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const status = document.querySelector('.guide-progress'); if (status) status.textContent = `Reading your PDFs… ${state.progress}`; const node = document.querySelector('.progress'); if (node) node.innerHTML = `<span class="spinner"></span>${esc(state.progress)}<div class="progress-bar"><span style="width:${Math.round(state.fraction*100)}%"></span></div>`; });
-        doc.fileSize = file.size; doc.fileModified = file.lastModified; state.statements.push(doc); files.set(doc.id, file);
+        const saved=await shared.uploadStatement(file,async original=>{extractor ??= await import('./extraction.mjs');return extractor.extractPDF(original, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const status = document.querySelector('.guide-progress'); if (status) status.textContent = `Reading your PDFs… ${state.progress}`; });});
+        files.set(saved.doc.id,file);
       } catch (error) { state.errors.push(`${file.name}: ${error.message}`); }
       render();
     }
@@ -281,14 +299,15 @@ document.querySelector('#pdf-input').addEventListener('change', e => uploadPDFs(
 document.querySelector('#csv-input').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
   try {
+    ready();
     const { records, summary } = importBillSource(await file.text());
-    state.provider = { loaded: true, simulated: false, records, label: file.name, refreshedAt: new Date().toISOString(), asOf: document.querySelector('#provider-date')?.value || '', sourceFormat: summary.format,
+    const provider = { loaded: true, simulated: false, records, label: file.name, refreshedAt: new Date().toISOString(), asOf: document.querySelector('#provider-date')?.value || '', sourceFormat: summary.format,
       importedRowCount: summary.inputRows, collapsedRowCount: summary.collapsedRows, excludedRowCount: summary.excludedRows, sourceIssueCount: summary.issues.length,
       importNotes: summary.issues.map(issue => `CSV row(s) ${issue.rows}: ${issue.reason}`).join('\n') };
-    state.resolutions = reviewNotesOnly(state.resolutions); render();
+    await shared.importBills(file,provider);render();
     toast(`${records.length} BILL comparison records imported. ${summary.excludedRows} rows excluded; ${summary.issues.length} source warnings. Check export coverage.`, summary.issues.length > 0);
   }
-  catch(error) { toast(error.message, true); }
+  catch(error) { sharedError=error;retryOperation=error.retry||null;render();toast(error.message, true); }
   e.target.value = '';
 });
 document.addEventListener('input', e => {
@@ -304,7 +323,10 @@ document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const action = target.dataset.action;
   try {
-    if (action === 'back-to-programs') modal('Go back to programs?', '<p>Use <strong>Save session</strong> or export your report before leaving.</p><p>Unsaved rows and notes will be lost. Original PDFs must be selected again after returning. Browser saving is not a backup.</p>', 'confirm-back-to-programs', 'Go back to programs');
+    if (action === 'back-to-programs') modal('Go back to programs?', '<p>Save changes or export your report before leaving.</p><p>Unsaved edits will be lost. Acknowledged revisions and original PDFs remain in your private shared workspace.</p>', 'confirm-back-to-programs', 'Go back to programs');
+    if (action === 'retry-shared') {if(retryOperation)await retryOperation();render();if(state.selected)renderDrawer();}
+    if (action === 'reload-latest') modal('Reload latest shared work?','<p>This discards unsaved edits in this tab. Shared records are retained.</p>','confirm-reload','Reload latest');
+    if (action === 'confirm-reload') {await shared.load({replace:true});dirty.clear();sharedError=null;sharedStatus('saved');closeOverlay();render();}
     if (action === 'confirm-back-to-programs') requestProgramHub(window, true);
     if (action === 'view') { state.view = target.dataset.view; state.filter = state.view === 'exceptions' ? 'attention' : 'all'; state.query = ''; render(); }
     if (action === 'filter') { state.filter = target.dataset.filter; render(); }
@@ -327,13 +349,13 @@ document.addEventListener('click', async e => {
         if (!doc.rows.length || doc.vendor === 'Unidentified vendor') throw new Error('Set the vendor and add transaction rows before confirming.');
         doc.confirmed = true; doc.rows.forEach(r => { r.confidence = 99; }); state.drawerTab = 'review';
       }
-      render(); renderDrawer(); toast(action === 'confirm-extraction' ? 'Extraction confirmed. Matching results are ready for review.' : 'Corrections saved. Confirm the rows when ready.');
+      await persistDoc(doc);render(); renderDrawer(); toast(action === 'confirm-extraction' ? 'Extraction confirmed and saved. Matching results are ready for review.' : 'Corrections saved to the shared workspace.');
     }
     if (action === 'add-row') { const doc = getDoc(); const priorRows = groupInvoices(doc); collectDoc(doc); invalidateReviewDecisions(priorRows); doc.rows.push({ id: uid(), type: 'invoice', invoiceNumber: '', amount: 0, balance: null, page: state.page, confidence: 99, source: 'Manually added row' }); doc.confirmed = false; render(); renderDrawer(); }
     if (action === 'delete-row') { const doc = getDoc(); const priorRows = groupInvoices(doc); collectDoc(doc, target.dataset.id); invalidateReviewDecisions(priorRows); render(); renderDrawer(); }
-    if (action === 'save-notes') { const doc = getDoc(); doc.notes = document.querySelector('#doc-notes').value; doc.assignee = document.querySelector('#assignee').value; toast('Notes saved in this workspace. Use Save session to keep them.'); }
-    if (action === 'resolve') { const note = document.querySelector('#review-note').value.trim(); if (!note) throw new Error('Add a note explaining your review decision.'); state.resolutions[state.selectedRow] = { note, decision: document.querySelector('#review-decision').value, at: new Date().toISOString() }; render(); renderDrawer(); toast('Review recorded. The matching evidence is preserved.'); }
-    if (action === 'reopen') { delete state.resolutions[state.selectedRow]; render(); renderDrawer(); }
+    if (action === 'save-notes') { const doc = getDoc(); doc.notes = document.querySelector('#doc-notes').value; doc.assignee = document.querySelector('#assignee').value; await persistDoc(doc);toast('Optional notes saved to the shared workspace.'); }
+    if (action === 'resolve') { const note = document.querySelector('#review-note').value.trim(); state.resolutions[state.selectedRow] = { note, decision: document.querySelector('#review-decision').value };await persistDoc(getDoc()); render(); renderDrawer(); toast('Review saved. The matching evidence is preserved.'); }
+    if (action === 'reopen') { delete state.resolutions[state.selectedRow];await persistDoc(getDoc()); render(); renderDrawer(); }
     if (action === 'mapping') {
       const value = document.getElementById(target.dataset.input).value.trim();
       if (!value) throw new Error('Enter the BILL vendor name.');
@@ -343,24 +365,23 @@ document.addEventListener('click', async e => {
           invalidateReviewDecisions(groupInvoices(doc));
         }
       }
-      state.mappings[vendor] = value;
-      const result = saveVendorMappings(browserStorage(), state.mappings);
-      render(); if (!result.ok) throw new Error(result.error);
+      ready();await shared.saveMapping({vendor,bill_vendor:value},shared.state.mappingVersions[vendor]||0);
+      render();
       toast('Vendor mapping saved. Changed comparisons need review; previous notes are retained.');
     }
-    if (action === 'save-session') { const result = saveSession(browserStorage(), { version: 1, statements: state.statements, provider: state.provider, resolutions: state.resolutions }); if (!result.ok) throw new Error(result.error); if (restoredNotice) { restoredNotice = ''; render(); } toast('Session saved in this browser. Select original PDFs again after leaving.'); }
+    if (action === 'save-session') { ready();if(state.selected&&state.drawerTab==='extraction')collectDoc(getDoc());if(state.selected&&state.drawerTab==='notes'){getDoc().notes=document.querySelector('#doc-notes').value;getDoc().assignee=document.querySelector('#assignee').value;}for(const doc of [...state.statements])await persistDoc(doc);render();if(state.selected)renderDrawer();toast('Changes saved to the shared workspace.'); }
     if (action === 'disconnect') { state.provider = { loaded: false, simulated: false, records: [], label: 'Not connected' }; state.resolutions = reviewNotesOnly(state.resolutions); render(); toast('Extraction-only mode. Invoice notes retained; comparison decisions need review.'); }
-    if (action === 'clear') modal('Clear this workspace?', '<p>This removes extracted statements, imported records, review notes, vendor mappings, and saved AP data from this browser. It does not delete your original PDFs or change BILL.</p>', 'confirm-clear', 'Clear workspace');
-    if (action === 'confirm-clear') { const result = clearSession(browserStorage()); if (!result.ok) throw new Error(result.error); restoredNotice = ''; state.statements = []; state.provider = { loaded: false, records: [], simulated: false }; state.resolutions = {}; state.mappings = {}; state.errors = []; files.clear(); closeOverlay(); render(); toast('Browser-local AP data cleared.'); }
+    if (action === 'clear') modal('Reset local view?', '<p>Reload shared records and discard unsaved edits in this tab. This does not delete shared statements, BILL records, or previous work.</p>', 'confirm-clear', 'Reset local view');
+    if (action === 'confirm-clear') {await shared.load({replace:true});dirty.clear();state.errors=[];files.clear();closeOverlay();render();toast('Local view reset. Shared history retained.');}
     if (action === 'remove-doc') { const doc = getDoc(); const id = doc.id; modal('Remove this statement?', `<p>Remove ${esc(doc.filename)} and its review notes from this workspace? Your original PDF will not be deleted.</p>`, 'confirm-remove', 'Remove'); state.selected = id; }
-    if (action === 'confirm-remove') { const doc = getDoc(); for (const row of groupInvoices(doc)) delete state.resolutions[row.id]; state.statements = state.statements.filter(d => d.id !== doc.id); files.delete(doc.id); closeOverlay(); render(); }
+    if (action === 'confirm-remove') { const doc = getDoc();await shared.archiveStatement(doc.id,shared.state.details.get(doc.id).version);files.delete(doc.id);closeOverlay();render(); }
     if (action === 'template') download('bill-record-template.csv', toCSV([['vendor','invoiceNumber','amount','kind','currency','clearedPaymentAmount','scheduledAmount','creditAmount','paymentDate','id']]));
     if (action === 'export') {
       const header = ['vendor','statement','statementDate','invoiceNumber','activityType','originalAmount','statementOutstanding','result','reason','source','simulated','reviewDecision','reviewNote','assignedReviewer'];
       const rows = results().map(r => { const doc = state.statements.find(d => d.id === r.statementId); const resolution = reviewDecision(r.id); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),statuses[r.status].label,r.reason,state.provider.label || 'No BILL data',r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',state.resolutions[r.id]?.note || '',doc.assignee || '']; });
       download('statement-reconciliation.csv', toCSV([header,...rows])); toast('Report exported with source and review notes.');
     }
-  } catch(error) { toast(error.message || 'This action could not be completed.', true); }
+  } catch(error) { sharedError=error;retryOperation=error.retry||null;toast(error.message || 'This action could not be completed.', true);decorateSharedUi(); }
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && overlay.innerHTML) closeOverlay();
@@ -372,3 +393,4 @@ document.addEventListener('keydown', e => {
   }
 });
 render();
+startShared();

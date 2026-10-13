@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSharedClient} from '../app/ap_statements/frontend/shared-client.mjs';
 const fixture=(timeoutMs=200)=>{let receiver;const sent=[];const client=createSharedClient({send:v=>sent.push(v),subscribe:f=>{receiver=f;return()=>{receiver=null;};},timeoutMs});return {client,sent,reply:v=>receiver?.(v)};};
-const ack=(request,data={saved:true})=>({version:1,request_id:request.request_id,ok:true,data,error:null});
+const ack=(request,data={saved:true})=>({version:1,request_id:request.request_id,attempt:request.attempt,ok:true,data,error:null});
 test('queues one request at a time and ignores unrelated acknowledgements',async()=>{
   const {client,sent,reply}=fixture();const first=client.request('bootstrap',{}),second=client.request('statement',{statement_id:crypto.randomUUID()});
   assert.equal(sent.length,1);reply({...ack(sent[0]),request_id:crypto.randomUUID()});assert.equal(sent.length,1);
@@ -10,7 +10,7 @@ test('queues one request at a time and ignores unrelated acknowledgements',async
 });
 test('timeout offers identical request retry rather than a second write identity',async()=>{
   const {client,sent,reply}=fixture(10);let failure;try{await client.request('complete_revision',{initials:'KC'});}catch(e){failure=e;}
-  assert.equal(failure.code,'timeout');const retry=failure.retry();assert.deepEqual(sent[1],sent[0]);reply(ack(sent[1]));await retry;client.dispose();
+  assert.equal(failure.code,'timeout');const retry=failure.retry();assert.equal(sent[1].request_id,sent[0].request_id);assert.deepEqual(sent[1].payload,sent[0].payload);assert.notEqual(sent[1].attempt,sent[0].attempt);reply(ack(sent[0]));reply(ack(sent[1]));await retry;client.dispose();
 });
 test('dispose rejects outstanding requests and clears subscribers',async()=>{
   const {client,sent}=fixture();const first=client.request('bootstrap',{}),second=client.request('bootstrap',{});

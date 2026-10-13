@@ -56,3 +56,10 @@ test('completion acknowledgement retry preserves identity and removes completed 
   try{await workspace.completeStatement({statement_id:original.id,expected_version:2,initials:'KC',notes:''});}catch(error){failure=error;}
   assert.equal(workspace.state.statements.length,1);fail=false;await failure.retry();assert.equal(ids[0],ids[1]);assert.equal(workspace.state.statements.length,0);assert.equal(workspace.state.details.get(original.id).readOnly,true);
 });
+test('completion first acknowledges the exact current comparison source before freezing it',async()=>{
+  const original=doc(),calls=[];const workspace=createSharedWorkspace({dispose(){},async request(action,payload){calls.push({action,payload});return {statement_id:original.id,version:action==='save_revision'?3:4};}});
+  workspace.state.statements=[original];workspace.state.details.set(original.id,{doc:original,version:2,importId:'old-source',results:[{id:original.rows[0].id,status:'missing'}]});
+  workspace.state.importId=importId;workspace.state.provider={loaded:true,simulated:false,records:[{id:'bill',vendor:'Alpha',invoiceNumber:'00042',amount:18400,currency:'USD'}]};
+  await workspace.completeStatement({statement_id:original.id,expected_version:2,initials:'KC',notes:''});
+  assert.equal(calls[0].action,'save_revision');assert.equal(calls[0].payload.import_id,importId);assert.equal(calls[0].payload.results[0].status,'matched');assert.equal(calls[1].action,'complete_revision');assert.equal(calls[1].payload.expected_version,3);
+});

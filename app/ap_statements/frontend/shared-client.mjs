@@ -7,11 +7,11 @@ export function createSharedClient({send,subscribe,timeoutMs=30000}) {
     if(active||disposed||!queue.length)return;
     active=queue.shift();const item=active;
     item.timer=setTimeout(()=>{if(active!==item)return;active=null;item.reject(fail('timeout','No save acknowledgement. Retry this operation before editing further.',item));advance();},timeoutMs);
-    try{send({version:1,request_id:item.id,action:item.action,payload:item.payload});}
+    try{send({version:1,request_id:item.id,attempt:item.attempt,action:item.action,payload:item.payload});}
     catch{clearTimeout(item.timer);active=null;item.reject(fail('unavailable','Shared storage is unavailable. Retry this operation.',item));advance();}
   }
   const unsubscribe=subscribe(reply=>{
-    if(!active||reply?.version!==1||reply.request_id!==active.id||typeof reply.ok!=='boolean')return;
+    if(!active||reply?.version!==1||reply.request_id!==active.id||(reply.attempt??0)!==active.attempt||typeof reply.ok!=='boolean')return;
     const item=active;clearTimeout(item.timer);active=null;
     if(reply.ok)item.resolve(reply.data);
     else item.reject(fail(reply.error?.code||'unavailable',reply.error?.message||'Not saved. Retry.',item));
@@ -22,11 +22,12 @@ export function createSharedClient({send,subscribe,timeoutMs=30000}) {
     let snapshot,identity;
     try{snapshot=JSON.parse(JSON.stringify(payload));identity=JSON.stringify({action,payload:snapshot});
       if(new TextEncoder().encode(identity).length>LIMITS.envelope-256)throw new Error('Request exceeds the size limit.');
-      if(identities.has(requestId)&&identities.get(requestId)!==identity)throw new Error('Request id has a different payload.');
+      if(identities.has(requestId)&&identities.get(requestId).identity!==identity)throw new Error('Request id has a different payload.');
     }catch(error){return Promise.reject(error);}
-    identities.set(requestId,identity);
+    const attempt=(identities.get(requestId)?.attempt??-1)+1;
+    identities.set(requestId,{identity,attempt});
     return new Promise((resolve,reject)=>{
-      const item={id:requestId,action,payload:snapshot,resolve,reject};
+      const item={id:requestId,attempt,action,payload:snapshot,resolve,reject};
       if(signal?.aborted){reject(new Error('Request cancelled.'));return;}
       // Disposing the entire access session is the cancellation boundary. A
       // sent write may already have committed; retry keeps its original ID.

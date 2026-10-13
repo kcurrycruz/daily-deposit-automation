@@ -11,7 +11,8 @@ MESSAGES={'validation':'Check the fields and allowed size limits before retrying
 
 def dispatch_request(value,session,config,service,now):
     request_id=value.get('request_id') if type(value) is dict else None
-    reply={'version':1,'request_id':request_id,'ok':False,'data':None,'error':None}
+    attempt=value.get('attempt',0) if type(value) is dict else 0
+    reply={'version':1,'request_id':request_id,'attempt':attempt if type(attempt) is int and 0<=attempt<=1000000 else None,'ok':False,'data':None,'error':None}
     try:
         auth=require_access(session,config,now)
         request=validate_request(value)

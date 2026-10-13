@@ -41,4 +41,27 @@ class ProtocolTests(unittest.TestCase):
             def handle(self,*args): raise AssertionError('Unauthorized call')
         reply=dispatch_request(self.request(),state,CONFIG,Service(),NOW+timedelta(hours=8))
         self.assertEqual(reply['error']['code'],'denied')
+    def test_transport_retry_can_dispatch_without_automatic_rerun_loop(self):
+        from app.ap_statements_ui import render_ap_statements
+        from test_ap_shared_gate import GateUi
+        from app.ap_shared.access import attempt_unlock
+        from test_ap_shared_access import TestLimiter
+        from app.ap_shared.repository import ApStoreError
+        ui=GateUi();attempt_unlock(ui.session_state,CONFIG.password,CONFIG,TestLimiter(),NOW)
+        class Service:
+            calls=0
+            def handle(self,*args):
+                self.calls+=1
+                if self.calls==1:raise ApStoreError('unavailable')
+                return {'statements':[]}
+        service=Service();request=self.request()
+        args={'config':CONFIG,'now':NOW,'service':service}
+        render_ap_statements(ui,component_renderer=lambda **kw:request,**args)
+        render_ap_statements(ui,component_renderer=lambda **kw:request,**args)
+        self.assertEqual(service.calls,1)
+        retry={**request,'attempt':1}
+        render_ap_statements(ui,component_renderer=lambda **kw:retry,**args)
+        self.assertEqual(service.calls,2)
+        self.assertTrue(ui.session_state['_ap_shared_reply']['ok'])
+        self.assertEqual(ui.session_state['_ap_shared_reply']['attempt'],1)
 

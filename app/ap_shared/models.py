@@ -112,7 +112,8 @@ def validate_request(value: object) -> JsonObject:
         raise ApValidationError('A valid JSON payload is required.') from None
     if size > MAX_ENVELOPE_BYTES:
         raise ApValidationError('Request exceeds the size limit.')
-    out=allowed(value,'version request_id action payload','version request_id action payload')
+    out=allowed(value,'version request_id action payload attempt','version request_id action payload')
+    out['attempt']=integer(out.get('attempt',0),minimum=0,maximum=1000000)
     if type(out['version']) is not int or out['version'] != 1 or type(out['action']) is not str or out['action'] not in ACTIONS or type(out['payload']) is not dict:
         raise ApValidationError('Unsupported request.')
     out['request_id']=require_uuid(out['request_id'])

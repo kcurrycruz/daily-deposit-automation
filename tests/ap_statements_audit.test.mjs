@@ -74,7 +74,7 @@ function deletionFixture(remainingAmount = '100.00', action = 'delete-row') {
     r: { decision: 'Reviewed — no action needed', note: 'Reviewed original $100 evidence', at: '2026-10-01' },
     unrelated: { decision: 'Follow up with vendor', note: 'Other document review', at: '2026-10-01' }
   } };
-  const context = { cents, groupInvoices, reconcile, totals, state, uid: () => 'added',
+  const context = { historicalDetail:null,cents, groupInvoices, reconcile, totals, state, uid: () => 'added',
     overlay: { querySelectorAll: () => [tr('r', 'INV123', remainingAmount), ...(action === 'delete-row' ? [tr('blank', '', '0.00')] : [])] },
     document: { querySelector: selector => ({ value: { '#doc-vendor': 'A&B Supply', '#doc-date': '2026-10-01', '#doc-total': '100.00' }[selector] }) },
     action, target: { dataset: { id: 'blank' } }, getDoc: () => doc, render() {}, renderDrawer() {} };
@@ -148,7 +148,7 @@ test('changing a vendor mapping reopens changed evidence while retaining review 
     r: { decision: 'Reviewed — no action needed', note: 'Prior vendor comparison', at: '2026-10-01' },
     unrelated: { decision: 'Follow up with vendor', note: 'Keep other review', at: '2026-10-01' }
   } };
-  const context = { state, groupInvoices, vendorKey, action: 'mapping', target: { dataset: { vendor: doc.vendor, input: 'mapping-0' } },
+  const context = { historicalDetail:null,state, groupInvoices, vendorKey, action: 'mapping', target: { dataset: { vendor: doc.vendor, input: 'mapping-0' } },
     document: { getElementById: () => ({ value: 'Other vendor' }) }, saveVendorMappings: () => ({ ok: true }),
     browserStorage() {}, render() {}, toast() {} };
   vm.runInNewContext(source.slice(source.indexOf('const reviewDecision ='), source.indexOf('function stats()')), context);

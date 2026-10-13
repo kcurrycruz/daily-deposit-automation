@@ -8,6 +8,8 @@ Run Python unittest discovery in the QA environment, the full `tests/ap_statemen
 
 `tests/fixtures/ap_shared/browser.html` is a synthetic UI harness served from the repository root. It contains no finance files or credentials and does not test durable cloud storage. Keep it separate from the deployed AP entry point.
 
+`tests/fixtures/ap_shared/streamlit_bridge_app.py` exercises the actual Streamlit component handshake with an injected synthetic service. Run it only locally; `?fail_once=1` injects a temporary bootstrap failure for retry validation. Mutation request IDs stay fixed across retries, while transport attempt numbers distinguish fresh deliveries and acknowledgements. This fixture contains no cloud credentials and does not save financial data.
+
 ## Cloud access and persistence checks
 
 - [ ] Owner authorizes a separate disposable test project and supplies credentials directly through local or Streamlit secrets, not chat.
@@ -29,5 +31,7 @@ Run Python unittest discovery in the QA environment, the full `tests/ap_statemen
 - [ ] An administrator identifies an expired, unreferenced upload prefix and removes only its staged test objects. Referenced originals and history remain readable.
 
 ## Current status
+
+Local verification on October 13, 2026: Python ran 588 tests successfully with one live-integration skip; all 157 Node tests passed; all 32 embedded PostgreSQL assertions passed. Frontend build, dependency compatibility and whitespace checks passed. The independent branch review identified four cross-layer issues; each received a failing regression followed by a passing fix. A fresh synthetic Streamlit browser session recovered from a temporary bootstrap failure, and Lock AP removed the financial iframe. These checks use no company data.
 
 Cloud Storage access, real credential compatibility, two independent cloud-backed browser sessions, expired live links and backup restoration remain **unverified deployment blockers**. The skipped integration test is not a pass. Keep the design's status short of Implemented until those checks and release are complete.

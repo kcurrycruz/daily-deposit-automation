@@ -678,18 +678,8 @@ def _hash_control_total(wb, report_date=None) -> float | None:
         }
         if "total" not in labels and "hashdetailtotal" not in labels:
             continue
-        candidates = (
-            row[amount_column : amount_column + 1]
-            if amount_column < len(row)
-            else ()
-        )
-        if candidates and candidates[0] is not None and str(candidates[0]).strip():
-            return round(abs(_finite_amount(candidates[0], "HASH control total")), 2)
-        for value in (*candidates, *reversed(row)):
-            try:
-                return round(abs(_finite_amount(value, "HASH control total")), 2)
-            except ValueError:
-                continue
+        declared = row[amount_column] if amount_column < len(row) else None
+        return round(abs(_finite_amount(declared, "HASH control total")), 2)
     return None
 
 
@@ -775,6 +765,28 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
     detail_total = 0.0
     target_codes = {23: "refunded", 32: "pass_through", 34: "paid_in"}
 
+    # SMS sometimes places detail amounts one cell left of the printed Amount
+    # header, while keeping the control total under that header. Infer the
+    # detail layout from a populated coded row, not from a blank row's Qty.
+    detail_amount_col = amount_col
+    if amount_col >= 2:
+        for row in ws.iter_rows(min_row=amount_header_row + 1, values_only=True):
+            try:
+                numeric_code = float(row[code_col])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if not numeric_code.is_integer():
+                continue
+            declared = row[amount_col] if len(row) > amount_col else None
+            shifted = row[amount_col - 1] if len(row) >= amount_col else None
+            preceding = row[amount_col - 2] if len(row) >= amount_col - 1 else None
+            if declared is not None and str(declared).strip():
+                break
+            if (shifted is not None and str(shifted).strip()
+                    and preceding is not None and str(preceding).strip()):
+                detail_amount_col = amount_col - 1
+                break
+
     for excel_row_num, row in enumerate(
         ws.iter_rows(min_row=amount_header_row + 1, values_only=True),
         start=amount_header_row + 1,
@@ -790,31 +802,14 @@ def parse_hash_sheet_details(filepath: Path, report_date) -> dict:
             continue
         code = int(numeric_code)
         code_index = code_col
-        raw_amount = row[amount_col] if len(row) > amount_col else None
-        amount = None
-        if raw_amount is not None and str(raw_amount).strip():
-            try:
-                amount = round(_finite_amount(raw_amount, f"HASH code {code} Amount"), 2)
-            except ValueError:
-                wb.close()
-                raise
-        if amount is None:
-            fallback_values = []
-            for idx, value in enumerate(row):
-                if idx < 3 or value is None:
-                    continue
-                try:
-                    num = _finite_amount(value, f"HASH code {code} shifted Amount")
-                except ValueError:
-                    continue
-                if abs(num - code) < 0.000001:
-                    continue
-                fallback_values.append((idx, num))
-            if fallback_values:
-                amount = round(fallback_values[1][1] if len(fallback_values) >= 2 else fallback_values[0][1], 2)
-        if amount is None:
+        raw_amount = row[detail_amount_col] if len(row) > detail_amount_col else None
+        if raw_amount is None or isinstance(raw_amount, str) and not raw_amount.strip():
+            continue
+        try:
+            amount = round(_finite_amount(raw_amount, f"HASH code {code} Amount"), 2)
+        except ValueError:
             wb.close()
-            raise ValueError(f"HASH code {code} must contain a valid monetary amount")
+            raise
         detail_total = round(detail_total + amount, 2)
         row_type = target_codes.get(code)
         if row_type == "refunded":
@@ -915,6 +910,9 @@ def parse_excel_discounts(filepath: Path, report_date) -> dict:
         try:
             code = int(float(str(code)))
         except (ValueError, TypeError, OverflowError):
+            continue
+        if amt is None or isinstance(amt, str) and not amt.strip():
+            # SMS prints unused shopper levels with no monetary activity.
             continue
         try:
             amt = _finite_amount(amt, f"Discount level {code} amount")
@@ -1119,6 +1117,10 @@ def parse_bs_sheet(filepath: Path, report_date) -> dict:
         if row[1] == "Total" and row[2] == "Taxes":
             bs["sales_tax"] = to_float(bal)
             log.info(f"    Sales Tax: ${bs['sales_tax']:,.2f}")
+        if amt is None or isinstance(amt, str) and not amt.strip():
+            # No activity for this Balance Sheet code; populated invalid
+            # amounts still fail in to_float below.
+            continue
         if code == 39: bs["bottle_sales"] = to_float(amt)
         if code == 40: bs["milk_bottle_fee"] = to_float(amt)
         if code == 205: bs["charity"] = to_float(amt)

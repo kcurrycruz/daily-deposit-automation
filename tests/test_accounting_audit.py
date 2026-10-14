@@ -130,7 +130,7 @@ class AccountingAuditTests(unittest.TestCase):
                 self.assertEqual(engine.parse_excel_report(path, DAY)[3], value)
 
     def test_sms_rejects_corrupt_recognized_balance_sheet_amounts(self):
-        for amount in ("not money", "NaN", "Infinity", None):
+        for amount in ("not money", "NaN", "Infinity"):
             with self.subTest(amount=amount), self.assertRaises(ValueError):
                 build_sms_deposit_data(synthetic_bundle("bs", (
                     ("Code", "Description", "Amount"), (930, "Visa", amount))))

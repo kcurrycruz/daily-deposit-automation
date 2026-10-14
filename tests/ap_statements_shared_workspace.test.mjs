@@ -29,10 +29,49 @@ test('same hash uses existing corrected statement without re-extraction',async()
   const result=await workspace.uploadStatement(new File(['%PDF-synthetic'],'new-name.pdf'),async()=>{extracted++;});assert.equal(result.doc.notes,'Keep this note');assert.equal(extracted,0);
 });
 test('failed save preserves edits; retry uses the same mutation identity and saved only on acknowledgement',async()=>{
-  const states=[],requests=[];let fail=true;const item=doc();
-  const workspace=createSharedWorkspace({dispose(){},async request(action,payload,options){requests.push(options.requestId);if(fail)throw Error('offline');return {statement_id:item.id,version:3};}},{onSaveState:s=>states.push(s)});
+  const states=[],requests=[];let fail=true;const item=doc(),revisionId=crypto.randomUUID();
+  const workspace=createSharedWorkspace({dispose(){},async request(action,payload,options){requests.push(options.requestId);if(fail)throw Error('offline');return action==='save_revision'?{statement_id:item.id,version:3,revision_id:revisionId}:{doc:item,version:3,revisionVersion:3,revisionId,resolutions:{}};}},{onSaveState:s=>states.push(s)});
   let error;try{await workspace.saveStatement(item,2);}catch(e){error=e;}
   assert.deepEqual(states,['saving','not_saved']);assert.equal(item.notes,'Keep this note');fail=false;await error.retry();assert.equal(requests[0],requests[1]);assert.equal(states.at(-1),'saved');
+});
+
+test('saved reviews immediately adopt the server timestamp from the exact acknowledged revision',async()=>{
+  const item=doc(),row=item.rows[0].id,revisionId=crypto.randomUUID(),at='2026-10-14T18:55:00+00:00',calls=[];
+  const resolution={decision:'Reviewed — no action needed',note:''};
+  const workspace=createSharedWorkspace({dispose(){},async request(action,payload){calls.push({action,payload});return action==='save_revision'?{statement_id:item.id,version:3,revision_id:revisionId}:{doc:item,version:3,revisionVersion:3,revisionId,resolutions:{[row]:{...resolution,at}},completed:false,archived:false};}});
+  const saved=await workspace.saveStatement(item,2,{resolutions:{[row]:resolution}});
+  assert.equal(saved.resolutions[row].at,at);assert.equal(workspace.state.resolutions[row].at,at);
+  assert.deepEqual(calls[1],{action:'statement',payload:{statement_id:item.id,revision_id:revisionId}});
+});
+
+test('post-save read failure keeps edits and retries readback without another save mutation',async()=>{
+  const item=doc(),revisionId=crypto.randomUUID(),states=[],calls=[];let offline=true;
+  const workspace=createSharedWorkspace({dispose(){},async request(action,payload,options){calls.push({action,id:options.requestId});if(action==='save_revision')return {statement_id:item.id,version:3,revision_id:revisionId};if(offline)throw Error('read offline');return {doc:item,version:3,revisionVersion:3,revisionId,resolutions:{}};}},{onSaveState:s=>states.push(s)});
+  workspace.state.statements=[item];let failure;
+  try{await workspace.saveStatement(item,2);}catch(error){failure=error;}
+  assert.ok(failure);assert.equal(workspace.state.statements[0],item);assert.equal(item.notes,'Keep this note');assert.equal(states.at(-1),'not_saved');
+  offline=false;await failure.retry();assert.equal(calls.filter(c=>c.action==='save_revision').length,1);assert.equal(calls[1].id,calls[2].id);assert.equal(states.at(-1),'saved');
+});
+
+test('a concurrently advanced head cannot be adopted as an editable saved revision',async()=>{
+  const item=doc(),revisionId=crypto.randomUUID();
+  const workspace=createSharedWorkspace({dispose(){},async request(action){return action==='save_revision'?{statement_id:item.id,version:3,revision_id:revisionId}:{doc:{...item,notes:'Old saved snapshot'},version:4,revisionVersion:3,revisionId,resolutions:{},completed:false};}});
+  workspace.state.statements=[item];workspace.state.details.set(item.id,{doc:item,version:2});
+  await assert.rejects(workspace.saveStatement(item,2),/changed.*reload/i);
+  assert.equal(workspace.state.statements[0],item);assert.equal(workspace.state.details.get(item.id).version,2);
+});
+
+test('retry after readback outage cannot overwrite corrections or decisions entered after failure',async()=>{
+  for(const change of ['doc','review']){
+    const item=doc(),row=item.rows[0].id,revisionId=crypto.randomUUID();let offline=true,snapshot;
+    const workspace=createSharedWorkspace({dispose(){},async request(action,payload){if(action==='save_revision'){snapshot=structuredClone(payload);return {statement_id:item.id,version:3,revision_id:revisionId};}if(offline)throw Error('read offline');return {doc:snapshot.doc,version:3,revisionVersion:3,revisionId,resolutions:snapshot.resolutions};}});
+    workspace.state.statements=[item];workspace.state.resolutions[row]={decision:'Follow up with vendor',note:''};let failure;
+    try{await workspace.saveStatement(item,2);}catch(error){failure=error;}
+    if(change==='doc')item.notes='New correction after failure';else workspace.state.resolutions[row]={decision:'Investigate amount difference',note:'New note'};
+    offline=false;await assert.rejects(failure.retry(),/local edits.*changed/i);
+    assert.equal(workspace.state.statements[0],item);
+    if(change==='doc')assert.equal(item.notes,'New correction after failure');else assert.equal(workspace.state.resolutions[row].note,'New note');
+  }
 });
 test('failed import retains prior provider and does not show Saved',async()=>{
   const states=[];const workspace=createSharedWorkspace({dispose(){},async request(){throw Error('offline');}},{onSaveState:s=>states.push(s)});

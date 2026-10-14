@@ -1,6 +1,7 @@
 """AP component and navigation, protected by server-side shared access."""
 
 from pathlib import Path
+from base64 import b64encode
 from re import fullmatch
 from datetime import datetime, timezone
 from app.ap_shared.models import read_config
@@ -31,12 +32,22 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
     except PermissionError:
         if "_ap_authorization" in ui.session_state:
             lock_access(ui.session_state)
-        ui.title("Unlock AP Statements")
-        if ui.button("← All Programs", key="ap_gate_back"):
-            return True
-        with ui.form("ap_unlock", clear_on_submit=True):
-            submitted = ui.text_input("Finance team password", type="password", key="_ap_password")
-            clicked = ui.form_submit_button("Open AP Statements")
+        with ui.container(key="ap_unlock_card"):
+            logo = Path(__file__).with_name("assets") / "hwfc-logo-simplified.png"
+            src = "data:image/png;base64," + b64encode(logo.read_bytes()).decode("ascii")
+            ui.markdown(
+                '<div id="hwfc-ap-gate" class="ap-gate-brand">'
+                f'<img src="{src}" alt="Honest Weight Food Co-op logo" width="52" height="52"/>'
+                '<div><strong>Honest Weight Food Co-op</strong><span>Our co-op. Our workspace.</span></div></div>',
+                unsafe_allow_html=True,
+            )
+            ui.title("Unlock AP Statements")
+            ui.markdown("Enter the finance team password to open your shared statement workspace.")
+            with ui.form("ap_unlock", clear_on_submit=True):
+                submitted = ui.text_input("Finance team password", type="password", key="_ap_password")
+                clicked = ui.form_submit_button("Open AP Statements", type="primary", use_container_width=True)
+            if ui.button("← Back to programs", key="ap_gate_back"):
+                return True
         if clicked:
             if limiter is None:
                 try:

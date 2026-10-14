@@ -1,6 +1,6 @@
 # AP shared workspace release validation
 
-Production activation is blocked until an authorized synthetic Supabase project passes the cloud and recovery checks below. The current implementation has local automated coverage, but no project credentials have been configured and no company data has been uploaded by this work.
+Production activation is blocked until the remaining cloud and recovery checks below pass. The owner configured a separate test deployment and Supabase workspace directly through Streamlit Secrets. Cloud tests use explicitly labeled synthetic records and PDFs only; no company financial files have been uploaded by this work.
 
 ## Local verification
 
@@ -12,7 +12,7 @@ Run Python unittest discovery in the QA environment, the full `tests/ap_statemen
 
 ## Cloud access and persistence checks
 
-- [ ] Owner authorizes a separate disposable test project and supplies credentials directly through local or Streamlit secrets, not chat.
+- [x] Owner authorizes a separate disposable test project and supplies credentials directly through Streamlit secrets, not chat.
 - [ ] Apply the migration and configure a private bucket; verify anon/authenticated table and function access is denied, including existing broad Storage policies.
 - [ ] Real server secret key works with the installed SDK. The opt-in `test_ap_shared_integration.py` read-only check runs with `AP_SYNTHETIC_INTEGRATION=1` and the test environment variables documented in that file.
 - [ ] Import synthetic CSVs with 1,001 and 5,610 records. All normalized ordinals load exactly once; incomplete imports leave the previous source active.
@@ -32,6 +32,8 @@ Run Python unittest discovery in the QA environment, the full `tests/ap_statemen
 
 ## Current status
 
-Local verification on October 13, 2026: Python ran 588 tests successfully with one live-integration skip; all 157 Node tests passed; all 32 embedded PostgreSQL assertions passed. Frontend build, dependency compatibility and whitespace checks passed. The independent branch review identified four cross-layer issues; each received a failing regression followed by a passing fix. A fresh synthetic Streamlit browser session recovered from a temporary bootstrap failure, and Lock AP removed the financial iframe. These checks use no company data.
+Local verification on October 14, 2026: Python ran 590 tests successfully with one live-integration skip; all 161 Node tests passed, including exact-revision review-date readback, readback-outage retry, concurrent-head protection, and edits made after a readback outage. The native unlock screen was checked at desktop and 390px mobile widths (350px card, no horizontal overflow). Frontend build and whitespace checks passed. Review of the unlock/date fix caught intervening-edit preservation and the Streamlit minimum version; the added regression failed before the preservation guard and passed after it, and the minimum was raised to 1.39 for keyed native containers. The earlier independent branch review identified four cross-layer issues; each received a failing regression followed by a passing fix. A synthetic Streamlit browser session recovered from a temporary bootstrap failure, and Lock AP removed the financial iframe.
 
-Cloud Storage access, real credential compatibility, two independent cloud-backed browser sessions, expired live links and backup restoration remain **unverified deployment blockers**. The skipped integration test is not a pass. Keep the design's status short of Implemented until those checks and release are complete.
+Authorized test-cloud checks demonstrated: real server SDK connectivity, a private bucket with no broad object policies, and zero anon/authenticated AP table/function privileges; imports of 1,001 and 5,610 synthetic records; two PDFs uploaded together; invoice lookup past record 1,000 with leading zeros retained; same-vendor amount candidates, amount differences, and missing invoices; corrected fields and private original previews; blank-initial rejection and completion with QA initials and empty notes; duplicate-PDF reuse; and completed evidence retaining the earlier import after a new import. An AP → programs → Daily → programs → AP component remount reloaded the saved source, draft, and history without re-upload. This is single-session persistence evidence, not independent-session validation. Export reported success, but downloaded contents were not verified.
+
+Two independent unlocked cloud-backed browser sessions, expired signed links, live wrong-password/cooldown/rotation checks, dropped-acknowledgement/concurrency tests, migration and recovery checks remain **unverified production-release gates**. Backup restoration has not been performed. The skipped integration test is not a pass. Keep the design's status short of Implemented until those checks and release are complete. Changes are deployed to the feature-branch test portal only; live `DD-v2` is unchanged.

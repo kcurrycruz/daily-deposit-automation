@@ -30,3 +30,39 @@
 .stApp:has(#hwfc-ap-page) [data-testid="stHeader"] button,
 .stApp:has(#hwfc-ap-page) [data-testid="stHeader"] button span { color: #31563a; }
 .stApp:has(#hwfc-ap-page) [data-testid="stButton"] button p { color: #ffffff; }
+
+/* Keep the native password gate separate from the full-width AP workspace. */
+.stApp:has(#hwfc-ap-gate) .block-container {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: clamp(4rem, 12vh, 7rem) 20px 3rem;
+}
+.stApp:has(#hwfc-ap-gate) [data-testid="stVerticalBlock"] { gap: 1rem; }
+.stApp:has(#hwfc-ap-gate) .st-key-ap_unlock_card {
+    border: 1px solid #dce3d5;
+    border-radius: 20px;
+    padding: clamp(20px, 4vw, 32px);
+    box-shadow: 0 8px 32px #26372f08;
+}
+.stApp:has(#hwfc-ap-gate) h1 {
+    font-size: clamp(1.5rem, 5vw, 1.85rem);
+    line-height: 1.25;
+    color: #26372f;
+    padding: 0;
+}
+.ap-gate-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.ap-gate-brand img { flex: 0 0 52px; }
+.ap-gate-brand strong { display: block; font-size: .7rem; letter-spacing: .09em; text-transform: uppercase; color: #31563a; }
+.ap-gate-brand span { display: block; font-size: .8rem; margin-top: 5px; }
+.stApp:has(#hwfc-ap-gate) [data-testid="stForm"] { border: 0; padding: 0; }
+.stApp:has(#hwfc-ap-gate) [data-testid="stTextInput"] input {
+    background: #f6f7f2; color: #26372f; border-radius: 8px;
+}
+.stApp:has(#hwfc-ap-gate) [data-testid="stFormSubmitButton"] button {
+    background: #205846; border-color: #205846; min-height: 44px;
+}
+.stApp:has(#hwfc-ap-gate) [data-testid="stFormSubmitButton"] button p { color: #fff; }
+.stApp:has(#hwfc-ap-gate) .st-key-ap_gate_back button {
+    background: transparent; border: 0; padding: 0; box-shadow: none;
+}
+.stApp:has(#hwfc-ap-gate) .st-key-ap_gate_back button p { color: #31563a; }

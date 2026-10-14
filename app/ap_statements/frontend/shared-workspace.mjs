@@ -81,7 +81,22 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   }
   function saveStatement(doc,expectedVersion,{resolutions=state.resolutions}={}){
     const payload=saveData(doc,expectedVersion,resolutions);
-    return write(async request=>{const reply=await request('save_revision',payload);const detail=adopt({...(state.details.get(doc.id)||{}),doc:clone(payload.doc),version:reply.version,resolutions:clone(payload.resolutions),results:payload.results,importId:payload.import_id,mappingSnapshot:payload.mapping_snapshot,ruleVersion:payload.rule_version});emit();return detail;});
+    payload.resolutions=clone(payload.resolutions);
+    const rowIds=new Set(groupInvoices(doc).map(row=>row.id));
+    const localReviews=()=>Object.fromEntries(Object.entries(state.resolutions).filter(([id])=>rowIds.has(id)));
+    const reviewsAtSave=JSON.stringify(localReviews());
+    return write(async request=>{
+      const reply=await request('save_revision',payload);
+      // The database stamps review dates. Read the exact acknowledged revision
+      // instead of adopting the unstamped client payload or a colleague's edits.
+      const saved=await request('statement',{statement_id:doc.id,revision_id:reply.revision_id});
+      if(saved.doc.id!==doc.id||saved.revisionId!==reply.revision_id||saved.revisionVersion!==reply.version||saved.version!==reply.version||saved.completed||saved.archived)
+        throw Object.assign(Error('This statement changed after saving. Reload latest before continuing; your local edits are retained.'),{code:'conflict'});
+      const current=state.statements.find(item=>item.id===doc.id)||doc;
+      if(JSON.stringify(current)!==JSON.stringify(payload.doc)||JSON.stringify(localReviews())!==reviewsAtSave)
+        throw Object.assign(Error('Your local edits have changed since this save. They are retained; reload latest only when ready to discard them.'),{code:'conflict'});
+      const detail=adopt({...saved,readOnly:false});emit();return detail;
+    });
   }
   function uploadStatement(file,extract){
     localFiles.set(file,file);let extracted=null,finished=null;

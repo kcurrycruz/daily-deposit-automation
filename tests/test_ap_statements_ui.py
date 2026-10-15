@@ -73,7 +73,7 @@ class ApRendererTests(unittest.TestCase):
         for phrase in ["Shared AP", "original PDFs", "Save acknowledgements", "BILL"]:
             self.assertIn(phrase, text)
         self.assertEqual(ui.session_state["run_result"], "retained")
-        self.assertEqual([call['key'] for call in ui.button_calls], ['ap_lock_access', 'ap_lock_access'])
+        self.assertEqual(ui.button_calls, [])
         self.assertNotIn("AP Statements", ui.messages)
 
     def test_confirmed_sidebar_exit_returns_to_hub_without_changing_daily_results(self):

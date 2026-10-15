@@ -61,10 +61,6 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
                 ui.session_state.pop("_ap_password", None)
                 ui.warning("Unable to unlock AP. Check the password and try again later if access is temporarily limited or unavailable.")
         return False
-    if ui.button("Lock AP", key="ap_lock_access"):
-        lock_access(ui.session_state)
-        ui.rerun()
-        return False
     path = Path(frontend_path) if frontend_path is not None else ap_frontend_path()
     missing_build = not (path / "index.html").is_file()
     if missing_build:

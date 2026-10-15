@@ -31,6 +31,19 @@
 .stApp:has(#hwfc-ap-page) [data-testid="stHeader"] button span { color: #31563a; }
 .stApp:has(#hwfc-ap-page) [data-testid="stButton"] button p { color: #ffffff; }
 
+/* The unlocked workspace supplies its own toolbar; don't reserve a second one. */
+.stApp:has(iframe[title="app.ap_statements_ui.hwfc_ap_statements"]) [data-testid="stHeader"] {
+    display: none;
+}
+.stApp:has(#hwfc-ap-page):has(iframe[title="app.ap_statements_ui.hwfc_ap_statements"]) .block-container {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.stApp:has(#hwfc-ap-page) iframe[title="app.ap_statements_ui.hwfc_ap_statements"] {
+    display: block;
+    height: 100dvh !important;
+}
+
 /* Keep the native password gate separate from the full-width AP workspace. */
 .stApp:has(#hwfc-ap-gate) .block-container {
     max-width: 520px;

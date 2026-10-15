@@ -26,7 +26,7 @@ html body{background:#fff}.main{background:#fff}
 .brand{padding-bottom:18px}
 .program-back{display:flex;align-items:center;gap:9px;width:100%;padding:12px 10px;margin:0 0 22px;border:1px solid #dce3d8;border-radius:8px;background:#fff;color:#205845;text-align:left;font-size:12px;min-height:44px}
 .program-back:hover{background:#e8f2e9}
-@media(max-width:700px){.sidebar{flex-wrap:wrap}.program-back{width:auto;margin:0;padding:9px;flex-shrink:0}.program-back span{display:inline}.nav{flex-basis:100%;justify-content:space-between}.program-back .icon{width:17px}}
+@media(max-width:800px){.sidebar{flex-wrap:wrap}.program-back{width:auto;margin:0;padding:9px;flex-shrink:0}.program-back span{display:inline}.nav{flex-basis:100%;justify-content:space-between}.program-back .icon{width:17px}}
 #shared-save-status{font-size:11px;color:#52694e;max-width:190px;line-height:1.5}
 #shared-save-status{font-weight:600}
 .history-hint{margin:18px 22px;font-size:12px;line-height:1.7;color:#63765c}
@@ -46,3 +46,14 @@ html body{background:#fff}.main{background:#fff}
 .statement-overview td small{font-size:10px;color:#86662c}.muted{color:#687864}
 .result-overview-layout{margin:0 0 24px;align-items:start}.invoice-details{margin:20px 0 24px;border:1px solid var(--line);border-radius:9px;padding:16px}.invoice-details>summary{font-size:13px;font-weight:650;color:#205845;cursor:pointer;margin-bottom:4px}.invoice-details[open]>summary{margin-bottom:18px}.invoice-review-detail{margin-top:18px}
 @media(max-width:800px){.bill-data-strip{flex-direction:column;align-items:flex-start;padding:16px}.statement-overview-heading{align-items:flex-start;flex-direction:column}.upload-review-start .dropzone{padding:16px}.top-actions{flex-wrap:wrap}.topbar{height:auto;min-height:56px;padding-top:8px;padding-bottom:8px}}
+
+/* Streamlit disables frame scrolling. Scroll the workspace, not its document. */
+.shell{height:100dvh;min-height:0;overflow:hidden}
+.main{height:100%;min-height:0;overflow-y:auto;scrollbar-gutter:stable}
+.sidebar{height:100dvh;overflow-y:auto}
+.sidebar>*{flex-shrink:0}
+@media(max-width:800px){
+  .shell{display:flex;flex-direction:column}
+  .sidebar{height:auto;max-height:40dvh;flex-shrink:0}
+  .main{height:auto;flex:1;min-height:0}
+}

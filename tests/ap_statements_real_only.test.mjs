@@ -85,6 +85,28 @@ function browserApp(data) {
   return { nodes, context, events, state: vm.runInNewContext('state', context) };
 }
 
+function scrollableApp(data) {
+  const app=browserApp(data);let markup='',main=null;
+  Object.defineProperty(app.nodes['#app'],'innerHTML',{
+    get:()=>markup,
+    set:value=>{markup=value;main={dataset:{workspaceView:app.state.view},scrollTop:0};}
+  });
+  app.nodes['#app'].querySelector=selector=>selector==='.main'?main:null;
+  return {...app,main:()=>main};
+}
+
+test('rerendering the same workspace preserves the list scroll position',()=>{
+  const app=scrollableApp(realSession());vm.runInNewContext('render()',app.context);
+  app.main().scrollTop=350;app.state.filter='presence';vm.runInNewContext('render()',app.context);
+  assert.equal(app.main().scrollTop,350);
+});
+
+test('switching workspace views starts the new view at the top',()=>{
+  const app=scrollableApp(realSession());vm.runInNewContext('render()',app.context);
+  app.main().scrollTop=350;app.state.view='connection';vm.runInNewContext('render()',app.context);
+  assert.equal(app.main().scrollTop,0);
+});
+
 test('arriving statements reuse the saved BILL source in a single upload and results workspace',()=>{
   const app=browserApp(realSession());vm.runInNewContext('render()',app.context);
   const html=app.nodes['#app'].innerHTML;

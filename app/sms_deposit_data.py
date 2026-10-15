@@ -79,13 +79,15 @@ def build_sms_deposit_data(bundle: SmsExportBundle) -> SmsDepositData:
         control_label="sales total",
         report_label="Sales",
         fallback_control_labels=("total",),
+        skip_blank_detail_amounts=True,
     )
     coupon_rows, _ = _subdepartment_amounts(
         bundle.reports["coupons"],
         control_label="coupon distribution total",
         report_label="Coupon distribution",
         fallback_control_labels=("total",),
-        skip_blank_coupon_allocations=True,
+        skip_blank_detail_amounts=True,
+        required_amount_codes=frozenset({3542}),
         control_total_extractor=lambda amounts: _sum(
             amount for code, amount in amounts.items() if code != 3542
         ),
@@ -143,7 +145,8 @@ def _subdepartment_amounts(
     report_label: str,
     fallback_control_labels: tuple[str, ...] = (),
     control_total_extractor=None,
-    skip_blank_coupon_allocations: bool = False,
+    skip_blank_detail_amounts: bool = False,
+    required_amount_codes: frozenset[int] = frozenset(),
 ) -> tuple[dict[int, Decimal], Decimal]:
     header_index, columns = _find_subdepartment_header(report.rows, report_label)
     amounts: dict[int, Decimal] = {}
@@ -153,12 +156,10 @@ def _subdepartment_amounts(
         if code is None:
             continue
         value = _cell(row, columns["amount"])
-        if (skip_blank_coupon_allocations and code != 3542
-                and (value is None or isinstance(value, str) and not value.strip())):
-            # SMS can print a quantity without a coupon allocation. Restore the
-            # pre-audit blank-row handling, but require the monetary control to
-            # reconcile before allowing the user to continue. Store Coupons
-            # (3542) is an authoritative total, not an optional allocation.
+        if (skip_blank_detail_amounts and code not in required_amount_codes
+                and _is_blank(value)):
+            # SMS may print a detail code without an amount. The report's
+            # monetary control must still reconcile before continuing.
             skipped_blank = True
             continue
         amount = _required_money(value, f"{report_label} code {code}")
@@ -186,7 +187,10 @@ def _discounts(report: SmsExport) -> tuple[dict[int, Decimal], Decimal]:
         level = _integer(_cell(row, columns["level"]))
         if level is None:
             continue
-        amount = _required_money(_cell(row, columns["amount"]), f"Discount level {level}")
+        value = _cell(row, columns["amount"])
+        if _is_blank(value):
+            continue
+        amount = _required_money(value, f"Discount level {level}")
         amounts[level] = _money(amounts.get(level, _ZERO) + abs(amount))
     total = _sum(amounts.values())
     _assert_control(
@@ -208,7 +212,10 @@ def _hash_amounts(report: SmsExport) -> tuple[Decimal, Decimal, Decimal]:
         code = _integer(_cell(row, columns["code"]))
         if code is None:
             continue
-        amount = _required_money(_cell(row, columns["amount"]), f"HASH code {code}")
+        value = _cell(row, columns["amount"])
+        if _is_blank(value):
+            continue
+        amount = _required_money(value, f"HASH code {code}")
         amounts[code] = _money(amounts.get(code, _ZERO) + amount)
     _assert_control(
         report,
@@ -242,7 +249,10 @@ def _balance_sheet_amounts(report: SmsExport) -> dict[str, Decimal]:
         code = _integer(_cell(row, columns["code"]))
         if code not in recognized_codes:
             continue
-        amount = _required_money(_cell(row, columns["amount"]), f"Balance Sheet code {code}")
+        value = _cell(row, columns["amount"])
+        if _is_blank(value):
+            continue
+        amount = _required_money(value, f"Balance Sheet code {code}")
         if code in _BS_CODE_KEYS:
             data[_BS_CODE_KEYS[code]] = amount
         elif code in _BS_SUMMED_CODES:
@@ -562,6 +572,10 @@ def _maybe_money(value: object) -> Decimal | None:
         return _money(amount) if amount.is_finite() else None
     except (InvalidOperation, ValueError):
         return None
+
+
+def _is_blank(value: object) -> bool:
+    return value is None or isinstance(value, str) and not value.strip()
 
 
 def _required_money(value: object, label: str) -> Decimal:

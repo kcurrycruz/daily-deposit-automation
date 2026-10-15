@@ -52,6 +52,19 @@ def fixture():
     return ApService(repo,CONFIG,lambda:clock[0],revalidate),repo,revalidate(),state,clock
 
 class ServiceTests(unittest.TestCase):
+    def test_current_frontend_rule_can_save_through_server_validation(self):
+        import subprocess
+        from pathlib import Path
+        from test_ap_shared_models import valid_doc
+        module=(Path(__file__).resolve().parents[1]/'app/ap_statements/frontend/core.mjs').as_uri()
+        version=subprocess.check_output(['node','--input-type=module','-e',f'import {{MATCH_RULE_VERSION}} from {json.dumps(module)};process.stdout.write(MATCH_RULE_VERSION)'],text=True)
+        service,repo,auth,_,_=fixture()
+        doc=valid_doc()
+        payload={'statement_id':doc['id'],'expected_version':2,'doc':doc,'resolutions':{},
+                 'import_id':None,'mapping_snapshot':{},'results':[],'rule_version':version}
+        saved=service.handle('save_revision',payload,str(uuid4()),auth)
+        self.assertEqual(saved['version'],3)
+
     def upload(self,service,auth,raw=b'%PDF-synthetic',kind='pdf',declared_hash=None):
         metadata={'kind':kind,'filename':'synthetic.'+kind,'size':len(raw),'file_hash':declared_hash or hashlib.sha256(raw).hexdigest()}
         result=service.handle('upload_begin',metadata,str(uuid4()),auth)
@@ -130,11 +143,12 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(first,service.handle('upload_finish',{'upload_id':upload},request,auth))
 
     def test_review_save_retry_does_not_change_payload_on_server_clock_tick(self):
+        from app.ap_shared.models import RULE_VERSION
         service,repo,auth,_,clock=fixture()
         from test_ap_shared_models import valid_doc
         doc=valid_doc(); request=str(uuid4())
         payload={'statement_id':doc['id'],'expected_version':2,'doc':doc,'resolutions':{'r':{'decision':'Reviewed — no action needed','note':''}},
-                 'import_id':None,'mapping_snapshot':{},'results':[{'id':'r','status':'possible','candidates':[]}],'rule_version':'ap-match-v2'}
+                 'import_id':None,'mapping_snapshot':{},'results':[{'id':'r','status':'possible','candidates':[]}],'rule_version':RULE_VERSION}
         first=service.handle('save_revision',payload,request,auth)
         clock[0]=NOW+timedelta(seconds=3)
         self.assertEqual(first,service.handle('save_revision',payload,request,auth))

@@ -1,3 +1,5 @@
+import {resolveStatementVendor} from './vendor-identity.mjs';
+export const MATCH_RULE_VERSION = 'ap-match-v3';
 export const money = cents => cents == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 export function cents(value) {
   if (typeof value === 'number') {
@@ -243,7 +245,8 @@ export const statuses = {
   possible: { label: 'Possible match', tone: 'amber' }, vendor: { label: 'Check vendor', tone: 'amber' },
 };
 export function reconcile(statement, provider, mappings = {}) {
-  const vendor = vendorKey(mappings[statement.vendor] || statement.vendor);
+  const identity=resolveStatementVendor(statement.vendor,provider.records||[],mappings);
+  const vendor = vendorKey(identity.vendor || '');
   const records = provider.records ?? [];
   return groupInvoices(statement).map(row => {
     let matchMethod = null;
@@ -256,11 +259,11 @@ export function reconcile(statement, provider, mappings = {}) {
     const references = kindRecords.filter(r => invoiceKey(row.invoiceNumber) && invoiceKey(r.invoiceNumber) === invoiceKey(row.invoiceNumber));
     let candidates = references.filter(r => vendorKey(r.vendor) === vendor);
     if (candidates.length) matchMethod = 'reference';
-    else if (references.length) {
+    else if (references.length && !vendor) {
       matchMethod = 'reference';
-      return result('vendor', 'Invoice reference found under another or unresolved vendor. Verify the BILL vendor and save a vendor mapping before accepting it.', references);
+      return result('vendor', 'This invoice number exists, but the vendor is not confirmed. Choose the correct vendor above.', references);
     } else {
-      if (records.length && (!vendor || !records.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'The statement vendor is not mapped to a vendor in this export. Save a vendor mapping before searching amounts.');
+      if (records.length && (!vendor || !records.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'Confirm which BILL vendor sent this statement using the question above.');
       candidates = kindRecords.filter(r => vendorKey(r.vendor) === vendor && Number.isSafeInteger(row.originalAmount) && Number.isSafeInteger(r.amount) && r.amount === row.originalAmount);
       if (candidates.length) matchMethod = 'amount';
     }

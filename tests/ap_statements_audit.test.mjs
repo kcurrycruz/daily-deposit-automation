@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { cents, dateISO, importRecords, reconcile, groupInvoices, vendorKey, parseStatement, totals } from '../app/ap_statements/frontend/core.mjs';
 import { saveSession, loadSession } from '../app/ap_statements/frontend/session.mjs';
+import {statementComparisons} from '../app/ap_statements/frontend/simple-flow.mjs';
 
 const source = readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
 const statement = () => ({ id: 's', vendor: 'A&B Supply', layout: 'demo', statementDate: '2026-10-01',
@@ -74,7 +75,7 @@ function deletionFixture(remainingAmount = '100.00', action = 'delete-row') {
     r: { decision: 'Reviewed — no action needed', note: 'Reviewed original $100 evidence', at: '2026-10-01' },
     unrelated: { decision: 'Follow up with vendor', note: 'Other document review', at: '2026-10-01' }
   } };
-  const context = { historicalDetail:null,cents, groupInvoices, reconcile, totals, state, uid: () => 'added',
+  const context = { historicalDetail:null,cents, groupInvoices, reconcile, totals, state, comparisonsFor:doc=>statementComparisons(doc,state.provider,state.mappings), uid: () => 'added',
     overlay: { querySelectorAll: () => [tr('r', 'INV123', remainingAmount), ...(action === 'delete-row' ? [tr('blank', '', '0.00')] : [])] },
     document: { querySelector: selector => ({ value: { '#doc-vendor': 'A&B Supply', '#doc-date': '2026-10-01', '#doc-total': '100.00' }[selector] }) },
     action, target: { dataset: { id: 'blank' } }, getDoc: () => doc, render() {}, renderDrawer() {} };

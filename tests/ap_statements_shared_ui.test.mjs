@@ -2,7 +2,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {completionReviews,confirmVendor} from '../app/ap_statements/frontend/simple-flow.mjs';
+import {completionPayload} from '../app/ap_statements/frontend/history.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
+
+test('finish dialog acknowledges confirmed invoice presence together without silently saving reviews',async()=>{
+  const doc={id:'s',confirmed:true,rows:[{id:'r'}]},resolutions={r:{note:'Keep this'}};
+  let opened=false;const context={action:'complete-dialog',getDoc:()=>doc,dirty:new Set(),completionReviews,completionPayload,
+    comparisonsFor:()=>[{id:'r',status:'presence'}],state:{resolutions},shared:{state:{details:new Map([['s',{version:4}]])}},modal(){opened=true;},esc:String};
+  const block=source.slice(source.indexOf("if(action==='complete-dialog')"),source.indexOf("if(action==='complete-statement')"));
+  await vm.runInNewContext('(async()=>{'+block+'})()',context);
+  assert.equal(opened,true);assert.equal(resolutions.r.decision,undefined);
+});
+
+test('inline vendor confirmation refuses to discard unsaved edits',async()=>{
+  const doc={id:'s',vendor:'Rinella'};let saved=0;
+  const context={action:'vendor-confirm',getDoc:()=>doc,dirty:new Set(['s']),target:{dataset:{vendor:'A.J. Rinella'}},confirmVendor:async()=>{saved++;},ready(){},state:{},shared:{},persistDoc(){},render(){},renderDrawer(){},toast(){}};
+  const start=source.indexOf("if(action==='vendor-confirm'");
+  assert.ok(start>=0,'The inline choice must have an application handler');
+  const block=source.slice(start,source.indexOf("if(action==='confirm-reading')",start));
+  await assert.rejects(vm.runInNewContext('(async()=>{'+block+'})()',context),/Save.*before/i);
+  assert.equal(saved,0);
+});
+
+test('preliminary results cannot invite saved review decisions before the PDF is confirmed',()=>{
+  const context={reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
+  const doc={confirmed:false},row={id:'r',status:'presence',candidates:[],activity:[]};
+  assert.doesNotMatch(context.reviewView(doc,row,[row]),/data-action="resolve"|id="review-note"/);
+  doc.confirmed=true;assert.match(context.reviewView(doc,row,[row]),/data-action="resolve"/);
+});
+
+test('invoice details can render beneath the overview without duplicating the original PDF',()=>{
+  let previews=0;const context={reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>{previews++;return '<canvas></canvas>';},state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
+  const row={id:'r',status:'presence',candidates:[],activity:[]};
+  context.reviewView({confirmed:true},row,[row],false);assert.equal(previews,0);
+});
+
+test('closing a statement cannot destroy unsaved optional notes',()=>{
+  const state={selected:'s',selectedRow:'r'},overlay={innerHTML:'unsaved note editor',querySelector:()=>({})};
+  const context={state,overlay,dirty:new Set(['s']),toast(){},historicalDetail:null,priorFocus:null,renderToken:0};
+  vm.runInNewContext(source.slice(source.indexOf('function closeOverlay('),source.indexOf('function getDoc(')),context);
+  context.closeOverlay();assert.equal(overlay.innerHTML,'unsaved note editor');assert.equal(state.selected,'s');
+});
+
+test('invoice selection cannot rebuild editable controls during a pending save',()=>{
+  let renders=0;const context={saveState:'saving',dirty:new Set(),state:{selected:'s',selectedRow:'one'},e:{target:{id:'row-select',value:'two'}},toast(){},comparisonsFor:()=>[],getDoc:()=>({}),renderDrawer(){renders++;}};
+  const block=source.slice(source.indexOf("if (e.target.id === 'row-select')"),source.indexOf("if (e.target.id === 'provider-date')"));
+  vm.runInNewContext('(function(){'+block+'})()',context);
+  assert.equal(context.state.selectedRow,'one');assert.equal(context.e.target.value,'one');assert.equal(renders,0);
+});
 test('save acknowledgements re-enable controls disabled during a shared write',()=>{
   const button={disabled:true};const context={docDetail:()=>null,saveState:'saving',sharedError:null,retryOperation:null,shared:{state:{ready:true,details:new Map()}},state:{selected:null},overlay:{querySelectorAll:()=>[]},document:{querySelector:()=>null,querySelectorAll:()=>[button]}};
   vm.runInNewContext(source.slice(source.indexOf('function sharedStatus('),source.indexOf('function receiveShared(')),context);

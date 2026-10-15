@@ -18,7 +18,7 @@ MAX_PDFS = 20
 AUTH_SECONDS = 28800
 PREVIEW_SECONDS = 300
 MAX_SAFE_CENTS = 9007199254740991
-RULE_VERSION = 'ap-match-v2'
+RULE_VERSION = 'ap-match-v3'
 ACTIONS = frozenset('bootstrap records_page statement history_page pdf_preview upload_begin upload_chunk upload_finish import_begin import_records import_finish save_revision save_mapping complete_revision reopen_statement archive_statement migrate_legacy'.split())
 DECISIONS = frozenset(['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'])
 

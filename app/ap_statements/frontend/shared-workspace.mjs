@@ -1,4 +1,4 @@
-import {reconcile,groupInvoices,vendorKey} from './core.mjs';
+import {reconcile,groupInvoices,vendorKey,MATCH_RULE_VERSION} from './core.mjs';
 import {LIMITS} from './shared-client.mjs';
 import {reviewNotesOnly} from './session.mjs';
 const clone=value=>JSON.parse(JSON.stringify(value));
@@ -77,7 +77,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   function saveData(doc,expectedVersion,resolutions){
     const rows=groupInvoices(doc),ids=new Set(rows.map(r=>r.id));
     return {statement_id:doc.id,expected_version:expectedVersion,doc:clone(doc),resolutions:Object.fromEntries(Object.entries(resolutions).filter(([id])=>ids.has(id))),
-      import_id:state.importId,mapping_snapshot:clone(state.mappings),results:comparisonSnapshot(doc,state.provider,state.mappings),rule_version:'ap-match-v2'};
+      import_id:state.importId,mapping_snapshot:clone(state.mappings),results:comparisonSnapshot(doc,state.provider,state.mappings),rule_version:MATCH_RULE_VERSION};
   }
   function saveStatement(doc,expectedVersion,{resolutions=state.resolutions}={}){
     const payload=saveData(doc,expectedVersion,resolutions);
@@ -108,7 +108,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       extracted={...extracted,id:finished.statement_id,fileSize:file.size,fileModified:file.lastModified||0,confirmed:false};
       const payload=saveData(extracted,stored.version,{});
       const saved=await request('save_revision',payload);
-      const detail=adopt({...stored,doc:extracted,version:saved.version,results:payload.results,importId:state.importId,mappingSnapshot:clone(state.mappings),ruleVersion:'ap-match-v2'});
+      const detail=adopt({...stored,doc:extracted,version:saved.version,results:payload.results,importId:state.importId,mappingSnapshot:clone(state.mappings),ruleVersion:MATCH_RULE_VERSION});
       localFiles.delete(file);emit();return detail;
     });
   }

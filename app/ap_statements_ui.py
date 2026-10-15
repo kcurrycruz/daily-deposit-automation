@@ -126,12 +126,4 @@ def render_ap_statements(ui, *, component_renderer=None, frontend_path=None, con
             ui.session_state['_ap_shared_reply']=dispatch_request(value,ui.session_state,config,service,now)
             ui.session_state['_ap_shared_last_request']=fingerprint
             ui.rerun()
-    ui.caption(
-        "BILL API is disconnected. Comparisons use imported CSV records and "
-        "depend on export coverage. This does not verify QuickBooks sync."
-    )
-    ui.caption(
-        "Shared AP records and original PDFs are private. Save acknowledgements confirm storage; "
-        "unsaved edits remain in this browser tab only. Reviewer initials are self-reported."
-    )
     return False

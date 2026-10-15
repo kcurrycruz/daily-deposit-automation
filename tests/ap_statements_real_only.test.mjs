@@ -105,6 +105,21 @@ test('previous work does not render BILL setup instructions behind its history l
   const app=browserApp(realSession());app.state.view='history';vm.runInNewContext('render()',app.context);
   assert.doesNotMatch(app.nodes['#app'].innerHTML,/class="panel wide-panel bill-settings"/);
 });
+
+test('BILL data explains the disconnected API and CSV comparison limits',()=>{
+  const app=browserApp(realSession());app.state.view='connection';vm.runInNewContext('render()',app.context);
+  assert.match(app.nodes['#app'].innerHTML,/BILL API is not connected/);
+  assert.match(app.nodes['#app'].innerHTML,/CSV/);
+  assert.match(app.nodes['#app'].innerHTML,/QuickBooks sync/);
+});
+
+test('statement and exception workspaces keep API status notices inside BILL data',()=>{
+  const app=browserApp(realSession());
+  for(const view of ['statements','exceptions','history']){
+    app.state.view=view;vm.runInNewContext('render()',app.context);
+    assert.doesNotMatch(app.nodes['#app'].innerHTML,/BILL API (?:is )?(?:offline|disconnected|not connected)/i);
+  }
+});
 test('the rendered workspace and connection page offer no sample or simulation actions', () => {
   const app = browserApp();
   for (const view of ['statements', 'connection', 'exceptions']) {

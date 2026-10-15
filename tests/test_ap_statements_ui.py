@@ -10,6 +10,7 @@ class RecordingUi:
         self.errors = []
         self.blocks = []
         self.button_calls = []
+        self.captions = []
         from datetime import datetime, timezone
         from dataclasses import asdict
         from test_ap_shared_access import CONFIG, TestLimiter
@@ -32,6 +33,7 @@ class RecordingUi:
 
     def caption(self, text):
         self.messages.append(text)
+        self.captions.append(text)
 
     def markdown(self, text, **kwargs):
         self.messages.append(text)
@@ -60,7 +62,7 @@ class ApRendererTests(unittest.TestCase):
         render_ap_statements(ui, component_renderer=component)
         self.assertEqual(positions, [("confirmation",), ("confirmation",)])
 
-    def test_stable_component_key_and_privacy_guidance_without_financial_inputs(self):
+    def test_stable_component_key_without_financial_inputs(self):
         from app.ap_statements_ui import render_ap_statements
         ui, calls = RecordingUi(), []
         renderer = lambda **kwargs: calls.append(kwargs)
@@ -69,12 +71,15 @@ class ApRendererTests(unittest.TestCase):
         self.assertEqual(calls[0],calls[1])
         self.assertTrue(calls[0]['key'].startswith('hwfc_ap_statements_workspace_'))
         self.assertIsNone(calls[0]['shared_reply'])
-        text = " ".join(ui.messages)
-        for phrase in ["Shared AP", "original PDFs", "Save acknowledgements", "BILL"]:
-            self.assertIn(phrase, text)
         self.assertEqual(ui.session_state["run_result"], "retained")
         self.assertEqual(ui.button_calls, [])
         self.assertNotIn("AP Statements", ui.messages)
+
+    def test_unlocked_workspace_has_no_external_captions_competing_with_full_height_frame(self):
+        from app.ap_statements_ui import render_ap_statements
+        ui = RecordingUi()
+        render_ap_statements(ui, component_renderer=lambda **kwargs: None)
+        self.assertEqual(ui.captions, [])
 
     def test_confirmed_sidebar_exit_returns_to_hub_without_changing_daily_results(self):
         from app.ap_statements_ui import render_ap_statements

@@ -38,6 +38,11 @@ class SyntheticService:
                       'invoiceNumber':doc['rows'][0]['invoiceNumber'],'amount':10000,
                       'kind':'invoice','comparisonScope':'invoice-only','status':'Open','currency':'USD'}
                      for index,doc in enumerate(documents)]
+            if st.query_params.get('ambiguity')=='1':
+                documents=documents[:1]
+                documents[0]['rows'][0]['invoiceNumber']='261601'
+                records=[{**records[0],'id':f'{import_id}:{index}','invoiceNumber':reference}
+                         for index,reference in enumerate(['261768','261874','261673'])]
             if action=='bootstrap':
                 return {'activeImport':{'id':import_id,'metadata':{
                     'label':'synthetic-layout-bills.csv','sourceFormat':'bill-native',

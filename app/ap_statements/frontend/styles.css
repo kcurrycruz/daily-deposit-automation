@@ -52,6 +52,27 @@ html body{background:#fff}.main{background:#fff}
 .main{height:100%;min-height:0;overflow-y:auto;scrollbar-gutter:stable}
 .sidebar{height:100dvh;overflow-y:auto}
 .sidebar>*{flex-shrink:0}
+.bill-export-guide{width:min(820px,95vw);max-height:92dvh;padding:0;display:flex;flex-direction:column;overflow:hidden}
+.bill-guide-header{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:22px 26px 16px;flex-shrink:0}
+.bill-guide-header h2{margin:6px 0 0}.bill-guide-header .close{font-size:22px;flex-shrink:0}
+.bill-guide-progress{display:flex;align-items:center;gap:18px;padding:0 26px 18px;border-bottom:1px solid var(--line);font-size:11px;color:#63765c;flex-shrink:0}
+.bill-guide-progress ol{display:flex;gap:6px;flex:1;padding:0;margin:0;list-style:none}.bill-guide-progress li{flex:1;height:4px;border-radius:4px;background:#e4eadd}.bill-guide-progress li.complete{background:#205845}
+.bill-guide-body{overflow-y:auto;min-height:0;padding:22px 26px;overscroll-behavior:contain}
+.bill-guide-body h3{font:700 21px 'Manrope',sans-serif;letter-spacing:-.5px;margin:0 0 12px}.bill-guide-body>p{margin:0 0 18px;color:#53664e;font-size:13px}
+.bill-guide-shot{margin:14px 0 20px;background:#fafbf8;border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center}
+.bill-guide-shot img{display:block;width:auto;max-width:100%;height:auto;margin:0 auto;border-radius:4px}.bill-guide-shot.compact img{width:310px}
+.bill-guide-shot figcaption{font-size:11px;color:#68785f;margin-top:12px;line-height:1.6}
+.bill-guide-body .bill-guide-hint{font-size:11px;color:#79866f;margin:8px 0 0}.bill-guide-body .bill-guide-caution{background:#f3f6ed;padding:14px;border-radius:8px;font-size:11px;margin:18px 0 0}
+.bill-guide-ready{text-align:center;border:1px dashed #cbd8c2;border-radius:12px;padding:32px 18px;background:#f6f9f2}.bill-guide-ready>span{display:block;color:#205845;font-size:32px;margin-bottom:10px}.bill-guide-ready>strong{display:block;font-size:17px}.bill-guide-ready p{margin:8px 0 0}
+.bill-guide-actions{padding:16px 26px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;background:#fff}
+.bill-guide-actions .action-row{margin:0;flex-shrink:0}.bill-guide-actions>.button{white-space:normal;text-align:left}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.candidate-warning{font-size:12px;line-height:1.7;color:#786338;margin:0 0 16px}.candidate-warning strong{display:block;margin-top:5px;color:#66512c}
+.bill-candidates{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px}
+.bill-candidate{border:1px solid #e3e7dc;border-radius:8px;background:#fafbf8;overflow:hidden}
+.bill-candidate summary{cursor:pointer;padding:13px 12px;font-size:12px;font-weight:650;color:#435b3d;overflow-wrap:anywhere}
+.candidate-evidence{padding:0 12px 12px;border-top:1px solid var(--line);background:#fff}.candidate-evidence .evidence-line{font-size:10px;overflow-wrap:anywhere}.candidate-evidence .evidence-line>span{flex-shrink:0;max-width:46%}
+@media(max-width:500px){.bill-guide-header{padding:18px 18px 14px}.bill-guide-progress{padding:0 18px 14px}.bill-guide-body{padding:18px}.bill-guide-actions{padding:14px 18px;flex-wrap:wrap}.bill-guide-actions .action-row{margin-left:auto}.bill-guide-body h3{font-size:19px}.bill-guide-shot{padding:8px}}
 @media(max-width:800px){
   .shell{display:flex;flex-direction:column}
   .sidebar{height:auto;max-height:40dvh;flex-shrink:0}

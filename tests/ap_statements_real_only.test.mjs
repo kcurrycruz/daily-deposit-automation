@@ -7,6 +7,7 @@ import * as session from '../app/ap_statements/frontend/session.mjs';
 import * as guide from '../app/ap_statements/frontend/guide.mjs';
 import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import * as simpleView from '../app/ap_statements/frontend/simple-flow-view.mjs';
+const billTutorial=await import('../app/ap_statements/frontend/bill-export-guide.mjs').catch(()=>({}));
 import { createDemo, simulateRecords } from './fixtures/legacy_ap_demo.mjs';
 import { importBillSource } from '../app/ap_statements/frontend/bill-import.mjs';
 import { backButtonHtml, requestProgramHub } from '../app/ap_statements/frontend/navigation.mjs';
@@ -73,7 +74,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial, importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
   vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, ''), context);
@@ -94,6 +95,46 @@ function scrollableApp(data) {
   app.nodes['#app'].querySelector=selector=>selector==='.main'?main:null;
   return {...app,main:()=>main};
 }
+
+const actionEvent=(action,extra={})=>({target:{classList:{contains:()=>false},closest:()=>({dataset:{action,...extra}})}});
+
+test('Update BILL data opens the export guide without opening a file picker',async()=>{
+  const app=browserApp(realSession());let picked=0;
+  app.nodes['#csv-input'].click=()=>picked++;
+  const before=JSON.stringify(app.state);
+  await app.events.click(actionEvent('import'));
+  assert.match(app.nodes['#overlay-root'].innerHTML,/Step 1 of 4/);
+  assert.equal(picked,0);assert.equal(JSON.stringify(app.state),before);
+});
+
+test('guide Next and Back display the requested screenshot step',async()=>{
+  const app=browserApp(realSession());
+  await app.events.click(actionEvent('import'));
+  await app.events.click(actionEvent('bill-guide-step',{step:'1'}));
+  assert.match(app.nodes['#overlay-root'].innerHTML,/Legacy Import\/Export/);
+  await app.events.click(actionEvent('bill-guide-step',{step:'0'}));
+  assert.match(app.nodes['#overlay-root'].innerHTML,/Step 1 of 4/);
+});
+
+test('already-have-CSV and final upload keep the existing file import path',async()=>{
+  const app=browserApp(realSession());let picked=0;
+  app.nodes['#csv-input'].click=()=>picked++;
+  await app.events.click(actionEvent('import'));
+  picked=0;
+  await app.events.click(actionEvent('bill-guide-upload'));
+  assert.equal(picked,1);assert.equal(app.nodes['#overlay-root'].innerHTML,'');
+  assert.equal(app.state.provider.records.length,1);
+});
+
+test('opening the export guide cannot discard unsaved statement corrections',async()=>{
+  const app=browserApp(realSession());
+  vm.runInNewContext("state.selected='real-doc';dirty.add('real-doc')",app.context);
+  app.nodes['#overlay-root'].innerHTML='unsaved statement editor';
+  app.nodes['#csv-input'].click=()=>{};
+  await app.events.click(actionEvent('import'));
+  assert.equal(app.nodes['#overlay-root'].innerHTML,'unsaved statement editor');
+  assert.match(String(app.nodes['#toast'].textContent||''),/Save.*before/i);
+});
 
 test('rerendering the same workspace preserves the list scroll position',()=>{
   const app=scrollableApp(realSession());vm.runInNewContext('render()',app.context);

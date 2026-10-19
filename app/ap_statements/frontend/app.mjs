@@ -7,6 +7,7 @@ import { backButtonHtml, requestProgramHub } from './navigation.mjs';
 import { emptyWorkspace, workflowGuide } from './guide.mjs';
 import {statementComparisons,invoiceFound,completionReviews,confirmVendor,readingIssues} from './simple-flow.mjs';
 import {billDataHTML,uploadReviewHTML,vendorQuestionHTML,statementOverviewHTML} from './simple-flow-view.mjs';
+import {billExportGuideHTML} from './bill-export-guide.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -201,6 +202,12 @@ function modal(title, body, action, label = 'Continue') {
   overlay.innerHTML = `<div class="overlay modal-overlay"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h2 id="modal-title">${title}</h2>${body}<div class="action-row"><button class="button" data-action="close">Cancel</button><button class="button primary" data-action="${action}">${label}</button></div></section></div>`;
   overlay.querySelector('button')?.focus();
 }
+function showBillExportGuide(step=0) {
+  if(dirty.has(state.selected))throw Error('Save your statement edits before opening the export guide.');
+  if(!overlay.querySelector('.bill-export-guide'))priorFocus=document.activeElement;
+  overlay.innerHTML=billExportGuideHTML(step);
+  overlay.querySelector('[data-guide-title]')?.focus();
+}
 function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
 function getDoc() { return historicalDetail?.doc.id===state.selected?historicalDetail.doc:(state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc); }
 function openDoc(id,row=null,{historical=false,tab=null}={}) {
@@ -234,9 +241,17 @@ function extractionView(doc, check, warnings) {
 }
 function pdfPanel(doc) { const available=files.has(doc.id)||shared?.state.details.get(doc.id)?.originalAvailable;return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${available?'<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading private original…</div></div>':`<div class="no-source">${icon('ledger')}<br>Original PDF not attached. This migrated draft is incomplete.</div>`}</div>`; }
 function reviewView(doc, row, rows, showPDF=true) {
-  const bill = row.candidates[0];
+  const bill = row.candidates.length === 1 && row.matchMethod !== 'amount'
+    && !['ambiguous','possible','vendor'].includes(row.status) ? row.candidates[0] : null;
+  const suggestions = !bill && row.candidates.length > 0;
+  const importedEvidence = suggestions
+    ? `<h3>Possible BILL matches</h3><p class="candidate-warning">${row.matchMethod === 'amount'
+      ? `No exact reference found for ${esc(row.invoiceNumber)} under this vendor. These records share the amount only.`
+      : row.status === 'vendor' ? 'Confirm the BILL vendor before accepting any of these records.' : 'More than one BILL record is available. Review the records separately.'}
+      <strong>No invoice has been selected.</strong></p><ol class="bill-candidates">${row.candidates.map(candidate=>`<li><details class="bill-candidate"><summary>${esc(candidateSummary(candidate))}</summary><div class="candidate-evidence">${billEvidence(candidate).map(([key,value])=>`<div class="evidence-line"><span>${esc(key)}</span><strong>${esc(value)}</strong></div>`).join('')}</div></details></li>`).join('')}</ol>`
+    : `<h3>Imported BILL record</h3>${bill ? billEvidence(bill).map(([key,value])=>`<div class="evidence-line"><span>${esc(key)}</span><strong>${esc(value)}</strong></div>`).join('') : `<p class="candidate-warning">${state.provider.loaded ? 'No matching record available in this dataset.' : 'No BILL records connected. This invoice has not been checked.'}</p>`}`;
   const resolution = reviewDecision(row.id);
-  return `<label class="field">Select invoice or account activity<select id="row-select">${rows.map(r => `<option value="${r.id}" ${r.id === row.id ? 'selected' : ''}>${esc(r.invoiceNumber || r.kind)} · ${statuses[r.status].label}</option>`).join('')}</select></label><div class="notice ${row.status === 'matched' ? '' : 'amber'}">${icon(row.status === 'matched' ? 'check' : 'info')}<div>${badge(row.status)}<div style="margin-top:7px">${esc(row.reason)}</div></div></div><div class="evidence-grid"><div class="evidence-card"><h3>Vendor statement</h3>${[['Reference',row.invoiceNumber || 'Account activity'],['Original amount',money(row.originalAmount)],['Outstanding balance',money(row.outstanding)],['Statement date',doc.statementDate || 'Not identified'],['Source page',row.page]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div><div class="evidence-card"><h3>Imported BILL record</h3>${bill ? billEvidence(bill).map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('') : `<p style="font-size:11px;line-height:1.8;color:#829175">${state.provider.loaded ? 'No matching record available in this dataset.' : 'No BILL records connected. This invoice has not been checked.'}</p>`}${row.candidates.length > 1 ? `<p style="font-size:11px;color:#a47a3f">${row.candidates.length} candidates: ${row.candidates.map(b => esc(candidateSummary(b))).join(' · ')}</p>` : ''}</div></div><div class="${showPDF?'source-layout':'invoice-review-detail'}"><div><h3 style="font-size:12px">Statement activity for this reference</h3>${row.activity.map(a => `<div class="activity-list"><div>${esc(a.type)} · ${esc(a.invoiceNumber || 'account')}<small>${esc(a.date || 'Date not supplied')} · page ${a.page}</small></div><strong>${money(a.amount)}</strong></div>`).join('')}${doc.confirmed ? `<label class="field">Review decision<select id="review-decision">${['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'].map(v => `<option ${resolution?.decision === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="field">Review note<textarea id="review-note" placeholder="Explain your decision or next step…">${esc(state.resolutions[row.id]?.note || '')}</textarea></label><div class="action-row"><button class="button primary" data-action="resolve">${icon('check')}Save review decision</button>${resolution ? '<button class="button" data-action="reopen">Reopen item</button>' : ''}</div>${resolution ? `<p style="font-size:10px;color:#7e916c">Reviewed ${esc(new Date(resolution.at).toLocaleString())}. The original matching result is preserved.</p>` : ''}` : '<p class="muted">Confirm the PDF reading above before recording review decisions.</p>'}</div>${showPDF?pdfPanel(doc):''}</div>`;
+  return `<label class="field">Select invoice or account activity<select id="row-select">${rows.map(r => `<option value="${r.id}" ${r.id === row.id ? 'selected' : ''}>${esc(r.invoiceNumber || r.kind)} · ${statuses[r.status].label}</option>`).join('')}</select></label><div class="notice ${row.status === 'matched' ? '' : 'amber'}">${icon(row.status === 'matched' ? 'check' : 'info')}<div>${badge(row.status)}<div style="margin-top:7px">${esc(row.reason)}</div></div></div><div class="evidence-grid"><div class="evidence-card"><h3>Vendor statement</h3>${[['Reference',row.invoiceNumber || 'Account activity'],['Original amount',money(row.originalAmount)],['Outstanding balance',money(row.outstanding)],['Statement date',doc.statementDate || 'Not identified'],['Source page',row.page]].map(([k,v]) => `<div class="evidence-line"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div><div class="evidence-card">${importedEvidence}</div></div><div class="${showPDF?'source-layout':'invoice-review-detail'}"><div><h3 style="font-size:12px">Statement activity for this reference</h3>${row.activity.map(a => `<div class="activity-list"><div>${esc(a.type)} · ${esc(a.invoiceNumber || 'account')}<small>${esc(a.date || 'Date not supplied')} · page ${a.page}</small></div><strong>${money(a.amount)}</strong></div>`).join('')}${doc.confirmed ? `<label class="field">Review decision<select id="review-decision">${['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'].map(v => `<option ${resolution?.decision === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="field">Review note<textarea id="review-note" placeholder="Explain your decision or next step…">${esc(state.resolutions[row.id]?.note || '')}</textarea></label><div class="action-row"><button class="button primary" data-action="resolve">${icon('check')}Save review decision</button>${resolution ? '<button class="button" data-action="reopen">Reopen item</button>' : ''}</div>${resolution ? `<p style="font-size:10px;color:#7e916c">Reviewed ${esc(new Date(resolution.at).toLocaleString())}. The original matching result is preserved.</p>` : ''}` : '<p class="muted">Confirm the PDF reading above before recording review decisions.</p>'}</div>${showPDF?pdfPanel(doc):''}</div>`;
 }
 function notesView(doc) { return `<label class="field">Assigned reviewer (optional)<input id="assignee" value="${esc(doc.assignee)}" placeholder="Name or initials"></label><label class="field">Statement notes (optional)<textarea id="doc-notes" style="min-height:170px" placeholder="Vendor follow-up, unresolved opening balances, or review context…">${esc(doc.notes)}</textarea></label><button class="button primary" data-action="save-notes">Save notes</button><p style="font-size:11px;line-height:1.8;color:#879578">Acknowledged saves retain notes in the private shared workspace.</p>`; }
 async function previewPDF(doc) {
@@ -365,7 +380,13 @@ document.addEventListener('click', async e => {
       if (next.action === 'export') document.querySelector('[data-action="export"]').click();
       else goToGuideStep(next.action);
     }
-    if (action === 'import') document.querySelector('#csv-input').click();
+    if (action === 'import') { ready(); showBillExportGuide(); }
+    if (action === 'bill-guide-step') showBillExportGuide(target.dataset.step);
+    if (action === 'bill-guide-upload') {
+      ready();
+      if(dirty.has(state.selected))throw Error('Save your statement edits before uploading BILL data.');
+      closeOverlay();document.querySelector('#csv-input').click();
+    }
     if (action === 'open-doc') openDoc(target.dataset.id);
     if (action === 'open-result') openDoc(target.dataset.doc, target.dataset.id);
     if (action === 'close') closeOverlay();

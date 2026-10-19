@@ -1,4 +1,8 @@
 const key=value=>String(value??'').trim().toLowerCase().replace(/\s+/g,' ');
+export function providerVendors(provider,statementId){
+  const scope=provider.scopes?.[statementId];
+  return scope?.directoryComplete?scope.vendorDirectory:(provider.vendorDirectory||provider.records||[]);
+}
 // Preserve meaningful symbols (A&B is not AB) and branch/location words.
 function nameStem(value){
   let result=key(value).replace(/[.,]/g,'').replace(/\s+/g,' ');

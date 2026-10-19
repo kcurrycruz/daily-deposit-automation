@@ -139,6 +139,7 @@ class ApRepository:
         source=self.import_info(workspace_id,data['import_id']) if data['import_id'] else None
         return {'doc':data['doc'],'version':item['version'],'revisionVersion':data['version'],'revisionId':data['id'],
                 'importLabel':source['metadata'].get('label','') if source else '',
+                'importInfo':({key:source[key] for key in ('id','metadata','record_count','created_at')}|{'storage_format':source.get('storage_format','rows-v1')}) if source else None,
                 'resolutions':data['resolutions'],'results':data['results'],'importId':data['import_id'],
                 'mappingSnapshot':data['mapping_snapshot'],'ruleVersion':data['rule_version'],
                 'completed':item['completed'],'archived':item['archived'],'originalAvailable':bool(item.get('original_object_key'))}

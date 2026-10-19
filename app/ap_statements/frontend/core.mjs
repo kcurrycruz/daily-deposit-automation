@@ -244,10 +244,18 @@ export const statuses = {
   source: { label: 'Check BILL export', tone: 'amber' },
   possible: { label: 'Possible match', tone: 'amber' }, vendor: { label: 'Check vendor', tone: 'amber' },
 };
+export function comparisonInputKey(statement,mappings={}){
+  return JSON.stringify([MATCH_RULE_VERSION,statement.vendor,mappings[statement.vendor]??null,
+    groupInvoices(statement).map(row=>[invoiceKey(row.invoiceNumber),row.kind,row.originalAmount])]);
+}
 export function reconcile(statement, provider, mappings = {}) {
-  const identity=resolveStatementVendor(statement.vendor,provider.records||[],mappings);
+  const scope=provider.scopes?.[statement.id];
+  const complete=!provider.scopes||!!scope?.complete&&scope.inputKey===comparisonInputKey(statement,mappings)&&scope.directoryComplete;
+  const directory=scope?.directoryComplete?scope.vendorDirectory:(provider.vendorDirectory||provider.records||[]);
+  const identity=resolveStatementVendor(statement.vendor,directory,mappings);
   const vendor = vendorKey(identity.vendor || '');
-  const records = provider.records ?? [];
+  const records = provider.scopes?(complete?scope.records:[]):(provider.records??[]);
+  const sourceAsOf=scope?.metadata?.asOf??provider.asOf;
   return groupInvoices(statement).map(row => {
     let matchMethod = null;
     const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
@@ -255,6 +263,7 @@ export function reconcile(statement, provider, mappings = {}) {
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
     if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
     if (!provider.loaded) return result('unverified', 'No BILL records are connected or imported. This does not mean the invoice is missing.');
+    if(!complete)return result('unverified','The BILL comparison is loading or unavailable. Wait or retry before reviewing.');
     const kindRecords = records.filter(r => (r.kind ?? 'invoice') === row.kind);
     const references = kindRecords.filter(r => invoiceKey(row.invoiceNumber) && invoiceKey(r.invoiceNumber) === invoiceKey(row.invoiceNumber));
     let candidates = references.filter(r => vendorKey(r.vendor) === vendor);
@@ -263,7 +272,7 @@ export function reconcile(statement, provider, mappings = {}) {
       matchMethod = 'reference';
       return result('vendor', 'This invoice number exists, but the vendor is not confirmed. Choose the correct vendor above.', references);
     } else {
-      if (records.length && (!vendor || !records.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'Confirm which BILL vendor sent this statement using the question above.');
+      if (directory.length && (!vendor || !directory.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'Confirm which BILL vendor sent this statement using the question above.');
       candidates = kindRecords.filter(r => vendorKey(r.vendor) === vendor && Number.isSafeInteger(row.originalAmount) && Number.isSafeInteger(r.amount) && r.amount === row.originalAmount);
       if (candidates.length) matchMethod = 'amount';
     }
@@ -288,7 +297,7 @@ export function reconcile(statement, provider, mappings = {}) {
       const afterStatement = bill.paymentDate && statement.statementDate && bill.paymentDate > statement.statementDate;
       return result(outstanding === 0 || afterStatement ? 'paid' : 'balance', afterStatement ? `Payment dated ${bill.paymentDate} is after the statement date. Review timing.` : `Statement balance ${money(row.outstanding)}; BILL balance after cleared payments and credits ${money(outstanding)}.`, candidates);
     }
-    if (!provider.simulated && provider.asOf && statement.statementDate && provider.asOf !== statement.statementDate) return result('presence', 'Invoice and current balance agree; historical balance as of the statement date is not verified.', candidates);
+    if (!provider.simulated && sourceAsOf && statement.statementDate && sourceAsOf !== statement.statementDate) return result('presence', 'Invoice and current balance agree; historical balance as of the statement date is not verified.', candidates);
     return result('matched', provider.simulated ? 'Invoice and balance agree with simulated BILL records.' : 'Invoice and balance agree with imported records. Confirm their date and coverage.', candidates);
   });
 }

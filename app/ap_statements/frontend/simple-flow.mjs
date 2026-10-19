@@ -1,7 +1,8 @@
 import {reconcile,totals} from './core.mjs';
+import {providerVendors} from './vendor-identity.mjs';
 export const invoiceFound=row=>['matched','presence'].includes(row.status);
 export async function confirmVendor(doc,name,shared,persistDoc){
-  if(!shared.state.provider.records.some(record=>record.vendor===name))throw Error('Choose a vendor from the saved BILL data.');
+  if(!providerVendors(shared.state.provider,doc.id).some(record=>record.vendor===name))throw Error('Choose a vendor from the saved BILL data.');
   if(!doc.vendor?.trim()||['unidentified vendor','unknown','unidentified'].includes(doc.vendor.trim().toLowerCase())){
     doc.vendor=name;doc.confirmed=false;return persistDoc(doc);
   }
@@ -17,7 +18,7 @@ export function billDataSummary(provider,now=new Date()){
   const ready=!!provider.loaded&&!provider.simulated;
   const time=Date.parse(provider.refreshedAt||'');
   const dateKnown=Number.isFinite(time)&&time<=now.getTime();
-  return {ready,count:ready?(provider.records||[]).length:0,dateKnown,
+  return {ready,count:ready?(Number.isInteger(provider.recordCount)?provider.recordCount:(provider.records||[]).length):0,dateKnown,
     updatedAt:dateKnown?new Date(time).toISOString():null,
     updateDue:ready&&(!dateKnown||now.getTime()-time>=7*86400000)};
 }

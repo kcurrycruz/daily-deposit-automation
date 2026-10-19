@@ -1,4 +1,5 @@
-import {reconcile,groupInvoices,vendorKey,MATCH_RULE_VERSION} from './core.mjs';
+import {reconcile,groupInvoices,vendorKey,MATCH_RULE_VERSION,comparisonInputKey} from './core.mjs';
+import {createComparisonSource} from './comparison-source.mjs';
 import {LIMITS} from './shared-client.mjs';
 import {reviewNotesOnly} from './session.mjs';
 const clone=value=>JSON.parse(JSON.stringify(value));
@@ -11,10 +12,36 @@ export function legacyMigrationPreview(session,mappings={}){
     originalsAvailable:0,importMetadata:session?.provider?.loaded&&!session.provider.simulated?fields(session.provider,'label asOf refreshedAt sourceFormat'):null,mappings:clone(mappings)};
 }
 export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
-  const state={ready:false,provider:unloaded(),importId:null,statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
+  const state={ready:false,provider:unloaded(),importId:null,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map();let disposed=false,loaded=false;
+  let comparison=null;
   function check(){if(disposed)throw Error('AP is locked.');}
   const emit=()=>{check();onState(state);};
+  function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=provider;if(loaded)emit();}}});return source;}
+  async function ensureComparisons(doc){
+    check();if(!comparison||!state.provider.loaded)return null;
+    const detail=state.details.get(doc.id);
+    const info=detail?.importInfo||(detail?.importId&&detail.importId!==state.importId?{id:detail.importId,metadata:{label:detail.importLabel||''}}:state.activeImport);
+    const result=await comparison.ensure(doc,state.mappings,{importInfo:info});check();
+    const scope=state.provider.scopes?.[doc.id];
+    if(info&&(!scope?.complete||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
+    return result;
+  }
+  async function refreshComparisons(id){
+    check();const detail=state.details.get(id),doc=state.statements.find(item=>item.id===id);
+    if(!detail||!doc||detail.completed||detail.readOnly)throw Error('Open an editable statement before comparing again.');
+    if(!comparison)return null;
+    detail.importId=state.importId;detail.importInfo=state.activeImport;
+    for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
+    comparison.invalidate(id);const result=await ensureComparisons(doc);emit();return result;
+  }
+  async function adoptImport(result){
+    check();const info={id:result.importId,metadata:result.metadata,record_count:result.recordCount,storage_format:result.storageFormat};
+    const pending=makeComparison();
+    try{const provider=await pending.loadDirectory(info);check();provider.scopes=state.provider.scopes||{};
+      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info.id;emit();return provider;
+    }catch(error){pending.dispose();throw error;}
+  }
   function write(operation){
     const steps=[];
     async function execute(){
@@ -47,24 +74,29 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       const next=records.length<total?records.length-1:null;
       if(page.nextCursor!==next)throw Error('Shared import is incomplete.');after=next;
     }while(after!==null);
-    return {...metadata,records,loaded:true,simulated:false};
+    return {...metadata,records,recordCount:records.length,loaded:true,simulated:false};
   }
   async function load({replace=false}={}){
     check();if(loaded&&!replace)return state;
     // Work is assembled separately. A failed refresh cannot replace unsaved edits.
-    const summaries=[],cursors=new Set();let cursor=null,home;
+    const summaries=[],cursors=new Set();let cursor=null,home,pendingComparison;
     try{
       do{const page=await client.request('bootstrap',{cursor,limit:50});check();home??=page;
         if(page.activeImport?.id!==home.activeImport?.id)throw Error('The shared import changed while loading. Retry.');
         summaries.push(...page.statements);cursor=page.nextCursor;if(cursor&&cursors.has(cursor))throw Error('Shared statement list is incomplete.');cursors.add(cursor);
       }while(cursor);
-      const provider=home.activeImport?await loadProvider(home.activeImport.id,home.activeImport.metadata):{...unloaded(),label:'No BILL records imported'};
+      const snapshotCapable=home.capabilities?.billSnapshots===2;
+      pendingComparison=snapshotCapable?makeComparison():null;
+      const provider=snapshotCapable?await pendingComparison.loadDirectory(home.activeImport):(home.activeImport?await loadProvider(home.activeImport.id,home.activeImport.metadata):{...unloaded(),label:'No BILL records imported'});
       const details=[];for(const summary of summaries)details.push(await client.request('statement',{statement_id:summary.id}));check();
       state.statements=[];state.details.clear();state.resolutions={};state.mappings=home.mappings;state.mappingVersions=home.mappingVersions||{};
       state.provider=provider;state.importId=home.activeImport?.id||null;
-      for(const detail of details){if(detail.importId!==state.importId||JSON.stringify(detail.mappingSnapshot||{})!==JSON.stringify(state.mappings))detail.resolutions=reviewNotesOnly(detail.resolutions||{});adopt(detail);}
-      state.ready=true;loaded=true;emit();return state;
-    }catch(error){if(!loaded){state.ready=false;state.provider=unloaded();emit();}throw error;}
+      comparison?.dispose();comparison=pendingComparison;state.activeImport=home.activeImport;state.capabilities=home.capabilities||{};
+      for(const detail of details){if(!snapshotCapable&&detail.importId!==state.importId||JSON.stringify(detail.mappingSnapshot||{})!==JSON.stringify(state.mappings))detail.resolutions=reviewNotesOnly(detail.resolutions||{});adopt(detail);}
+      state.ready=true;loaded=true;emit();
+      if(comparison)for(const doc of state.statements)ensureComparisons(doc).catch(()=>{});
+      return state;
+    }catch(error){if(pendingComparison&&pendingComparison!==comparison)pendingComparison.dispose();if(!loaded){state.ready=false;state.provider=unloaded();emit();}throw error;}
   }
   async function upload(file,kind,request,attachment={}){
     if(!file||!Number.isInteger(file.size)||file.size<1||file.size>LIMITS.file)throw Error('Each PDF or CSV must be at most 20 MiB.');
@@ -77,9 +109,10 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   function saveData(doc,expectedVersion,resolutions){
     const rows=groupInvoices(doc),ids=new Set(rows.map(r=>r.id));
     return {statement_id:doc.id,expected_version:expectedVersion,doc:clone(doc),resolutions:Object.fromEntries(Object.entries(resolutions).filter(([id])=>ids.has(id))),
-      import_id:state.importId,mapping_snapshot:clone(state.mappings),results:comparisonSnapshot(doc,state.provider,state.mappings),rule_version:MATCH_RULE_VERSION};
+      import_id:comparison?(state.details.get(doc.id)?.importId||state.importId):state.importId,mapping_snapshot:clone(state.mappings),results:comparisonSnapshot(doc,state.provider,state.mappings),rule_version:MATCH_RULE_VERSION};
   }
-  function saveStatement(doc,expectedVersion,{resolutions=state.resolutions}={}){
+  async function saveStatement(doc,expectedVersion,{resolutions=state.resolutions}={}){
+    await ensureComparisons(doc);
     const payload=saveData(doc,expectedVersion,resolutions);
     payload.resolutions=clone(payload.resolutions);
     const rowIds=new Set(groupInvoices(doc).map(row=>row.id));
@@ -106,6 +139,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       if(finished.duplicate){localFiles.delete(file);return stored;}
       if(!extracted){try{extracted=await extract(file);}catch(error){extracted={...stored.doc,confirmed:false,warnings:[...(stored.doc.warnings||[]),`Extraction could not finish: ${error.message}. Review the original and add rows manually.`]};}}
       extracted={...extracted,id:finished.statement_id,fileSize:file.size,fileModified:file.lastModified||0,confirmed:false};
+      await ensureComparisons(extracted);
       const payload=saveData(extracted,stored.version,{});
       const saved=await request('save_revision',payload);
       const detail=adopt({...stored,doc:extracted,version:saved.version,results:payload.results,importId:state.importId,mappingSnapshot:clone(state.mappings),ruleVersion:MATCH_RULE_VERSION});
@@ -129,15 +163,15 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     return write(async request=>{const reply=await request('save_mapping',payload);if(vendorKey(state.mappings[payload.vendor]||payload.vendor)!==vendorKey(payload.bill_vendor))for(const doc of state.statements.filter(d=>d.vendor===payload.vendor))for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};state.mappings[payload.vendor]=payload.bill_vendor;state.mappingVersions[payload.vendor]=reply.version;emit();return reply;});
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
-  return {state,load,loadProvider,importBills,uploadStatement,saveStatement,saveMapping,originalPdf,
+  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,
     attachOriginal(file,id,expectedVersion){return write(async request=>{await upload(file,'pdf',request,{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     migrateLegacy(preview,confirmed=false){if(!confirmed)return Promise.resolve({cancelled:true});const items=clone(preview.statements);if(!items.length)return Promise.reject(Error('No real legacy statements to migrate.'));return write(async request=>{const results=[];for(const item of items)results.push(await request('migrate_legacy',{confirmed:true,statements:[item]}));await load({replace:true});return results;});},
-    completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)return Promise.reject(Error('Open the current editable draft before completing.'));const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,mappingSnapshot:snapshot.mapping_snapshot,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
+    async completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)throw Error('Open the current editable draft before completing.');const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;await ensureComparisons(doc);const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,mappingSnapshot:snapshot.mapping_snapshot,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
     extractionOnly(){state.provider={loaded:false,simulated:false,records:[],label:'Extraction-only view'};state.importId=null;state.resolutions=reviewNotesOnly(state.resolutions);emit();},
     history(filters={},cursor=null){return client.request('history_page',{filters,cursor,limit:50});},
     reopenStatement(id,expectedVersion){return write(async request=>{await request('reopen_statement',{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     archiveStatement(id,expectedVersion){return write(async request=>{const reply=await request('archive_statement',{statement_id:id,expected_version:expectedVersion});state.statements=state.statements.filter(doc=>doc.id!==id);emit();return reply;});},
     async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return {...detail,readOnly:!!revisionId||detail.completed};},
     write,adopt,
-    dispose(){disposed=true;client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
+    dispose(){disposed=true;comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
 }

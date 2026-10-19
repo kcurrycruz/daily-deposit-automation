@@ -4,6 +4,19 @@ import {createSharedWorkspace} from '../app/ap_statements/frontend/shared-worksp
 const importId=crypto.randomUUID();
 const doc=()=>({id:crypto.randomUUID(),vendor:'Alpha',filename:'statement.pdf',layout:'generic',statementDate:'2026-10-01',declaredTotal:18400,confirmed:true,pageCount:1,notes:'Keep this note',warnings:[],rows:[{id:crypto.randomUUID(),invoiceNumber:'00042',type:'invoice',amount:18400,balance:18400,page:1,confidence:99}]});
 const snapshot=()=>({activeImport:{id:importId,metadata:{label:'Bills.csv',asOf:'2026-10-01',sourceFormat:'bill-native'},record_count:5610},mappings:{},mappingVersions:{},statements:[],nextCursor:null});
+
+test('snapshot capability uses metadata and complete scopes, preserving pinned draft source until explicit refresh',async()=>{
+  const oldId=crypto.randomUUID(),directory=[{vendor:'Alpha'}],digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(directory))))].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const active={id:importId,metadata:{label:'large.csv',asOf:'2026-10-19'},record_count:223425,storage_format:'snapshot-v2',vendorDigest:digest};const calls=[];
+  const client={dispose(){},async request(action,payload){calls.push({action,payload});if(action==='bootstrap')return {...snapshot(),activeImport:active,capabilities:{billSnapshots:2}};if(action==='bill_vendors_page')return {importId:payload.import_id,vendors:directory,total:1,nextCursor:null,vendorDigest:digest};if(action==='bill_candidates_page')return {importId:payload.query.importId,queryDigest:'a'.repeat(64),total:1,records:[{id:payload.query.importId+':0',vendor:'Alpha',invoiceNumber:'00042',amount:18400}],nextCursor:null,afterOrdinal:-1};throw Error(action);}};
+  const workspace=createSharedWorkspace(client);await workspace.load();assert.equal(workspace.state.provider.recordCount,223425);assert.equal(workspace.state.provider.records.length,0);
+  const item=doc();workspace.state.statements.push(item);workspace.state.details.set(item.id,{doc:item,version:1,importId:oldId,importInfo:{...active,id:oldId,record_count:1},resolutions:{}});
+  workspace.state.resolutions[item.rows[0].id]={decision:'Reviewed — no action needed',note:'Keep this note'};
+  await workspace.ensureComparisons(item);assert.equal(workspace.state.provider.scopes[item.id].importId,oldId);
+  await workspace.refreshComparisons(item.id);assert.equal(workspace.state.provider.scopes[item.id].importId,importId);
+  assert.deepEqual(workspace.state.resolutions[item.rows[0].id],{note:'Keep this note'});
+  assert.ok(calls.every(c=>c.action!=='records_page'));workspace.dispose();
+});
 test('all import records load before matching, including 5610 rows',async()=>{
   let pages=0;
   const client={dispose(){},async request(action,payload){if(action==='bootstrap')return snapshot();if(action==='records_page'){pages++;const start=payload.after_ordinal+1,n=Math.min(500,5610-start);return {importId,recordCount:5610,records:Array.from({length:n},(_,i)=>({id:`${importId}:${start+i}`,vendor:'Alpha',invoiceNumber:`00${start+i}`,amount:18400})),nextCursor:start+n<5610?start+n-1:null};}throw Error(action);}};

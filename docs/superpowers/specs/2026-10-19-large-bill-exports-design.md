@@ -2,7 +2,7 @@
 
 Date: October 19, 2026
 
-Status: Proposed design for user review. Implementation and live migration have not started.
+Status: Approved for implementation planning on October 19, 2026. Implementation and live migration have not started.
 
 ## Purpose and agreed requirements
 

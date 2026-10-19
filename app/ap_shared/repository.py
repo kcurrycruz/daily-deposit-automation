@@ -85,9 +85,13 @@ class ApRepository:
     @safe_backend
     def bootstrap(self,workspace_id,cursor=None,limit=50) -> SharedSnapshot:
         self._workspace(workspace_id); self._private_bucket(); integer(limit,minimum=1,maximum=50)
-        home=self._one(self.client.table('ap_workspaces').select('id,active_import_id').eq('id',workspace_id))
+        home=self._one(self.client.table('ap_workspaces').select('*').eq('id',workspace_id))
         source=self.import_info(workspace_id,home['active_import_id']) if home['active_import_id'] else None
         active={key:source[key] for key in ('id','metadata','record_count','created_at')} if source else None
+        if active is not None:
+            active['storage_format']=source.get('storage_format','rows-v1')
+            if source.get('storage_format')=='snapshot-v2':
+                active['vendorDigest']=source['snapshot_manifest']['vendorDigest']
         query=self._table('ap_statements').eq('archived',False).eq('completed',False).order('id').limit(limit)
         if cursor: query=query.gt('id',require_uuid(cursor))
         items=query.execute().data
@@ -105,7 +109,9 @@ class ApRepository:
             mapping_rows.extend(page)
             if len(page)<PAGE_SIZE: break
             offset+=PAGE_SIZE
-        return {'activeImport':active,'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},
+        return {'activeImport':active,'capabilities':{'billSnapshots':2} if 'import_version' in home else {},
+                'importVersion':home.get('import_version'),
+                'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},
                 'mappingVersions':{r['vendor']:r['version'] for r in mapping_rows},'statements':statements,
                 'nextCursor':items[-1]['id'] if len(items)==limit else None}
 

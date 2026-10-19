@@ -18,7 +18,7 @@ class BillRepository:
         return self.base._one(self.base._table('ap_bill_jobs').eq('id', job_id))
 
     def rpc(self, operation, data, request_id):
-        if operation not in ('job_begin', 'job_checkpoint', 'job_abandon', 'snapshot_stage', 'snapshot_activate', 'quota_reserve'):
+        if operation not in ('job_begin', 'job_chunk', 'job_uploaded', 'job_restart', 'job_reuse', 'job_checkpoint', 'job_abandon', 'snapshot_stage', 'snapshot_activate', 'quota_reserve'):
             raise SnapshotError('bill_incomplete')
         require_uuid(request_id); self.base._private_bucket()
         payload = dict(p_workspace=self.config.workspace_id, p_request_id=request_id,
@@ -41,11 +41,11 @@ class BillRepository:
                                              bucket=self.config.bucket, requested_bytes=requested_bytes,
                                              budget_bytes=STORAGE_BUDGET), request_id)
 
-    def put_artifact(self, job_id, name, path, request_id):
+    def put_artifact(self, job_id, name, path, request_id, *, original_hash=None):
         job = self.job(job_id)
         if name not in ('original', 'index'):
             raise SnapshotError('bill_incomplete')
-        raw_hash = digest(job.get('original_hash', ''))
+        raw_hash = digest(original_hash if name == 'original' and original_hash is not None else job.get('original_hash', ''))
         with open(path, 'rb') as source:
             data = source.read(MAX_ARCHIVE_BYTES + 1)
         if not data or len(data) > MAX_ARCHIVE_BYTES:
@@ -55,6 +55,35 @@ class BillRepository:
         key = f'{self.config.workspace_id}/bills/v2/{raw_hash}/{artifact_hash}.{extension}.gz'
         self.base.write_bytes(self.config.workspace_id, key, data, 'application/gzip')
         return dict(key=key, hash=artifact_hash, bytes=len(data))
+
+    def source(self, import_id):
+        return self.base.import_info(self.config.workspace_id, import_id)
+
+    def lookup_hash(self, raw_hash):
+        digest(raw_hash); self.base._private_bucket()
+        rows = self.base._table('ap_bill_imports').eq('file_hash', raw_hash).limit(1).execute().data
+        if type(rows) is not list:
+            raise SnapshotError('bill_incomplete')
+        return rows[0] if rows else None
+
+    def write_chunk(self, job_id, position, data):
+        require_uuid(job_id); integer(position, minimum=0, maximum=127)
+        if not 1 <= len(data) <= 256 * 1024:
+            raise SnapshotError('bill_limit')
+        value = hashlib.sha256(data).hexdigest()
+        self.base.write_bytes(self.config.workspace_id, f'{self.config.workspace_id}/staging/{job_id}/{position}-{value}.bin', data, 'application/octet-stream')
+        return dict(hash=value, size=len(data))
+
+    def read_chunk(self, job_id, position, info):
+        require_uuid(job_id); integer(position, minimum=0, maximum=127); digest(info['hash'])
+        return self.base.read_bytes(self.config.workspace_id, f'{self.config.workspace_id}/staging/{job_id}/{position}-{info["hash"]}.bin')
+
+    def read_original(self, job, target):
+        info = job['original_archive']
+        data = self.base.read_bytes(self.config.workspace_id, info['key'])
+        if len(data) > MAX_ARCHIVE_BYTES or len(data) != info['bytes'] or hashlib.sha256(data).hexdigest() != info['hash']:
+            raise SnapshotError('bill_invalid_archive')
+        Path(target).write_bytes(data)
 
     def read_artifact(self, manifest, name, target):
         manifest = validate_manifest(manifest)

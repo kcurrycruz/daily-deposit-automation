@@ -23,7 +23,7 @@ create trigger ap_bill_import_version before update on public.ap_workspaces
 create table public.ap_bill_jobs (
   id uuid primary key, workspace_id uuid not null references public.ap_workspaces(id), session_nonce uuid not null,
   generation uuid not null default gen_random_uuid(), expected_import_version bigint not null,
-  state text not null default 'uploading', checkpoint integer not null default 0,
+  state text not null default 'uploading' check(state in ('uploading','reading','grouping','packaging','prepared','activated','abandoned')), checkpoint integer not null default 0,
   lease_until timestamptz not null default now()+interval '1 hour', metadata jsonb not null,
   chunks jsonb not null default '{}', counts jsonb not null default '{}', import_id uuid,
   reserved_bytes bigint not null default 0 check(reserved_bytes>=0), reservation_bucket text,
@@ -38,7 +38,7 @@ create function public.ap_bill_mutate(p_operation text,p_workspace uuid,p_reques
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare
   home ap_workspaces%rowtype; job ap_bill_jobs%rowtype; source ap_bill_imports%rowtype;
-  cached ap_requests%rowtype; result jsonb; mf jsonb; jid uuid; n bigint; used bigint; reserved bigint; reused boolean;
+  cached ap_requests%rowtype; result jsonb; mf jsonb; jid uuid; n bigint; used bigint; reserved bigint; reused boolean; part integer; old_part jsonb;
 begin
   if p_payload_hash !~ '^[0-9a-f]{64}$' or jsonb_typeof(p_data)<>'object' then raise exception 'bill_incomplete'; end if;
   select * into home from ap_workspaces where id=p_workspace for update;
@@ -58,8 +58,43 @@ begin
     result=jsonb_build_object('job_id',job.id,'generation',job.generation,'expected_import_version',job.expected_import_version,'checkpoint',0,'state',job.state);
   else
     select * into job from ap_bill_jobs where id=jid and workspace_id=p_workspace for update;
-    if not found or job.session_nonce is distinct from (p_data->>'session_nonce')::uuid or job.lease_until<=now() or job.state='abandoned' then raise exception 'bill_conflict'; end if;
-    if p_operation='job_abandon' then
+    if not found or job.session_nonce is distinct from (p_data->>'session_nonce')::uuid or job.state='abandoned' then raise exception 'bill_conflict'; end if;
+    if job.lease_until<=now() and p_operation<>'job_restart' then raise exception 'bill_conflict'; end if;
+    if p_operation='job_chunk' then
+      if job.state<>'uploading' then raise exception 'bill_conflict'; end if;
+      part=(p_data->>'index')::integer;
+      if part not between 0 and 127 or part*262144 >= (job.metadata->>'compressed_size')::integer or
+        coalesce(p_data->>'chunk_hash','') !~ '^[0-9a-f]{64}$' or
+        (p_data->>'size')::integer is distinct from least(262144,(job.metadata->>'compressed_size')::integer-part*262144)
+        then raise exception 'bill_limit'; end if;
+      old_part=job.chunks->part::text;
+      if old_part is not null and old_part<>jsonb_build_object('hash',p_data->>'chunk_hash','size',(p_data->>'size')::integer) then raise exception 'bill_conflict'; end if;
+      if old_part is null and part<>(select count(*) from jsonb_object_keys(job.chunks)) then raise exception 'bill_conflict'; end if;
+      update ap_bill_jobs set chunks=chunks||jsonb_build_object(part::text,jsonb_build_object('hash',p_data->>'chunk_hash','size',(p_data->>'size')::integer)),lease_until=now()+interval '1 hour' where id=jid;
+      result=jsonb_build_object('job_id',jid,'index',part);
+    elsif p_operation='job_uploaded' then
+      if job.state<>'uploading' or coalesce(p_data->>'original_hash','') !~ '^[0-9a-f]{64}$' or
+        (p_data->>'original_bytes')::bigint not between 1 and 268435456 or
+        (select coalesce(sum((value->>'size')::bigint),0) from jsonb_each(job.chunks))<>(job.metadata->>'compressed_size')::bigint or
+        p_data->'original_archive'->>'key'<>p_workspace::text||'/bills/v2/'||(p_data->>'original_hash')||'/'||(p_data->'original_archive'->>'hash')||'.csv.gz'
+        then raise exception 'bill_incomplete'; end if;
+      update ap_bill_jobs set original_hash=p_data->>'original_hash',original_archive=p_data->'original_archive',
+        metadata=metadata||jsonb_build_object('original_bytes',(p_data->>'original_bytes')::bigint),state='reading',lease_until=now()+interval '1 hour' where id=jid returning * into job;
+      result=jsonb_build_object('job_id',jid,'state',job.state,'generation',job.generation,'checkpoint',job.checkpoint);
+    elsif p_operation='job_restart' then
+      if job.generation is distinct from (p_data->>'generation')::uuid or job.state in ('activated','prepared') or job.original_archive is null or
+        exists(select 1 from ap_bill_jobs where workspace_id=p_workspace and id<>jid and lease_until>now() and state not in ('activated','abandoned'))
+        then raise exception 'bill_conflict'; end if;
+      update ap_bill_jobs set generation=gen_random_uuid(),checkpoint=0,state='reading',counts='{}',lease_until=now()+interval '1 hour' where id=jid returning * into job;
+      result=jsonb_build_object('job_id',jid,'generation',job.generation,'checkpoint',0,'state','reading');
+    elsif p_operation='job_reuse' then
+      select * into source from ap_bill_imports where workspace_id=p_workspace and file_hash=p_data->>'original_hash' and state='ready';
+      if not found or job.state<>'uploading' or (select coalesce(sum((value->>'size')::bigint),0) from jsonb_each(job.chunks))<>(job.metadata->>'compressed_size')::bigint then raise exception 'bill_incomplete'; end if;
+      update ap_bill_jobs set import_id=source.id,original_hash=source.file_hash,
+        original_archive=case when source.storage_format='snapshot-v2' then source.snapshot_manifest->'originalArchive' else jsonb_build_object('key',source.original_object_key,'hash',source.file_hash) end,
+        state=case when home.active_import_id=source.id then 'activated' else 'prepared' end,reserved_bytes=0 where id=jid;
+      result=jsonb_build_object('job_id',jid,'generation',job.generation,'checkpoint',0,'import_id',source.id,'duplicate',true,'alreadyCurrent',coalesce(home.active_import_id=source.id,false),'confirmationRequired',home.active_import_id is distinct from source.id);
+    elsif p_operation='job_abandon' then
       if job.generation is distinct from (p_data->>'generation')::uuid or job.state='activated' then raise exception 'bill_conflict'; end if;
       update ap_bill_jobs set state='abandoned',reserved_bytes=0 where id=jid;
       result=jsonb_build_object('job_id',jid,'state','abandoned');
@@ -115,7 +150,7 @@ begin
 end $$;
 
 do $$ declare operation text; begin
-  foreach operation in array array['job_begin','job_checkpoint','job_abandon','snapshot_stage','snapshot_activate','quota_reserve'] loop
+  foreach operation in array array['job_begin','job_chunk','job_uploaded','job_restart','job_reuse','job_checkpoint','job_abandon','snapshot_stage','snapshot_activate','quota_reserve'] loop
     execute format('create function public.ap_bill_%I(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb) returns jsonb language sql security definer set search_path=public,pg_temp as $fn$ select public.ap_bill_mutate(%L,p_workspace,p_request_id,p_payload_hash,p_data) $fn$',operation,operation);
     execute format('revoke all on function public.ap_bill_%I(uuid,uuid,text,jsonb) from public,anon,authenticated',operation);
     execute format('grant execute on function public.ap_bill_%I(uuid,uuid,text,jsonb) to service_role',operation);

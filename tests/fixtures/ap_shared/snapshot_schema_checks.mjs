@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+import {resolve} from 'node:path';
+const root=resolve(import.meta.dirname,'../../..');
+let PGlite;try{({PGlite}=createRequire(resolve(root,'app/ap_statements/package.json'))('@electric-sql/pglite'));}
+catch{({PGlite}=createRequire(resolve(root,'.superpowers/sdd/2026-10-13-ap-shared-workspace/sql-runtime/package.json'))('@electric-sql/pglite'));}
+const db=new PGlite();
+const w='00000000-0000-4000-8000-000000000001',nonce=crypto.randomUUID();
+const q=(s,p=[])=>db.query(s,p);
+const call=(op,data,id=crypto.randomUUID(),hash='f'.repeat(64))=>q('select public.ap_bill_mutate($1,$2,$3,$4,$5) as value',[op,w,id,hash,JSON.stringify(data)]).then(r=>r.rows[0].value);
+const begin=async()=>{const job_id=crypto.randomUUID();return call('job_begin',{job_id,session_nonce:nonce,filename:'synthetic.csv',compressed_size:20,as_of:''});};
+const mf=(raw='a')=>{const prefix=`${w}/bills/v2/${raw.repeat(64)}/`;return {format:'snapshot-v2',parserVersion:'bill-csv-v1',indexVersion:1,originalHash:raw.repeat(64),originalBytes:100,originalArchive:{key:prefix+'b'.repeat(64)+'.csv.gz',hash:'b'.repeat(64),bytes:20},indexArchive:{key:prefix+'c'.repeat(64)+'.sqlite.gz',hash:'c'.repeat(64),bytes:30,expandedHash:'d'.repeat(64),expandedBytes:200},recordCount:1,sourceRowCount:1,collapsedRowCount:0,excludedRowCount:0,warningCount:0,vendorDigest:'e'.repeat(64)};};
+try{
+ await db.exec('create role anon;create role authenticated;create role service_role bypassrls;create schema storage;create table storage.objects(bucket_id text,name text,metadata jsonb);');
+ for(const name of ['202610130001_ap_shared_workspace.sql','202610190001_ap_bill_snapshots.sql'])await db.exec(readFileSync(resolve(root,'supabase/migrations',name),'utf8'));
+ await q('insert into ap_workspaces(id) values($1)',[w]);
+ const job=await begin();assert.equal(job.expected_import_version,0);
+ await assert.rejects(begin(),/bill_conflict/);
+ const data={job_id:job.job_id,session_nonce:nonce};
+ await assert.rejects(call('snapshot_activate',{...data,import_id:crypto.randomUUID(),expected_import_version:0,confirm_restore:false}),/bill_incomplete/);
+ const staged=await call('snapshot_stage',{...data,generation:job.generation,manifest:mf(),metadata:{label:'synthetic.csv',loaded:true,simulated:false}});
+ assert.equal(staged.duplicate,false);
+ const request=crypto.randomUUID(),activate={...data,import_id:staged.import_id,expected_import_version:0,confirm_restore:false};
+ const first=await call('snapshot_activate',activate,request),replay=await call('snapshot_activate',activate,request);
+ assert.deepEqual(first,replay);assert.equal(first.import_version,1);
+ assert.equal((await q('select count(*)::int n from ap_bill_records')).rows[0].n,0);
+ await assert.rejects(q('update ap_bill_imports set record_count=2'),/immutable/);
+ const next=await begin();const nextData={job_id:next.job_id,session_nonce:nonce};
+ const duplicate=await call('snapshot_stage',{...nextData,generation:next.generation,manifest:mf(),metadata:{label:'renamed.csv',loaded:true,simulated:false}});
+ assert.equal(duplicate.duplicate,true);
+ assert.equal(duplicate.import_id,staged.import_id);assert.equal((await q('select count(*)::int n from ap_bill_imports')).rows[0].n,1);
+ await call('job_abandon',{...nextData,generation:next.generation});
+ const third=await begin(),thirdData={job_id:third.job_id,session_nonce:nonce};
+ const newer=await call('snapshot_stage',{...thirdData,generation:third.generation,manifest:mf('2'),metadata:{label:'next.csv',loaded:true,simulated:false}});
+ // A legacy writer changing active_import_id must advance the same CAS counter.
+ await q('update ap_workspaces set active_import_id=null where id=$1',[w]);
+ await q('update ap_workspaces set active_import_id=$1 where id=$2',[staged.import_id,w]);
+ await assert.rejects(call('snapshot_activate',{...thirdData,import_id:newer.import_id,expected_import_version:third.expected_import_version,confirm_restore:false}),/bill_conflict/);
+ await call('job_abandon',{...thirdData,generation:third.generation});
+ const fourth=await begin(),fd={job_id:fourth.job_id,session_nonce:nonce};
+ await q('insert into storage.objects values($1,$2,$3)',['private','any/owned-object',JSON.stringify({size:900})]);
+ await assert.rejects(call('quota_reserve',{...fd,bucket:'private',requested_bytes:101,budget_bytes:1000}),/bill_quota/);
+ const reserved=await call('quota_reserve',{...fd,bucket:'private',requested_bytes:50,budget_bytes:1000});assert.equal(reserved.used_bytes,900);
+ await call('job_abandon',{...fd,generation:fourth.generation});
+ await assert.rejects(call('snapshot_activate',{...fd,import_id:staged.import_id,expected_import_version:3,confirm_restore:true}),/bill_conflict/);
+ await db.exec('set role anon');await assert.rejects(q('select * from ap_bill_jobs'),/permission denied/);await assert.rejects(call('job_begin',{}),/permission denied/);await db.exec('reset role');
+ assert.equal((await q('select count(*)::int n from ap_completion_events')).rows[0].n,0);
+ console.log('BILL snapshot SQL checks passed');
+}finally{await db.close();}

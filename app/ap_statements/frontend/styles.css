@@ -78,3 +78,6 @@ html body{background:#fff}.main{background:#fff}
   .sidebar{height:auto;max-height:40dvh;flex-shrink:0}
   .main{height:auto;flex:1;min-height:0}
 }
+:root .bill-update-progress{margin:0 0 20px;padding:18px 22px;border:1px solid #cbdcc5;border-radius:10px;background:#f3f7ef;color:#234e40}
+.bill-update-progress progress{display:block;width:min(100%,440px);margin-top:12px;accent-color:#205b48}
+.bill-update-progress p{margin:8px 0 0;font-size:13px}

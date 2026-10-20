@@ -143,21 +143,21 @@ test('native evidence survives session save without retaining extra source colum
   assert.ok(!JSON.stringify(saved).includes('Do not retain internal details'));
 });
 
-test('actual import control applies native evidence and resets reviews only after successful parsing', async () => {
-  const importBillSource = await importer();
+test('actual import control delegates the original file without reading it and preserves drafts on failure', async () => {
   const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
   const block = source.slice(source.indexOf("document.querySelector('#csv-input').addEventListener"), source.indexOf("document.addEventListener('input'"));
   const state = { statements: [statement], resolutions: { r1: { decision: 'Preserve on failure' } }, provider: { label: 'old' } };
   let handler;
   const input = { addEventListener: (_, callback) => { handler = callback; } };
-  const context = { state, importBillSource, importRecords, reviewNotesOnly, document: { querySelector: selector => selector === '#csv-input' ? input : null }, render() {}, toast() {} };
-  context.ready=()=>{};context.shared={async importBills(file,provider){state.provider=provider;state.resolutions=reviewNotesOnly(state.resolutions);}};
+  let received;
+  const context = { state, document: { querySelector: selector => selector === '#csv-input' ? input : null }, render() {}, toast() {},async updateBillFile(file){received=file;if(file.name==='bad.csv')throw Error('Rejected by server');state.provider={sourceFormat:'bill-native',recordCount:223425,label:file.name};return {importId:'new'};} };
   vm.runInNewContext(block, context);
-  await handler({ target: { files: [{ name: 'BILL.csv', text: async () => csv([row()]) }], value: 'BILL.csv' } });
+  const original={name:'BILL.csv',text(){throw Error('Never read whole CSV');}};
+  await handler({ target: { files: [original], value: 'BILL.csv' } });
+  assert.equal(received,original);
   assert.equal(state.provider.sourceFormat, 'bill-native');
-  assert.equal(state.provider.records[0].invoiceNumber, '000123-A');
-  assert.equal(state.provider.importedRowCount, 1);
-  assert.equal(Object.keys(state.resolutions).length, 0);
+  assert.equal(state.provider.recordCount,223425);
+  assert.equal(state.resolutions.r1.decision,'Preserve on failure');
   assert.equal(state.statements[0], statement);
   state.resolutions.r1 = { decision: 'Keep' };
   const previous = state.provider;

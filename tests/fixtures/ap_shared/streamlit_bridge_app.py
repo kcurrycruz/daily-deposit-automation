@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]))
 from datetime import datetime,timezone
+import hashlib,json
 import streamlit as st
 from app.ap_shared.models import ApConfig
 from app.ap_shared.access import attempt_unlock
@@ -44,11 +45,34 @@ class SyntheticService:
                 records=[{**records[0],'id':f'{import_id}:{index}','invoiceNumber':reference}
                          for index,reference in enumerate(['261768','261874','261673'])]
             if action=='bootstrap':
-                return {'activeImport':{'id':import_id,'metadata':{
+                result={'activeImport':{'id':import_id,'record_count':223425 if st.query_params.get('snapshot') else 3,'metadata':{
                     'label':'synthetic-layout-bills.csv','sourceFormat':'bill-native',
                     'refreshedAt':datetime.now(timezone.utc).isoformat()}},
                     'statements':[{'id':doc['id']} for doc in documents],
                     'mappings':{},'mappingVersions':{},'nextCursor':None}
+                if st.query_params.get('snapshot'):
+                    result['capabilities']={'billSnapshots':2}
+                    result['activeImport']['storage_format']='snapshot-v2'
+                return result
+            if action=='bill_vendors_page':
+                vendors=[{'vendor':'Synthetic Layout Supplier'}]
+                return {'vendors':vendors,'total':1,'nextCursor':None,'importId':payload['import_id'],
+                        'vendorDigest':hashlib.sha256(json.dumps(vendors,separators=(',',':')).encode()).hexdigest()}
+            if action=='bill_candidates_page':
+                if st.query_params.get('partial') and payload.get('cursor'):
+                    raise ValueError('Synthetic final page failure')
+                return {'records':records,'total':4 if st.query_params.get('partial') else len(records),'importId':payload['query']['importId'],
+                        'queryDigest':'a'*64,'afterOrdinal':-1,'nextCursor':'synthetic-final-page' if st.query_params.get('partial') else None}
+            if action=='bill_upload_begin':
+                return {'job_id':'00000000-0000-4000-8000-000000000090'}
+            if action=='bill_upload_chunk':return {'acknowledged':True}
+            if action=='bill_upload_finish':
+                if st.query_params.get('failed_update'):raise ValueError('Synthetic update failure; prior source retained.')
+                return {'state':'prepared','duplicate':bool(st.query_params.get('duplicate')),'alreadyCurrent':bool(st.query_params.get('duplicate'))}
+            if action=='bill_activate':
+                return {'importId':import_id,'recordCount':223425,'storageFormat':'snapshot-v2',
+                        'metadata':{'label':'synthetic-weekly.csv','sourceFormat':'bill-native','refreshedAt':datetime.now(timezone.utc).isoformat()}}
+            if action=='bill_cancel':return {'cancelled':True}
             if action=='records_page':
                 return {'records':records,'importId':import_id,'recordCount':3,'nextCursor':None}
             if action=='statement':

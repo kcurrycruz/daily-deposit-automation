@@ -7,6 +7,7 @@ import * as session from '../app/ap_statements/frontend/session.mjs';
 import * as guide from '../app/ap_statements/frontend/guide.mjs';
 import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import * as simpleView from '../app/ap_statements/frontend/simple-flow-view.mjs';
+import * as billUI from '../app/ap_statements/frontend/bill-update-ui.mjs';
 const billTutorial=await import('../app/ap_statements/frontend/bill-export-guide.mjs').catch(()=>({}));
 import { createDemo, simulateRecords } from './fixtures/legacy_ap_demo.mjs';
 import { importBillSource } from '../app/ap_statements/frontend/bill-import.mjs';
@@ -74,14 +75,15 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial, importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,
+    createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
   vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, ''), context);
   // Tests of controls supply an acknowledged synthetic shared snapshot,
   // never an implicit localStorage restore.
   if(data){context.fixtureSession=session.loadSession(localStorage).session;vm.runInNewContext('Object.assign(state,fixtureSession)',context);}
-  context.cloud={state:{ready:true,details:new Map()},async importBills(file,provider){const current=vm.runInNewContext('state',context);current.provider=provider;current.resolutions=session.reviewNotesOnly(current.resolutions);},extractionOnly(){const current=vm.runInNewContext('state',context);current.provider={loaded:false,records:[]};current.resolutions=session.reviewNotesOnly(current.resolutions);}};
+  context.cloud={state:{ready:true,capabilities:{billSnapshots:2},details:new Map()},async adoptImport(result){const current=vm.runInNewContext('state',context);current.provider={loaded:true,records:[],recordCount:result.recordCount,label:result.metadata.label};},extractionOnly(){const current=vm.runInNewContext('state',context);current.provider={loaded:false,records:[]};current.resolutions=session.reviewNotesOnly(current.resolutions);}};
   vm.runInNewContext('shared=cloud',context);
   return { nodes, context, events, state: vm.runInNewContext('state', context) };
 }

@@ -1,5 +1,5 @@
 import {billDataSummary,invoiceFound,readingIssues} from './simple-flow.mjs';
-import {resolveStatementVendor} from './vendor-identity.mjs';
+import {resolveStatementVendor,providerVendors} from './vendor-identity.mjs';
 import {money,statuses} from './core.mjs';
 import {nyTimestamp} from './history.mjs';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -12,7 +12,8 @@ export function uploadReviewHTML(state){
 }
 export function vendorQuestionHTML(doc,provider,mappings={},readOnly=false){
   if(readOnly||!provider.loaded)return '';
-  const choice=resolveStatementVendor(doc.vendor,provider.records,mappings);
+  if(provider.scopes&&!provider.directoryComplete)return '<p role="status">Loading saved BILL vendors…</p>';
+  const choice=resolveStatementVendor(doc.vendor,providerVendors(provider,doc.id),mappings);
   if(choice.vendor)return `<div class="vendor-recognized">BILL vendor: <strong>${esc(choice.vendor)}</strong> · ${choice.status==='remembered'?'your saved choice':'recognized automatically'}</div>`;
   const first=choice.candidates.length===1?choice.candidates[0]:null;
   return `<section class="vendor-question" aria-label="Confirm statement vendor"><strong>${first?`Is “${esc(doc.vendor)}” the same vendor as “${esc(first)}”?`:'Which BILL vendor sent this statement?'}</strong><p>${first?'Confirm once. We’ll remember your answer for future statements.':'Choose the company from your saved BILL data. Invoice numbers alone don’t identify a vendor.'}</p>${first?`<button class="button primary" data-action="vendor-confirm" data-vendor="${esc(first)}">Yes, same vendor</button>`:''}<details ${first?'':'open'}><summary>Choose another vendor</summary><label class="field">BILL vendor<select id="statement-bill-vendor"><option value="">Select vendor…</option>${choice.choices.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></label><button class="button" data-action="vendor-choose">Use this vendor</button></details></section>`;

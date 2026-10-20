@@ -72,3 +72,33 @@ test('candidate text is escaped and an empty result has no suggestion list',()=>
   const missing=render(compare([]));
   assert.doesNotMatch(missing,/bill-candidate/);assert.match(missing,/No matching record/);
 });
+
+test('a low-confidence scan says matching is pending verification rather than invoice missing',()=>{
+  const statement=doc();statement.rows[0].confidence=65;
+  const row=reconcile(statement,{loaded:true,records:[bill('261601')]})[0];
+  const before=structuredClone(row),html=render(row,statement);
+  assert.equal(row.status,'extraction');assert.equal(row.candidates.length,0);
+  assert.match(html,/Matching pending PDF verification/);
+  assert.match(html,/data-action="drawer-tab" data-tab="extraction"/);
+  assert.match(html,/>Check PDF<\/button>/);
+  assert.doesNotMatch(html,/No matching record|not found|<h3>Imported BILL record/);
+  assert.deepEqual(row,before);assert.equal(statement.rows[0].confidence,65);
+});
+
+test('unavailable BILL comparisons never claim the reference is absent',()=>{
+  const statement=doc(),row=reconcile(statement,{loaded:false,records:[]})[0];
+  const html=render(row,statement);
+  assert.equal(row.status,'unverified');
+  assert.match(html,/not ready|unavailable/i);
+  assert.doesNotMatch(html,/No matching record|not found/);
+});
+
+test('confirming accurate scan values allows the exact invoice record to appear',()=>{
+  const statement=doc();statement.rows[0].confidence=65;
+  assert.equal(reconcile(statement,{loaded:true,records:[bill('261601')]})[0].status,'extraction');
+  statement.confirmed=true;statement.rows[0].confidence=99;
+  const row=reconcile(statement,{loaded:true,records:[bill('261601')]})[0],html=render(row,statement);
+  assert.equal(row.status,'presence');assert.equal(row.matchMethod,'reference');
+  assert.match(html,/<h3>Imported BILL record<\/h3>/);
+  assert.doesNotMatch(html,/Matching pending PDF verification/);
+});

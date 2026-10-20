@@ -36,10 +36,11 @@ class BillRepository:
 
     def reserve(self, job_id, requested_bytes, request_id):
         job = self.job(job_id)
-        integer(requested_bytes, minimum=0, maximum=STORAGE_BUDGET)
+        budget = self.config.bill_storage_budget_bytes
+        integer(requested_bytes, minimum=0, maximum=budget)
         return self.rpc('quota_reserve', dict(job_id=job_id, session_nonce=job['session_nonce'],
                                              bucket=self.config.bucket, requested_bytes=requested_bytes,
-                                             budget_bytes=STORAGE_BUDGET), request_id)
+                                             budget_bytes=budget), request_id)
 
     def put_artifact(self, job_id, name, path, request_id, *, original_hash=None):
         job = self.job(job_id)
@@ -112,6 +113,6 @@ class BillRepository:
             self.base._object_key(self.config.workspace_id, key)
             keys.append(key)
         # No prefix deletion: only exact, verified acknowledged upload chunks.
-        for key in keys:
+        if keys:
             self.base._private_bucket()
-            self.base.client.storage.from_(self.config.bucket).remove([key])
+            self.base.client.storage.from_(self.config.bucket).remove(keys)

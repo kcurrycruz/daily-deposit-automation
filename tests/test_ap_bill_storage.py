@@ -43,6 +43,14 @@ class BillStorageTests(unittest.TestCase):
         self.transport = BillTransport()
         self.repo = self.api.BillRepository(make_repository(self.transport))
 
+    def test_acknowledged_chunk_cleanup_uses_one_bounded_exact_key_request(self):
+        self.transport.job['chunks']={str(i):dict(hash='c'*64,size=1) for i in range(128)}
+        self.repo.cleanup_acknowledged_chunks(self.transport.job['id'])
+        deletes=[r for r in self.transport.requests if r.method=='DELETE']
+        self.assertEqual(len(deletes),1)
+        self.assertEqual(len(self.transport.deleted),128)
+        self.assertTrue(all('/staging/'+self.transport.job['id']+'/' in key for key in self.transport.deleted))
+
     def test_content_addressed_artifact_retries_do_not_overwrite(self):
         with tempfile.TemporaryDirectory(prefix='ap-bill-store-') as root:
             path = Path(root) / 'index.gz'; path.write_bytes(b'synthetic compressed fixture')

@@ -24,10 +24,9 @@ export function createBillUpdateUI({shared,client,hasUnsaved=()=>false,onProgres
    active=controller;
    try{const result=await operation();check();
     if(result.cancelled){progress({stage:'cancelled'});return result;}
-    if(result.alreadyCurrent){progress({stage:'unchanged'});return result;}
     // Activation is authoritative; directory readback must also succeed before publication.
-    try{await shared.adoptImport(result);}catch(error){error.retry=async()=>result;throw error;}
-    check();progress({stage:'done'});return result;
+    if(!result.alreadyCurrent||result.importId){try{await shared.adoptImport(result);}catch(error){error.retry=async()=>result;throw error;}}
+    check();progress({stage:result.alreadyCurrent?'unchanged':'done'});return result;
    }catch(error){if(error.retry){const retry=error.retry;error.retry=()=>execute(retry);}throw error;}
    finally{active=null;}
   }

@@ -33,6 +33,7 @@ class ApConfig:
     supabase_secret_key: str = field(repr=False)
     workspace_id: str
     bucket: str
+    bill_storage_budget_bytes: int = 900000000
 
 @dataclass(frozen=True)
 class Authorization:
@@ -98,6 +99,7 @@ def read_config(secrets: Mapping) -> ApConfig:
     values['workspace_id'] = require_uuid(values['workspace_id'])
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{2,62}',values['bucket']):
         raise ApValidationError('A valid private bucket name is required.')
+    values['bill_storage_budget_bytes'] = integer(cfg.get('bill_storage_budget_bytes',900000000),minimum=1,maximum=9000000000)
     return ApConfig(**values)
 
 def normalize_initials(value: str) -> str:

@@ -4,6 +4,8 @@ Production activation is blocked until the remaining cloud and recovery checks b
 
 ## Local verification
 
+For the large weekly export upgrade also follow `docs/ap-bill-snapshot-rollout.md`. Earlier cloud checks below predate `snapshot-v2` and do not validate its new SQL jobs, gzip artifacts, source-scoped queries or activation/version behavior. These require new authorized synthetic cloud checks before production.
+
 Run Python unittest discovery in the QA environment, the full `tests/ap_statements*.test.mjs` Node suite, `node app/ap_statements/build.mjs`, `git diff --check`, and `python -m pip check`. On restricted Windows runners use Node `--test-isolation=none`; the build needs subprocess permission. SQL behavior tests use PGlite PostgreSQL with synthetic roles and data, not a live Supabase project. The Python SDK tests use HTTPX at the cloud boundary. Their mocks do not demonstrate real cloud access.
 
 `tests/fixtures/ap_shared/browser.html` is a synthetic UI harness served from the repository root. It contains no finance files or credentials and does not test durable cloud storage. Keep it separate from the deployed AP entry point.

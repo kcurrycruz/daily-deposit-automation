@@ -64,6 +64,16 @@ class BillOperationsTests(unittest.TestCase):
         vendors = self.call('bill_vendors_page', dict(import_id=saved['importId']))
         self.assertEqual(vendors['vendors'], [dict(vendor='Synthetic & Co.')])
 
+    def test_full_snapshot_changes_and_omissions_do_not_leak_old_current_rows(self):
+        first_job, p = self.upload(export([{'Invoice #':'KEEP'},{'Invoice #':'OMITTED'}])); first = self.finish(first_job,p)
+        second_job, p = self.upload(export([{'Invoice #':'KEEP','Amount':'139.00','Bill Line Item Amount':'139.00'},
+                                           {'Invoice #':'NEW'}])); second = self.finish(second_job,p)
+        query = dict(importId=second['importId'], references=[dict(invoiceKey=n,kind='invoice') for n in ['KEEP','OMITTED','NEW']], amounts=[])
+        current = self.call('bill_candidates_page',dict(query=query))
+        self.assertEqual([(r['invoiceNumber'],r['amount']) for r in current['records']],[('KEEP',13900),('NEW',13800)])
+        old = self.call('bill_candidates_page',dict(query={**query,'importId':first['importId']}))
+        self.assertEqual([(r['invoiceNumber'],r['amount']) for r in old['records']],[('KEEP',13800),('OMITTED',13800)])
+
     def test_storage_failure_does_not_replace_active_data(self):
         job, p = self.upload(export([{}])); first = self.finish(job, p)
         self.repo.fail_writes = True

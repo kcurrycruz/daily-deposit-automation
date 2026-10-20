@@ -12,7 +12,7 @@ The AP upgrade needs an owner-controlled Supabase project before it can be relea
 insert into public.ap_workspaces(id) values(gen_random_uuid()) returning id;
 ```
 
-4. In Storage, create `hwfc-ap-private` with **Public disabled** and a 20 MiB file limit. Allow `application/pdf`, `text/csv`, and `application/octet-stream` (for bounded staging chunks). Do not create anonymous or authenticated Storage policies for this bucket. Check existing broad policies if the project is shared with other apps. [Supabase private bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals).
+4. In Storage, create `hwfc-ap-private` with **Public disabled**. For the large-export release, follow `docs/ap-bill-snapshot-rollout.md`: apply the additive snapshot migration, use a 32 MiB object limit and allow `application/gzip` alongside `application/pdf`, `text/csv`, and `application/octet-stream`. PDFs remain capped at 20 MiB in the app. Do not create anonymous or authenticated Storage policies for this bucket. Check existing broad policies if the project is shared with other apps. [Supabase private bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals).
 5. Verify direct browser-facing requests cannot read AP tables, call AP functions, download private objects or mint signed links. A publishable key must not provide access. The runtime also refuses financial operations if the bucket is public.
 
 ## Enter Streamlit Secrets
@@ -32,7 +32,7 @@ Use the server secret key, not a publishable key. Choose a new team password bef
 
 ## First use
 
-Unlock AP, import the original Bills CSV once, then upload statement PDFs. Up to twenty PDFs may be selected together; each PDF or CSV must be at most 20 MiB. An import supports up to 100,000 normalized records. All pages load before matching. Each new export is a complete snapshot, not an incremental merge.
+Unlock AP, import the original Bills CSV once, then upload statement PDFs. Up to twenty PDFs may be selected together; each PDF is capped at 20 MiB. The new snapshot importer supports original CSVs up to 256 MiB, subject to 32 MiB compressed artifacts and 500,000 normalized records. Legacy imports keep their earlier limits. Only complete statement-specific candidate sets load before matching. Each weekly export replaces current comparison data; overlapping exports do not append invoice copies. Saved drafts retain their source until explicitly refreshed; completed evidence stays frozen. See `docs/ap-bill-snapshot-rollout.md` for every limit and the required cloud/recovery gates.
 
 Check the extraction, confirm invoice rows, review unresolved comparisons, then mark reviewed with your initials. Notes are optional. Amount-only suggestions and native BILL exports retain their limitations after completion; review does not verify QuickBooks sync. Previous Statements opens frozen review evidence. Reopen starts further work without rewriting earlier completed evidence.
 

@@ -87,3 +87,11 @@ test('export of a selected historical revision uses only that revision evidence 
   vm.runInNewContext(source.slice(source.indexOf("if (action === 'export')"),source.indexOf('} catch(error)',source.indexOf("if (action === 'export')"))),context);
   assert.ok(exported[1]);assert.ok(exported[1].includes('old.pdf'));assert.ok(exported[1].includes('Old review note'));assert.ok(exported[1].includes('old-import'));assert.ok(!JSON.stringify(exported).includes('new.pdf'));
 });
+
+test('export of an older editable draft labels its pinned source rather than the latest weekly export',()=>{
+  const doc={id:'s',vendor:'Synthetic',filename:'draft.pdf',statementDate:'2026-10-01',notes:''},row={id:'r',statementId:'s',vendor:'Synthetic',status:'possible'};
+  const detail={doc,readOnly:false,importId:'old-import',importInfo:{metadata:{label:'pinned.csv'}}};
+  let exported;const context={state:{statements:[doc],resolutions:{},provider:{label:'latest.csv'}},shared:{state:{details:new Map([['s',detail]])}},historicalDetail:null,docDetail:()=>detail,results:()=>[row],reviewDecision:()=>null,statuses:{possible:{label:'Possible'}},toCSV:rows=>rows,download:(name,rows)=>exported=rows,toast(){},action:'export'};
+  vm.runInNewContext(source.slice(source.indexOf("if (action === 'export')"),source.indexOf('} catch(error)',source.indexOf("if (action === 'export')"))),context);
+  assert.ok(exported[1].includes('pinned.csv'));assert.ok(!exported[1].includes('latest.csv'));
+});

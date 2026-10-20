@@ -4,6 +4,7 @@ import json
 import sqlite3
 import subprocess
 import unittest
+from unittest.mock import patch
 from fixtures.ap_shared.bill_exports import export
 from app.ap_shared.bills.parser import CsvStage
 
@@ -41,6 +42,20 @@ class BillIndexTests(unittest.TestCase):
         db, index = self.build(export([{}, {}]))
         self.assertEqual(db.execute('select count(*) from bill_records').fetchone()[0], 2)
         self.assertEqual(index.finish()['counts']['warningCount'], 2)
+
+    def test_final_index_contains_no_discarded_staging_pages(self):
+        db,index=self.build(export([{'Invoice #':str(i)} for i in range(1000)]))
+        self.assertEqual(db.execute('pragma freelist_count').fetchone()[0],0,
+                         'Discarded CSV staging pages must not inflate the immutable archive')
+
+    def test_candidate_byte_accounting_is_linear_not_reencoding_the_whole_page(self):
+        _,index=self.build(export([{'Invoice #':str(i)} for i in range(100)]))
+        original=self.api.encoded;encoded_bytes=[]
+        def counted(value):
+            result=original(value);encoded_bytes.append(len(result.encode()));return result
+        query=dict(importId=IMPORT_ID,references=[],amounts=[dict(vendorKey='synthetic & co.',kind='invoice',amount=13800)])
+        with patch.object(self.api,'encoded',counted):page=index.candidates_page(query)
+        self.assertLess(sum(encoded_bytes),len(original(page).encode())*3)
 
     def test_native_and_template_results_match_existing_importer(self):
         sources = [export([{}]), export([{}, {'Invoice Date': '10/02/2026'}]), export([{}, {}]),

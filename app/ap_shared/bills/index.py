@@ -144,6 +144,9 @@ class SnapshotIndex:
         # Discard only derived staging tables, never the original CSV or finalized records.
         self.db.executescript('drop table bill_stage;drop table bill_groups;pragma user_version=1;')
         self.db.commit()
+        # DROP leaves pages (and their old CSV bytes) on SQLite's freelist. Pack
+        # only the final search data, not hundreds of MiB of discarded staging.
+        self.db.execute('vacuum')
         return dict(counts=counts, vendorDigest=digest)
 
     def vendors_page(self, after=-1, limit=PAGE_SIZE):
@@ -174,17 +177,18 @@ class SnapshotIndex:
         total = self.db.execute('select count(*) from bill_records where ' + predicate, params).fetchone()[0]
         output = dict(importId=query['importId'], queryDigest=canonical_hash(query), total=total,
                       afterOrdinal=after, nextCursor=None, records=[])
+        wire_bytes = len(encoded(output).encode()) + 128
         rows = self.db.execute('select ordinal,record from bill_records where ' + predicate + ' and ordinal>? order by ordinal limit ?', [*params, after, limit])
         last = after
         for ordinal, raw in rows:
             record = {**validate_record(json.loads(raw)), 'id': f'{query["importId"]}:{ordinal}'}
-            output['records'].append(record)
-            output['nextCursor'] = ordinal
-            if len(encoded(output).encode()) + 128 > max_bytes:
-                output['records'].pop()
+            record_bytes = len(encoded(record).encode()) + (1 if output['records'] else 0)
+            if wire_bytes + record_bytes > max_bytes:
                 if not output['records']:
                     raise SnapshotError('bill_limit')
                 break
+            output['records'].append(record)
+            wire_bytes += record_bytes
             last = ordinal
         more = self.db.execute('select 1 from bill_records where ' + predicate + ' and ordinal>? limit 1', [*params, last]).fetchone()
         output['nextCursor'] = last if more else None

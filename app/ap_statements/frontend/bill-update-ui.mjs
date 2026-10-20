@@ -5,9 +5,11 @@ export function billUpdateHTML(progress){
  const count=Number.isSafeInteger(progress.sourceRowCount)?` · ${progress.sourceRowCount.toLocaleString()} source rows checked`:'';
  return `<section class="bill-update-progress" role="status" aria-live="polite"><strong>${esc(labels[progress.stage]||'Updating BILL data')}${count}</strong>${Number.isFinite(progress.fraction)?`<progress max="1" value="${Math.max(0,Math.min(1,progress.fraction))}" aria-label="${esc(labels[progress.stage])}"></progress>`:''}<p>${['done','unchanged','current_changed','cancelled'].includes(progress.stage)?'Your statements and previous reviews are retained.':'Keep this tab open. Saved BILL data remains in use until the update is acknowledged.'}</p></section>`;
 }
-export function draftSourceHTML(detail,activeId){
- if(!detail?.importId||detail.importId===activeId||detail.completed||detail.readOnly)return '';
- return `<div class="notice blue"><div>This draft still uses ${esc(detail.importInfo?.metadata?.label||detail.importLabel||'its saved BILL export')}. <button class="button small" data-action="refresh-comparisons">Compare with current BILL data</button><small>Notes and corrections stay. Invoice decisions must be reviewed again.</small></div></div>`;
+export function draftSourceHTML(detail,activeId,scope){
+ if(!activeId||detail?.completed||detail?.readOnly)return '';
+ if(scope?.error)return '<div class="notice amber"><div>Current BILL comparison is unavailable. <button class="button small" data-action="refresh-comparisons">Retry comparison</button></div></div>';
+ if(detail?.importId!==activeId||!scope?.complete||scope.importId!==activeId)return '<div class="notice blue" role="status"><div>Automatically updating comparisons with the latest BILL data… Your notes and corrections are retained.</div></div>';
+ return `<div class="notice blue"><div>Compared with latest BILL data: ${esc(detail.importInfo?.metadata?.label||detail.importLabel||'saved export')}. Invoice presence does not verify payment settlement.</div></div>`;
 }
 export function createBillUpdateUI({shared,client,hasUnsaved=()=>false,onProgress=()=>{},confirmRestore,confirmRestart,importer=importBillSnapshot}){
  let disposed=false,active=null;

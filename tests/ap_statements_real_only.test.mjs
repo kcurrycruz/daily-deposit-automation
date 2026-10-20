@@ -170,7 +170,7 @@ test('arriving statements reuse the saved BILL source in a single upload and res
 
 test('opening a readable statement starts at its comparison results rather than extraction setup',()=>{
   const sourceBlock=source.slice(source.indexOf('function openDoc('),source.indexOf('function renderDrawer('));
-  const state={};const d=realDoc();const context={state,historicalDetail:null,document:{activeElement:null},getDoc:()=>d,comparisonsFor:()=>[],reconcile:()=>[],renderDrawer(){},overlay:{querySelector:()=>null}};
+  const state={};const d=realDoc();const context={state,dirty:new Set(),shared:null,historicalDetail:null,document:{activeElement:null},getDoc:()=>d,comparisonsFor:()=>[],reconcile:()=>[],renderDrawer(){},overlay:{querySelector:()=>null}};
   vm.runInNewContext(sourceBlock,context);context.openDoc(d.id);
   assert.equal(state.drawerTab,'review');
 });

@@ -13,7 +13,7 @@ export function legacyMigrationPreview(session,mappings={}){
 }
 export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
   const state={ready:false,provider:unloaded(),importId:null,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
-  const localFiles=new Map();let disposed=false,loaded=false;
+  const localFiles=new Map(),preparations=new Map();let disposed=false,loaded=false;
   let comparison=null,adoption=0;
   function check(){if(disposed)throw Error('AP is locked.');}
   const emit=()=>{check();onState(state);};
@@ -21,11 +21,37 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   async function ensureComparisons(doc){
     check();if(!comparison||!state.provider.loaded)return null;
     const detail=state.details.get(doc.id);
-    const info=detail?.importInfo||(detail?.importId&&detail.importId!==state.importId?{id:detail.importId,metadata:{label:detail.importLabel||''}}:state.activeImport);
+    if(detail?.completed||detail?.readOnly)return null;
+    const info=state.activeImport;
+    if(detail&&detail.importId!==state.importId){
+      detail.importId=state.importId;detail.importInfo=info;detail.importLabel=info?.metadata?.label||'';
+      // Keep human notes, but decisions against superseded evidence need review.
+      for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
+      comparison.invalidate(doc.id);
+    }
     const result=await comparison.ensure(doc,state.mappings,{importInfo:info});check();
     const scope=state.provider.scopes?.[doc.id];
-    if(info&&(!scope?.complete||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
+    if(info&&(!scope?.complete||scope.importId!==info.id||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
     return result;
+  }
+  async function prepareStatement(doc){
+    check();const detail=state.details.get(doc.id);
+    if(detail?.completed||detail?.readOnly)return null;
+    if(!comparison)return ensureComparisons(doc);
+    const token=Symbol();preparations.set(doc.id,token);let source=comparison;
+    comparison.invalidate(doc.id);
+    try{
+      const current=await client.request('bill_current',{});check();
+      if(preparations.get(doc.id)!==token)return null;
+      if(current.importId!==state.importId||current.importVersion!==state.importVersion)await adoptImport(current);
+      if(preparations.get(doc.id)!==token)return null;
+      source=comparison;
+      return await ensureComparisons(doc);
+    }catch(error){
+      if(preparations.get(doc.id)!==token||comparison!==source)return null;
+      const scope=state.provider.scopes?.[doc.id];if(scope){scope.complete=false;scope.error=error.message;emit();}
+      throw error;
+    }finally{if(preparations.get(doc.id)===token)preparations.delete(doc.id);}
   }
   async function refreshComparisons(id){
     check();const detail=state.details.get(id),doc=state.statements.find(item=>item.id===id);
@@ -44,8 +70,11 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     try{const provider=await pending.loadDirectory(info);check();
       const verified=await client.request('bill_current',{});check();
       if(token!==adoption||verified.importVersion!==current.importVersion||verified.importId!==current.importId)throw Error('The BILL data changed in a newer update. Retry loading current data.');
-      provider.scopes=state.provider.scopes||{};
-      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;emit();return provider;
+      // Do not display previous source scopes while new comparisons are loading.
+      provider.scopes={};
+      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;
+      for(const doc of state.statements)ensureComparisons(doc).catch(()=>{});
+      emit();return provider;
     }catch(error){pending.dispose();throw error;}
   }
   function write(operation){
@@ -170,7 +199,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     return write(async request=>{const reply=await request('save_mapping',payload);if(vendorKey(state.mappings[payload.vendor]||payload.vendor)!==vendorKey(payload.bill_vendor))for(const doc of state.statements.filter(d=>d.vendor===payload.vendor))for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};state.mappings[payload.vendor]=payload.bill_vendor;state.mappingVersions[payload.vendor]=reply.version;emit();return reply;});
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
-  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,
+  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,prepareStatement,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,
     attachOriginal(file,id,expectedVersion){return write(async request=>{await upload(file,'pdf',request,{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     migrateLegacy(preview,confirmed=false){if(!confirmed)return Promise.resolve({cancelled:true});const items=clone(preview.statements);if(!items.length)return Promise.reject(Error('No real legacy statements to migrate.'));return write(async request=>{const results=[];for(const item of items)results.push(await request('migrate_legacy',{confirmed:true,statements:[item]}));await load({replace:true});return results;});},
     async completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)throw Error('Open the current editable draft before completing.');const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;await ensureComparisons(doc);const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,mappingSnapshot:snapshot.mapping_snapshot,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},

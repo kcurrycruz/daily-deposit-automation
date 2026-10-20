@@ -84,3 +84,17 @@ test('a reference under another vendor cannot block same-vendor amount suggestio
   const row=reconcile(d,provider([own,other]))[0];
   assert.equal(row.status,'possible');assert.equal(row.matchMethod,'amount');assert.equal(row.candidates[0].vendor,'A.J. Rinella & Co., Inc.');
 });
+
+test('default review decisions accept only clear reference matches and preserve user choices',async()=>{
+  const {defaultReviewDecision}=await flow();
+  const exact=reconcile(doc(),provider())[0];
+  assert.equal(defaultReviewDecision(exact),'Reviewed — no action needed');
+  assert.equal(defaultReviewDecision({...exact,status:'presence'}),'Reviewed — no action needed');
+  assert.equal(defaultReviewDecision(exact,{decision:'Check payment timing'}),'Check payment timing');
+  for(const status of ['ambiguous','possible','missing','vendor','amount','balance','scheduled','source','unverified','extraction'])
+    assert.equal(defaultReviewDecision({...exact,status}),'');
+  assert.equal(defaultReviewDecision({...exact,preview:true}),'');
+  assert.equal(defaultReviewDecision({...exact,matchMethod:'amount'}),'');
+  assert.equal(defaultReviewDecision({...exact,simulated:true}),'');
+  assert.equal(defaultReviewDecision({...exact,candidates:[bill(),bill()]}),'');
+});

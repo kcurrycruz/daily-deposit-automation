@@ -3,8 +3,56 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {completionReviews,confirmVendor} from '../app/ap_statements/frontend/simple-flow.mjs';
+import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import {completionPayload} from '../app/ap_statements/frontend/history.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
+
+test('clear reference matches preselect no action without creating a saved review',()=>{
+  const resolutions={},context={docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,billEvidence:()=>[],reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
+  const row={id:'r',status:'presence',matchMethod:'reference',candidates:[{vendor:'Alpha',invoiceNumber:'00042',amount:18400}],activity:[]};
+  const html=context.reviewView({confirmed:true},row,[row]);
+  assert.match(html,/<option selected>Reviewed — no action needed<\/option>/);
+  assert.deepEqual(resolutions,{});
+  context.docDetail=()=>({readOnly:true});
+  assert.doesNotMatch(context.reviewView({confirmed:true},row,[row]),/<option selected>Reviewed — no action needed/);
+  context.docDetail=()=>null;row.status='unverified';context.statuses.unverified={label:'Not checked'};
+  assert.match(context.reviewView({confirmed:true},row,[row]),/<option value="" selected>Choose a review decision/);
+});
+
+test('automatic comparison updates redraw the open statement without overwriting unsaved input',()=>{
+  let renders=0;const context={state:{selected:'s'},dirty:new Set(),overlay:{querySelector:()=>({})},render(){},renderDrawer(){renders++;}};
+  vm.runInNewContext(source.slice(source.indexOf('function receiveShared('),source.indexOf('async function startShared(')),context);
+  context.receiveShared({provider:{label:'Latest'},statements:[],mappings:{},resolutions:{}});assert.equal(renders,1);
+  context.dirty.add('s');context.receiveShared({provider:{label:'Latest'},statements:[],mappings:{},resolutions:{}});assert.equal(renders,1);
+});
+
+test('automatic redraw preserves keyboard focus and the statement scroll position',()=>{
+  const document={activeElement:null};let drawer={scrollTop:340,contains:()=>true};
+  let close={id:'',dataset:{action:'close'},focus(){document.activeElement=this;}};document.activeElement=close;
+  const overlay={querySelector(selector){return selector==='.drawer'?drawer:selector==='.close'?close:null;},querySelectorAll(){return [close];}};
+  const context={state:{selected:'s'},dirty:new Set(),document,overlay,render(){},renderDrawer(){drawer={scrollTop:0,contains:()=>true};close={id:'',dataset:{action:'close'},focus(){document.activeElement=this;}};}};
+  vm.runInNewContext(source.slice(source.indexOf('function receiveShared('),source.indexOf('async function startShared(')),context);
+  context.receiveShared({provider:{},statements:[],mappings:{},resolutions:{}});
+  assert.equal(drawer.scrollTop,340);assert.equal(document.activeElement,close);
+});
+
+test('changing the review dropdown protects the unsaved choice from comparison redraws',()=>{
+  let changed;const context={saveState:'saved',state:{selected:'s'},dirty:new Set(),sharedStatus(){},document:{addEventListener(type,handler){changed=handler;}}};
+  vm.runInNewContext(source.slice(source.indexOf('function markDirty('),source.indexOf('function decorateSharedUi(')),context);
+  vm.runInNewContext(source.slice(source.indexOf("document.addEventListener('change'"),source.indexOf("document.addEventListener('click'")),context);
+  changed({target:{id:'review-decision',value:'Follow up with vendor'}});
+  assert.equal(context.dirty.has('s'),true);
+});
+
+test('top Save changes retains the selected review decision as well as the note',async()=>{
+  const doc={id:'s',confirmed:true},saved=[];
+  const nodes={'#review-note':{value:'Keep my follow-up'},'#review-decision':{value:'Check payment timing'}};
+  const context={action:'save-session',state:{selected:'s',selectedRow:'r',drawerTab:'review',statements:[doc],resolutions:{}},getDoc:()=>doc,comparisonsFor:()=>[{id:'r',status:'presence'}],document:{querySelector:s=>nodes[s]},ready(){},render(){},renderDrawer(){},toast(){},async persistDoc(){saved.push(structuredClone(context.state.resolutions));}};
+  const block=source.slice(source.indexOf("if (action === 'save-session')"),source.indexOf("if (action === 'disconnect')"));
+  await vm.runInNewContext('(async()=>{'+block+'})()',context);
+  assert.equal(saved[0].r.decision,'Check payment timing');assert.equal(saved[0].r.note,'Keep my follow-up');
+});
 
 test('finish dialog acknowledges confirmed invoice presence together without silently saving reviews',async()=>{
   const doc={id:'s',confirmed:true,rows:[{id:'r'}]},resolutions={r:{note:'Keep this'}};
@@ -26,7 +74,7 @@ test('inline vendor confirmation refuses to discard unsaved edits',async()=>{
 });
 
 test('preliminary results cannot invite saved review decisions before the PDF is confirmed',()=>{
-  const context={reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  const context={docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const doc={confirmed:false},row={id:'r',status:'presence',candidates:[],activity:[]};
   assert.doesNotMatch(context.reviewView(doc,row,[row]),/data-action="resolve"|id="review-note"/);
@@ -34,7 +82,7 @@ test('preliminary results cannot invite saved review decisions before the PDF is
 });
 
 test('invoice details can render beneath the overview without duplicating the original PDF',()=>{
-  let previews=0;const context={reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>{previews++;return '<canvas></canvas>';},state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  let previews=0;const context={docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>{previews++;return '<canvas></canvas>';},state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const row={id:'r',status:'presence',candidates:[],activity:[]};
   context.reviewView({confirmed:true},row,[row],false);assert.equal(previews,0);

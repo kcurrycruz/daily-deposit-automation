@@ -1,6 +1,12 @@
 import {reconcile,totals} from './core.mjs';
 import {providerVendors} from './vendor-identity.mjs';
 export const invoiceFound=row=>['matched','presence'].includes(row.status);
+export function defaultReviewDecision(row,resolution){
+  if(resolution?.decision)return resolution.decision;
+  if(invoiceFound(row)&&!row.preview&&!row.simulated&&row.matchMethod==='reference'&&row.candidates?.length===1)
+    return 'Reviewed — no action needed';
+  return '';
+}
 export async function confirmVendor(doc,name,shared,persistDoc){
   if(!providerVendors(shared.state.provider,doc.id).some(record=>record.vendor===name))throw Error('Choose a vendor from the saved BILL data.');
   if(!doc.vendor?.trim()||['unidentified vendor','unknown','unidentified'].includes(doc.vendor.trim().toLowerCase())){

@@ -121,7 +121,7 @@ test('guide opens the unchecked statement once and retains focus inside the dial
   const document = { activeElement: { name: 'guide button' } };
   let closeButton;
   let renders = 0;
-  const context = { state, workflowGuide, document, priorFocus: null,
+  const context = { state, workflowGuide, document, priorFocus: null,dirty:new Set(),shared:null,
     overlay: { querySelector: () => closeButton },
     renderDrawer: () => {
       renders++;

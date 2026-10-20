@@ -32,7 +32,7 @@ Optional server-side Streamlit Secrets setting, inside `[ap]`:
 bill_storage_budget_bytes = 900000000
 ```
 
-The default is 900,000,000 bytes. The value must be an integer from 1 through 9,000,000,000. This is an **application reservation budget, not a billing limit or a plan upgrade**. Do not raise it without checking the account's actual included capacity and approving any costs. Capacity checks count all existing objects in the configured bucket plus active job reservations, reserve staging and final artifacts, and warn at 80%. An insufficient reservation leaves the prior source current. Historical imports and statements are not automatically deleted.
+The default is 900,000,000 bytes. The value must be an integer from 1 through 9,000,000,000. This is an **application reservation budget, not a billing limit or a plan upgrade**. Do not raise it without checking the account's actual included capacity and approving any costs. Capacity checks count all existing objects in the configured bucket plus active job reservations and reserve staging and final artifacts. The backend calculates an 80% warning flag, but this release does not yet display it; administrators must check usage manually. An insufficient reservation leaves the prior source current. Historical imports and statements are not automatically deleted.
 
 ## Verification before production
 
@@ -57,3 +57,22 @@ Temporary process directories are derived and private. A restart loses them safe
 Once a v2 source is active, **do not roll back to old full-reader code**: it cannot load the new snapshot as legacy rows. Use a compatible patched release, or explicitly restore an approved legacy source using compatible code before switching versions. Back up and verify frozen statement references before any restoration. Source restoration does not authorize rewriting historical evidence.
 
 No part of this workflow posts accounting entries to BILL or QuickBooks.
+
+## Independent review and implementation decisions
+
+A fresh-context independent review found three Important issues and no Critical issues. The single fix pass reproduced each issue before implementing its correction: authoritative active-source/version readback and stale-response guards; terminal CSV lease release with explicit cancellation/reselection; and accessible paginated, source-pinned warning details with byte bounds. Original artifacts and frozen statement evidence are retained. A superseded acknowledgement cannot silently make its old source current in this tab.
+
+Recorded decisions:
+
+- Windows has no Bash runtime for the skill's bookkeeping helpers. Equivalent PowerShell/apply_patch task briefs, commit ranges, regression evidence and ledger entries were used without installing another shell.
+- Durable chunk acknowledgement, verified-original attachment, restart/reuse and cancellation needed additional guarded lifecycle RPCs within the same authenticated job protocol. Transaction tests cover them; migration surface is larger.
+- Update orchestration/progress markup lives in a separate UI module so activation, retry and navigation behavior can be tested directly.
+- The finalized SQLite file is compacted after staging tables are dropped. A regression demonstrated discarded staging pages; compaction fixes the real export's archive-size failure without increasing limits. It costs local disk/time.
+- Candidate response sizes are calculated once per record instead of repeatedly serializing the growing page. Existing envelope-bound tests and conservative cursor overhead protect the byte limit.
+- Live migration/MIME/private-access/quota/SDK behavior remains unverified until owner-approved test-cloud validation. PGlite and mocks are not live-service evidence.
+- Independent live-session concurrency, server recovery and database/object backup restoration remain release gates, not implied approvals to change external state.
+- Browser file-chooser upload completion, cancellation and production latency remain gates after the stalled local chooser check. Desktop/narrow navigation, tutorial and scrolling were verified separately.
+- Real-file counts, hashes, artifact sizes and memory are local measurements; the independent reviewer did not reopen company data. Authorized representative-input retesting remains appropriate before production.
+- Five seconds is a cooperative budget, not a hard upper bound on atomic SQLite finalization. The measured 6.953-second maximum is below the current 30-second request timeout, but deployment-hardware latency must pass before rollout.
+
+Deferred review minors: unusually zero-padded numeric amount/ordinal strings can differ from the legacy JavaScript importer and require manual review; the backend 80% storage-warning flag is not yet visible in the UI. These are not described as completed features.

@@ -81,3 +81,6 @@ html body{background:#fff}.main{background:#fff}
 :root .bill-update-progress{margin:0 0 20px;padding:18px 22px;border:1px solid #cbdcc5;border-radius:10px;background:#f3f7ef;color:#234e40}
 .bill-update-progress progress{display:block;width:min(100%,440px);margin-top:12px;accent-color:#205b48}
 .bill-update-progress p{margin:8px 0 0;font-size:13px}
+.bill-warning-details{margin-top:16px;padding:16px;border:1px solid #d8e1d3;border-radius:8px;overflow-wrap:anywhere}
+.bill-warning-details ol{max-height:420px;overflow:auto;padding-left:24px}
+.bill-warning-details li{margin:12px 0}

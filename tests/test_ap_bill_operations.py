@@ -74,6 +74,26 @@ class BillOperationsTests(unittest.TestCase):
         old = self.call('bill_candidates_page',dict(query={**query,'importId':first['importId']}))
         self.assertEqual([(r['invoiceNumber'],r['amount']) for r in old['records']],[('KEEP',13800),('OMITTED',13800)])
 
+    def test_activated_job_replay_does_not_claim_an_older_source_is_current(self):
+        a,p=self.upload(export([{}]));first=self.finish(a,p)
+        b,p=self.upload(export([{'Invoice #':'NEW'}]));second=self.finish(b,p)
+        for action in ['bill_activate','bill_upload_finish']:
+            response=self.call(action,dict(job_id=a['job_id']))
+            self.assertFalse(response['alreadyCurrent'])
+            self.assertTrue(response['superseded'])
+            self.assertEqual(response['currentImportId'],second['importId'])
+        current=self.call('bill_current',{})
+        self.assertEqual(current['importId'],second['importId'])
+        self.assertEqual(current['importVersion'],self.repo.version)
+
+    def test_invalid_header_and_later_row_release_the_lease_for_a_corrected_file(self):
+        for bad in ['not,a,bill\n1,2,3\n','vendor,invoiceNumber,amount\nSynthetic,1,1\nSynthetic,2,1,extra\n']:
+            with self.subTest(source=bad[:10]):
+                with self.assertRaises(ValueError):
+                    job,p=self.upload(bad);self.finish(job,p)
+                self.assertTrue(all(j['state'] in ('activated','abandoned') for j in self.repo.jobs.values()))
+                job,p=self.upload(export([{}]));self.finish(job,p)
+
     def test_storage_failure_does_not_replace_active_data(self):
         job, p = self.upload(export([{}])); first = self.finish(job, p)
         self.repo.fail_writes = True

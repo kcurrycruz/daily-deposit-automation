@@ -1,9 +1,9 @@
 import {importBillSnapshot} from './bill-upload.mjs';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function billUpdateHTML(progress){
- const labels={preparing:'Preparing file',uploading:'Uploading',checking:'Checking records',saving:'Saving',done:'BILL data updated. Previous invoices were refreshed, not added again.',unchanged:'This BILL export is already current. No invoices were added.',cancelled:'Update cancelled. Your saved BILL data was not replaced.'};
+ const labels={preparing:'Preparing file',uploading:'Uploading',checking:'Checking records',saving:'Saving',done:'BILL data updated. Previous invoices were refreshed, not added again.',unchanged:'This BILL export is already current. No invoices were added.',current_changed:'BILL data changed in another session. The current saved export has been loaded.',cancelled:'Update cancelled. Your saved BILL data was not replaced.'};
  const count=Number.isSafeInteger(progress.sourceRowCount)?` · ${progress.sourceRowCount.toLocaleString()} source rows checked`:'';
- return `<section class="bill-update-progress" role="status" aria-live="polite"><strong>${esc(labels[progress.stage]||'Updating BILL data')}${count}</strong>${Number.isFinite(progress.fraction)?`<progress max="1" value="${Math.max(0,Math.min(1,progress.fraction))}" aria-label="${esc(labels[progress.stage])}"></progress>`:''}<p>${['done','unchanged','cancelled'].includes(progress.stage)?'Your statements and previous reviews are retained.':'Keep this tab open. Saved BILL data remains in use until the update is acknowledged.'}</p></section>`;
+ return `<section class="bill-update-progress" role="status" aria-live="polite"><strong>${esc(labels[progress.stage]||'Updating BILL data')}${count}</strong>${Number.isFinite(progress.fraction)?`<progress max="1" value="${Math.max(0,Math.min(1,progress.fraction))}" aria-label="${esc(labels[progress.stage])}"></progress>`:''}<p>${['done','unchanged','current_changed','cancelled'].includes(progress.stage)?'Your statements and previous reviews are retained.':'Keep this tab open. Saved BILL data remains in use until the update is acknowledged.'}</p></section>`;
 }
 export function draftSourceHTML(detail,activeId){
  if(!detail?.importId||detail.importId===activeId||detail.completed||detail.readOnly)return '';
@@ -25,9 +25,11 @@ export function createBillUpdateUI({shared,client,hasUnsaved=()=>false,onProgres
    try{const result=await operation();check();
     if(result.cancelled){progress({stage:'cancelled'});return result;}
     // Activation is authoritative; directory readback must also succeed before publication.
-    if(!result.alreadyCurrent||result.importId){try{await shared.adoptImport(result);}catch(error){error.retry=async()=>result;throw error;}}
+    let adopted;
+    if(!result.alreadyCurrent||result.importId){try{adopted=await shared.adoptImport(result);}catch(error){error.retry=async()=>result;throw error;}}
+    if(result.superseded||(adopted?.importId&&adopted.importId!==result.importId)){check();progress({stage:'current_changed'});return {...result,superseded:true};}
     check();progress({stage:result.alreadyCurrent?'unchanged':'done'});return result;
-   }catch(error){if(error.retry){const retry=error.retry;error.retry=()=>execute(retry);}throw error;}
+   }catch(error){if(error.retry){const retry=error.retry;error.retry=()=>execute(retry);}if(error.cancel){const cancel=error.cancel;error.cancel=async()=>{const result=await cancel();progress({stage:'cancelled'});return result;};}throw error;}
    finally{active=null;}
   }
   return execute(()=>importer(client,file,{asOf,signal:controller.signal,onProgress:progress,confirmRestore,confirmRestart}));

@@ -33,6 +33,11 @@ test('a stale tab adopts an already-current source without activating it again',
  const f=setup({importer:async()=>({importId:'new',duplicate:true,alreadyCurrent:true,recordCount:223425,metadata:{label:'Current server export'}})});
  await f.ui.update({});assert.equal(f.shared.state.provider.recordCount,223425);assert.equal(f.events.at(-1).stage,'unchanged');
 });
+test('an acknowledgement superseded by another session reports current data instead of claiming its export won',async()=>{
+ const f=setup({importer:async()=>({importId:'A',recordCount:1,metadata:{label:'A.csv'}})});
+ f.shared.adoptImport=async()=>({importId:'B',recordCount:2,label:'B.csv'});
+ const result=await f.ui.update({});assert.equal(result.superseded,true);assert.equal(f.events.at(-1).stage,'current_changed');
+});
 test('navigation aborts work and ignores late worker or server completion',async()=>{
  let release,signal;const f=setup({importer:async(c,file,o)=>{signal=o.signal;await new Promise(r=>release=r);o.onProgress({stage:'saving'});return {importId:'new',metadata:{label:'Late'},recordCount:223425};}});
  const pending=f.ui.update({});f.ui.dispose();release();await assert.rejects(pending,/cancelled/i);assert.equal(signal.aborted,true);assert.equal(f.shared.state.provider.label,'Old export');assert.equal(f.events.length,0);

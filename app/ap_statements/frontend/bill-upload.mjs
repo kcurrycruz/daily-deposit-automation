@@ -60,7 +60,7 @@ export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal
         onProgress({stage:'uploading',fraction:Math.min(1,(at+CHUNK)/packed.blob.size)});
       }
       let progress=await request('finish','bill_upload_finish',{job_id:job.job_id});
-      if(progress.duplicate&&progress.alreadyCurrent)return progress;
+      if(progress.superseded||(progress.duplicate&&progress.alreadyCurrent))return progress;
       if(progress.confirmationRequired&&!await confirmRestore(progress))return cancel();
       let restoring=!!progress.confirmationRequired;
       while(progress.state!=='prepared'){
@@ -82,7 +82,10 @@ export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal
       // A quota rejection at begin explicitly abandons that unseen server job.
       // A user-requested retry must start a new job, not replay an abandoned lease.
       if(error.code==='bill_quota'&&!job){steps.clear();}
-      error.retry=execute;throw error;
+      if(job?.job_id)error.cancel=cancel;
+      if(['bill_invalid_archive','bill_limit'].includes(error.code))delete error.retry;
+      else error.retry=execute;
+      throw error;
     }
   }
   return execute();

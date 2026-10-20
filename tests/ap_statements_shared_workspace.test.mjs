@@ -5,6 +5,31 @@ const importId=crypto.randomUUID();
 const doc=()=>({id:crypto.randomUUID(),vendor:'Alpha',filename:'statement.pdf',layout:'generic',statementDate:'2026-10-01',declaredTotal:18400,confirmed:true,pageCount:1,notes:'Keep this note',warnings:[],rows:[{id:crypto.randomUUID(),invoiceNumber:'00042',type:'invoice',amount:18400,balance:18400,page:1,confidence:99}]});
 const snapshot=()=>({activeImport:{id:importId,metadata:{label:'Bills.csv',asOf:'2026-10-01',sourceFormat:'bill-native'},record_count:5610},mappings:{},mappingVersions:{},statements:[],nextCursor:null});
 
+test('adoption rechecks the active version and rejects a late older directory response',async()=>{
+ const a=crypto.randomUUID(),b=crypto.randomUUID(),vendors=[{vendor:'Alpha'}];
+ const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(vendors))))].map(b=>b.toString(16).padStart(2,'0')).join('');
+ let current={importId:a,importVersion:1,recordCount:1,metadata:{label:'A.csv'}},release,started;
+ const held=new Promise(r=>started=r);
+ const workspace=createSharedWorkspace({dispose(){},async request(action,payload){
+  if(action==='bill_current')return structuredClone(current);
+  if(action==='bill_vendors_page'){if(payload.import_id===a){started();await new Promise(r=>release=r);}return {importId:payload.import_id,vendors,total:1,vendorDigest:digest,nextCursor:null};}
+  throw Error(action);
+ }});
+ const old=workspace.adoptImport({importId:a,recordCount:1,metadata:{label:'Old acknowledgement'}});await held;
+ current={importId:b,importVersion:2,recordCount:1,metadata:{label:'B.csv'}};
+ await workspace.adoptImport(current);release();await assert.rejects(old,/changed|newer/i);
+ assert.equal(workspace.state.importId,b);assert.equal(workspace.state.provider.label,'B.csv');workspace.dispose();
+});
+
+test('retrying directory readback after a newer activation adopts the fresh source, not cached acknowledgement',async()=>{
+ const a=crypto.randomUUID(),b=crypto.randomUUID(),vendors=[{vendor:'Alpha'}],digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(vendors))))].map(b=>b.toString(16).padStart(2,'0')).join('');
+ let current={importId:a,importVersion:1,recordCount:1,metadata:{label:'A.csv'}},offline=true;
+ const workspace=createSharedWorkspace({dispose(){},async request(action,payload){if(action==='bill_current')return current;if(action==='bill_vendors_page'){if(offline)throw Error('offline');return {importId:payload.import_id,vendors,total:1,vendorDigest:digest,nextCursor:null};}throw Error(action);}});
+ const ack={importId:a,recordCount:1,metadata:{label:'A.csv'}};await assert.rejects(workspace.adoptImport(ack),/offline/);
+ offline=false;current={importId:b,importVersion:2,recordCount:1,metadata:{label:'B.csv'}};
+ await workspace.adoptImport(ack);assert.equal(workspace.state.importId,b);assert.equal(workspace.state.provider.label,'B.csv');workspace.dispose();
+});
+
 test('snapshot capability uses metadata and complete scopes, preserving pinned draft source until explicit refresh',async()=>{
   const oldId=crypto.randomUUID(),directory=[{vendor:'Alpha'}],digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(directory))))].map(b=>b.toString(16).padStart(2,'0')).join('');
   const active={id:importId,metadata:{label:'large.csv',asOf:'2026-10-19'},record_count:223425,storage_format:'snapshot-v2',vendorDigest:digest};const calls=[];

@@ -8,6 +8,7 @@ import * as guide from '../app/ap_statements/frontend/guide.mjs';
 import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import * as simpleView from '../app/ap_statements/frontend/simple-flow-view.mjs';
 import * as billUI from '../app/ap_statements/frontend/bill-update-ui.mjs';
+import * as billWarningsView from '../app/ap_statements/frontend/bill-warnings.mjs';
 const billTutorial=await import('../app/ap_statements/frontend/bill-export-guide.mjs').catch(()=>({}));
 import { createDemo, simulateRecords } from './fixtures/legacy_ap_demo.mjs';
 import { importBillSource } from '../app/ap_statements/frontend/bill-import.mjs';
@@ -75,7 +76,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
@@ -99,6 +100,14 @@ function scrollableApp(data) {
 }
 
 const actionEvent=(action,extra={})=>({target:{classList:{contains:()=>false},closest:()=>({dataset:{action,...extra}})}});
+
+test('native snapshot warnings are accessible through BILL data without embedded importNotes',async()=>{
+ const app=browserApp();app.state.view='connection';app.state.provider={loaded:true,records:[],importId:'source',label:'Weekly.csv',sourceFormat:'bill-native',sourceIssueCount:1};
+ const calls=[];app.context.window.hwfcSharedClient={async request(action,payload){calls.push({action,payload});return {importId:'source',total:1,warnings:[{rows:'88',reason:'Missing vendor'}],nextCursor:null};}};
+ app.context.render();assert.match(app.nodes['#app'].innerHTML,/data-action="bill-warnings"/);
+ await app.events.click(actionEvent('bill-warnings'));
+ assert.equal(calls[0].action,'bill_warnings_page');assert.equal(calls[0].payload.import_id,'source');assert.match(app.nodes['#app'].innerHTML,/Missing vendor/);
+});
 
 test('Update BILL data opens the export guide without opening a file picker',async()=>{
   const app=browserApp(realSession());let picked=0;

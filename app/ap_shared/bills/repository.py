@@ -60,6 +60,10 @@ class BillRepository:
     def source(self, import_id):
         return self.base.import_info(self.config.workspace_id, import_id)
 
+    def current(self):
+        self.base._private_bucket()
+        return self.base._one(self.base.client.table('ap_workspaces').select('active_import_id,import_version').eq('id',self.config.workspace_id))
+
     def lookup_hash(self, raw_hash):
         digest(raw_hash); self.base._private_bucket()
         rows = self.base._table('ap_bill_imports').eq('file_hash', raw_hash).limit(1).execute().data

@@ -14,7 +14,7 @@ export function legacyMigrationPreview(session,mappings={}){
 export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
   const state={ready:false,provider:unloaded(),importId:null,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map();let disposed=false,loaded=false;
-  let comparison=null;
+  let comparison=null,adoption=0;
   function check(){if(disposed)throw Error('AP is locked.');}
   const emit=()=>{check();onState(state);};
   function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=provider;if(loaded)emit();}}});return source;}
@@ -36,10 +36,16 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     comparison.invalidate(id);const result=await ensureComparisons(doc);emit();return result;
   }
   async function adoptImport(result){
-    check();const info={id:result.importId,metadata:result.metadata,record_count:result.recordCount,storage_format:result.storageFormat};
+    check();const token=++adoption;
+    const current=await client.request('bill_current',{});check();
+    if(token!==adoption||!Number.isSafeInteger(current.importVersion)||current.importVersion<(state.importVersion||0))throw Error('The BILL data changed in a newer update. Retry loading current data.');
+    const info=current.importId?{id:current.importId,metadata:current.metadata,record_count:current.recordCount,storage_format:current.storageFormat}:null;
     const pending=makeComparison();
-    try{const provider=await pending.loadDirectory(info);check();provider.scopes=state.provider.scopes||{};
-      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info.id;emit();return provider;
+    try{const provider=await pending.loadDirectory(info);check();
+      const verified=await client.request('bill_current',{});check();
+      if(token!==adoption||verified.importVersion!==current.importVersion||verified.importId!==current.importId)throw Error('The BILL data changed in a newer update. Retry loading current data.');
+      provider.scopes=state.provider.scopes||{};
+      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;emit();return provider;
     }catch(error){pending.dispose();throw error;}
   }
   function write(operation){
@@ -77,6 +83,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     return {...metadata,records,recordCount:records.length,loaded:true,simulated:false};
   }
   async function load({replace=false}={}){
+    adoption++;
     check();if(loaded&&!replace)return state;
     // Work is assembled separately. A failed refresh cannot replace unsaved edits.
     const summaries=[],cursors=new Set();let cursor=null,home,pendingComparison;
@@ -90,7 +97,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       const provider=snapshotCapable?await pendingComparison.loadDirectory(home.activeImport):(home.activeImport?await loadProvider(home.activeImport.id,home.activeImport.metadata):{...unloaded(),label:'No BILL records imported'});
       const details=[];for(const summary of summaries)details.push(await client.request('statement',{statement_id:summary.id}));check();
       state.statements=[];state.details.clear();state.resolutions={};state.mappings=home.mappings;state.mappingVersions=home.mappingVersions||{};
-      state.provider=provider;state.importId=home.activeImport?.id||null;
+      state.provider=provider;state.importId=home.activeImport?.id||null;state.importVersion=home.importVersion||0;
       comparison?.dispose();comparison=pendingComparison;state.activeImport=home.activeImport;state.capabilities=home.capabilities||{};
       for(const detail of details){if(!snapshotCapable&&detail.importId!==state.importId||JSON.stringify(detail.mappingSnapshot||{})!==JSON.stringify(state.mappings))detail.resolutions=reviewNotesOnly(detail.resolutions||{});adopt(detail);}
       state.ready=true;loaded=true;emit();

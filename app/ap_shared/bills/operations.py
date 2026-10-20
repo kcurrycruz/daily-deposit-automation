@@ -11,7 +11,7 @@ import tempfile
 import threading
 from uuid import UUID, uuid5
 from ..access import require_access
-from ..models import allowed, integer, text, date_value, require_uuid, validate_record
+from ..models import allowed, integer, text, date_value, require_uuid, validate_record, ApValidationError
 from .archive import verify_csv_archive, SnapshotCache
 from .builds import BuildRegistry
 from .contracts import (SnapshotError, MAX_ARCHIVE_BYTES, CHUNK_BYTES, RESPONSE_BYTES,
@@ -66,6 +66,26 @@ class BillOperations:
         return dict(importId=source['id'], recordCount=source['record_count'],
                     storageFormat=source.get('storage_format', 'rows-v1'), metadata=source['metadata'])
 
+    def _activation_info(self, job, auth):
+        self._check(auth)
+        current=self.repository.current()
+        same=current['active_import_id']==job['import_id']
+        return dict(**self._source_info(job['import_id']),alreadyCurrent=same and job['state']=='activated',superseded=not same,
+                    currentImportId=current['active_import_id'],importVersion=current['import_version'])
+
+    def _build_operation(self, operation, job, request_id, auth):
+        try:
+            return operation()
+        except (SnapshotError,ApValidationError) as error:
+            terminal=isinstance(error,ApValidationError) or error.code in ('bill_limit','bill_invalid_archive')
+            if terminal:
+                try:
+                    self._rpc('job_abandon',dict(job_id=job['id'],generation=job['generation']),request_id,auth,'invalid-source-cancel')
+                finally:
+                    self.builds.release(job['id'])
+                if isinstance(error,ApValidationError):raise SnapshotError('bill_invalid_archive') from None
+            raise
+
     def _cleanup(self, job_id, auth):
         self._check(auth)
         try:
@@ -79,8 +99,8 @@ class BillOperations:
         if job['state'] != 'uploading':
             result = dict(job_id=job['id'], generation=job['generation'], checkpoint=job['checkpoint'], state=job['state'])
             if job.get('import_id'):
-                result.update(self._source_info(job['import_id']), duplicate=True,
-                              alreadyCurrent=job['state'] == 'activated', confirmationRequired=job['state'] == 'prepared')
+                if job['state']=='activated':result.update(self._activation_info(job,auth),duplicate=True)
+                else:result.update(self._source_info(job['import_id']),duplicate=True,alreadyCurrent=False,confirmationRequired=True)
             return result
         paths = self.builds.paths(job['id'])
         with open(paths['archive'], 'wb') as assembled:
@@ -202,6 +222,12 @@ class BillOperations:
     def handle(self, action, payload, request_id, authorization):
         require_uuid(request_id); self._check(authorization)
         auth = authorization
+        if action == 'bill_current':
+            allowed(payload,'')
+            current=self.repository.current()
+            result=self._source_info(current['active_import_id']) if current['active_import_id'] else dict(importId=None,recordCount=0,metadata={})
+            self._check(auth)
+            return dict(**result,importVersion=current['import_version'])
         if action == 'bill_upload_begin':
             data = allowed(payload, 'filename compressed_size as_of', 'filename compressed_size')
             text(data['filename'], maximum=1024, blank=False)
@@ -239,17 +265,18 @@ class BillOperations:
                       'bill_activate': 'job_id confirm_restore', 'bill_cancel': 'job_id'}[action]
             data = allowed(payload, fields, 'job_id generation expected_checkpoint' if action == 'bill_prepare_step' else 'job_id')
             job = self._job(data['job_id'], auth)
+            if action=='bill_cancel' and job['state']=='abandoned':return dict(cancelled=True)
             if action == 'bill_upload_finish':
-                return self._finish_upload(job, request_id, auth)
+                return self._build_operation(lambda:self._finish_upload(job,request_id,auth),job,request_id,auth)
             if action == 'bill_prepare_step':
                 require_uuid(data['generation']); integer(data['expected_checkpoint'], minimum=0)
                 if type(data.get('restart', False)) is not bool:
                     raise SnapshotError('bill_incomplete')
-                return self._prepare(job, data, request_id, auth)
+                return self._build_operation(lambda:self._prepare(job,data,request_id,auth),job,request_id,auth)
             if type(data.get('confirm_restore', False)) is not bool:
                 raise SnapshotError('bill_incomplete')
             if job['state'] == 'activated':
-                return dict(alreadyCurrent=True, **self._source_info(job['import_id']))
+                return self._activation_info(job,auth)
             source = self.repository.source(job['import_id']) if job.get('import_id') else None
             needs_restore = source is not None and source['file_hash'] != job.get('original_hash')
             # Reused sources are prepared before any local build, with no completed build counts.
@@ -262,7 +289,7 @@ class BillOperations:
                 raise SnapshotError('bill_incomplete')
             self._rpc('snapshot_activate', dict(job_id=job['id'], import_id=job['import_id'],
                       expected_import_version=job['expected_import_version'], confirm_restore=data.get('confirm_restore', False)), request_id, auth, 'activate')
-            return self._source_info(job['import_id'])
+            return self._activation_info(job,auth)
         if action in ('bill_vendors_page', 'bill_candidates_page', 'bill_warnings_page'):
             if action == 'bill_candidates_page':
                 data = allowed(payload, 'query cursor limit', 'query')

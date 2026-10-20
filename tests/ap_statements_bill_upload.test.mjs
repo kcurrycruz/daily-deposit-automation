@@ -30,6 +30,17 @@ test('a transport retry keeps request identity and does not re-upload acknowledg
  const prepare=transport.calls.filter(c=>c.action==='bill_prepare_step');assert.equal(prepare[0].id,prepare[1].id);
  assert.equal(transport.calls.filter(c=>c.action==='bill_upload_chunk').length,1);
 });
+
+test('failed uploads expose explicit cancellation and terminal invalid files are not offered same-file retry',async()=>{
+ const {importBillSnapshot}=await api();
+ for(const code of ['unavailable','bill_invalid_archive']){
+  const transport=client({bill_prepare_step:()=>{throw Object.assign(Error('Rejected'),{code});}});let failure;
+  try{await importBillSnapshot(transport,source(),{workerFactory:await workerFactory()});}catch(e){failure=e;}
+  assert.equal(typeof failure.cancel,'function');
+  assert.equal(typeof failure.retry,code==='unavailable'?'function':'undefined');
+  await failure.cancel();assert.equal(transport.calls.at(-1).action,'bill_cancel');
+ }
+});
 test('already-current duplicate does not activate and old source requires explicit consent',async()=>{
  const {importBillSnapshot}=await api();const current=client({bill_upload_finish:()=>({state:'prepared',generation,checkpoint:0,duplicate:true,alreadyCurrent:true,importId,recordCount:1})});
  const same=await importBillSnapshot(current,source(),{workerFactory:await workerFactory()});assert.equal(same.alreadyCurrent,true);assert.equal(current.activated,0);

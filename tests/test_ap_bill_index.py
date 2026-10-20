@@ -57,6 +57,15 @@ class BillIndexTests(unittest.TestCase):
         with patch.object(self.api,'encoded',counted):page=index.candidates_page(query)
         self.assertLess(sum(encoded_bytes),len(original(page).encode())*3)
 
+    def test_warning_pages_are_byte_bounded_and_keep_every_source_warning(self):
+        db,index=self.build(export([{},{}]))
+        db.execute('update bill_warnings set reason=?',('Synthetic warning '*50,));db.commit()
+        page=index.warnings_page(limit=500,max_bytes=1400)
+        self.assertEqual(page['total'],2);self.assertEqual(len(page['warnings']),1)
+        self.assertLessEqual(len(self.api.encoded(page).encode()),1400)
+        last=index.warnings_page(after=page['nextCursor'],limit=500,max_bytes=1400)
+        self.assertEqual(len(last['warnings']),1);self.assertIsNone(last['nextCursor'])
+
     def test_native_and_template_results_match_existing_importer(self):
         sources = [export([{}]), export([{}, {'Invoice Date': '10/02/2026'}]), export([{}, {}]),
                    export([{'Amount': 'bad'}, {'Active?': 'Inactive'}, {'Vendor Name': ''}]),

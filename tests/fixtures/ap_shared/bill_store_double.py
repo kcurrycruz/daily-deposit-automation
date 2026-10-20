@@ -14,6 +14,7 @@ class BillStoreDouble:
 
     def job(self, job_id): return copy.deepcopy(self.jobs[job_id])
     def source(self, import_id): return copy.deepcopy(self.sources[import_id])
+    def current(self): return dict(active_import_id=self.active_id,import_version=self.version)
     def lookup_hash(self, raw_hash):
         return next((copy.deepcopy(s) for s in self.sources.values() if s['file_hash'] == raw_hash), None)
 

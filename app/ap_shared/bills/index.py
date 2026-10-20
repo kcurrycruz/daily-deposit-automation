@@ -127,7 +127,7 @@ class SnapshotIndex:
             return dict(counts=meta['counts'], vendorDigest=meta['vendorDigest'])
         count = self.db.execute('select count(*) from bill_records').fetchone()[0]
         if not count:
-            raise SnapshotError('bill_incomplete')
+            raise SnapshotError('bill_invalid_archive')
         self.db.executescript('create index bill_reference on bill_records(reference_key,kind);create index bill_vendor_amount on bill_records(vendor_key,kind,amount);')
         counts = dict(recordCount=count, sourceRowCount=meta['sourceRowCount'], collapsedRowCount=self.collapsed,
                       excludedRowCount=meta['excludedRowCount'], warningCount=self.db.execute('select count(*) from bill_warnings').fetchone()[0])
@@ -157,12 +157,21 @@ class SnapshotIndex:
         more = self.db.execute('select 1 from bill_vendors where ordinal>? limit 1', (last,)).fetchone()
         return dict(total=total, vendors=[dict(vendor=r[1]) for r in rows], nextCursor=last if more else None)
 
-    def warnings_page(self, after=-1, limit=PAGE_SIZE):
+    def warnings_page(self, after=-1, limit=PAGE_SIZE, max_bytes=1024*1024-4096):
         integer(after, minimum=-1, maximum=750000); integer(limit, minimum=1, maximum=PAGE_SIZE)
         rows = self.db.execute('select id,source_rows,reason from bill_warnings where id>? order by id limit ?', (after, limit)).fetchall()
-        last = rows[-1][0] if rows else after
+        integer(max_bytes,minimum=512,maximum=1024*1024-4096)
+        output=dict(warnings=[],total=self.db.execute('select count(*) from bill_warnings').fetchone()[0],nextCursor=None)
+        wire_bytes=len(encoded(output).encode())+128;last=after
+        for row_id,source_rows,reason in rows:
+            item=dict(rows=source_rows,reason=reason);size=len(encoded(item).encode())+(1 if output['warnings'] else 0)
+            if wire_bytes+size>max_bytes:
+                if not output['warnings']:raise SnapshotError('bill_limit')
+                break
+            output['warnings'].append(item);wire_bytes+=size;last=row_id
         more = self.db.execute('select 1 from bill_warnings where id>? limit 1', (last,)).fetchone()
-        return dict(warnings=[dict(rows=r[1], reason=r[2]) for r in rows], nextCursor=last if more else None)
+        output['nextCursor']=last if more else None
+        return output
 
     def candidates_page(self, query, after=-1, limit=PAGE_SIZE, max_bytes=1024 * 1024 - 4096):
         query = validate_query(query)

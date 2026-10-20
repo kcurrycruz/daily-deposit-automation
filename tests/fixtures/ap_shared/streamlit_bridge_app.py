@@ -58,6 +58,9 @@ class SyntheticService:
                 vendors=[{'vendor':'Synthetic Layout Supplier'}]
                 return {'vendors':vendors,'total':1,'nextCursor':None,'importId':payload['import_id'],
                         'vendorDigest':hashlib.sha256(json.dumps(vendors,separators=(',',':')).encode()).hexdigest()}
+            if action=='bill_current':
+                return {'importId':import_id,'recordCount':223425,'importVersion':1,'storageFormat':'snapshot-v2',
+                        'metadata':{'label':'synthetic-current.csv','sourceFormat':'bill-native'}}
             if action=='bill_candidates_page':
                 if st.query_params.get('partial') and payload.get('cursor'):
                     raise ValueError('Synthetic final page failure')

@@ -52,7 +52,7 @@ test('inline vendor question offers confirmation and another choice without a se
 test('saved BILL status is reusable while statement upload stays the primary workflow',async()=>{
   const {billDataHTML,uploadReviewHTML}=await view();
   const html=billDataHTML(provider(),new Date('2026-10-02T12:00:00Z'))+uploadReviewHTML({statements:[doc()],provider:provider(),errors:[],busy:false});
-  assert.match(html,/Update BILL data/);assert.match(html,/Upload statements/);
+  assert.match(html,/Update BILL data/);assert.match(html,/Add statements/);
   assert.match(html,/Last updated/);assert.doesNotMatch(html,/Step \d of 4|guide-step|vendor mapping/);
 });
 test('finishing can acknowledge found invoices together but never unresolved differences or existing follow-up',async()=>{

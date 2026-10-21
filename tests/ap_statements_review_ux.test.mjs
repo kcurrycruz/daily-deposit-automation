@@ -12,6 +12,7 @@ const app=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.me
 test('upload area is one keyboard-operable browse button with visible drag-drop instructions',()=>{
   const html=uploadReviewHTML({busy:false,errors:[]});
   assert.match(html,/<button[^>]*id="dropzone"[^>]*data-action="upload"/);
+  assert.match(html,/aria-label="Add statements:/);
   assert.match(html,/Drag statement PDFs here/);assert.match(html,/Browse files/);
   assert.equal((html.match(/<button/g)||[]).length,1);
 });

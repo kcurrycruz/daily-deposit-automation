@@ -16,6 +16,7 @@ import { backButtonHtml, requestProgramHub } from '../app/ap_statements/frontend
 import * as historyBrowser from '../app/ap_statements/frontend/history-browser.mjs';
 import * as duplicates from '../app/ap_statements/frontend/statement-duplicates.mjs';
 import * as dropzone from '../app/ap_statements/frontend/statement-dropzone.mjs';
+import * as referenceReview from '../app/ap_statements/frontend/reference-review.mjs';
 
 const KEY = 'hwfc-ap-statements-session-v1';
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -79,7 +80,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
@@ -101,6 +102,21 @@ function scrollableApp(data) {
   app.nodes['#app'].querySelector=selector=>selector==='.main'?main:null;
   return {...app,main:()=>main};
 }
+
+test('confirmed amount suggestions appear in the Invoices found filter and queue with manual attribution',()=>{
+  const data=realSession();data.provider.records[0].invoiceNumber='000123X';data.resolutions={};
+  const result=simpleFlow.statementComparisons(data.statements[0],data.provider,{})[0];
+  data.resolutions[result.id]={...referenceReview.confirmReferenceReview(data.statements[0],result),at:'2026-10-21T16:00:00Z'};
+  const app=browserApp();Object.assign(app.state,data);app.state.view='exceptions';app.state.filter='matched';app.context.render();
+  assert.match(app.nodes['#app'].innerHTML,/000123/);assert.match(app.nodes['#app'].innerHTML,/Invoice found/);assert.match(app.nodes['#app'].innerHTML,/Manually confirmed/);assert.doesNotMatch(app.nodes['#app'].innerHTML,/Possible match/);
+});
+test('confirmed invoice export distinguishes the current result from original comparison evidence',async()=>{
+  const data=realSession();data.provider.records[0].invoiceNumber='000123X';data.resolutions={};
+  const result=simpleFlow.statementComparisons(data.statements[0],data.provider,{})[0];data.resolutions[result.id]={...referenceReview.confirmReferenceReview(data.statements[0],result),at:'2026-10-21T16:00:00Z'};
+  const app=browserApp();Object.assign(app.state,data);app.context.downloads=[];vm.runInNewContext('download=(name,text)=>downloads.push(text)',app.context);
+  await app.events.click(actionEvent('export'));const [header,row]=core.parseCSV(app.context.downloads[0]);
+  assert.equal(row[header.indexOf('result')],'Invoice found');assert.equal(row[header.indexOf('originalComparisonResult')],'Possible match');assert.equal(row[header.indexOf('confirmationType')],'Manually confirmed');
+});
 
 const actionEvent=(action,extra={})=>({target:{classList:{contains:()=>false},closest:()=>({dataset:{action,...extra}})}});
 

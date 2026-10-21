@@ -1,6 +1,7 @@
 import {reconcile,totals} from './core.mjs';
 import {providerVendors} from './vendor-identity.mjs';
-export const invoiceFound=row=>['matched','presence'].includes(row.status);
+import {confirmedInvoiceCandidate} from './reference-review.mjs';
+export const invoiceFound=(row,resolution)=>['matched','presence'].includes(row.status)||!!confirmedInvoiceCandidate(row,resolution);
 export function defaultReviewDecision(row,resolution){
   if(resolution?.decision)return resolution.decision;
   if(invoiceFound(row)&&!row.preview&&!row.simulated&&row.matchMethod==='reference'&&row.candidates?.length===1)

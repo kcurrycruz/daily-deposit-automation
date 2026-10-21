@@ -132,11 +132,17 @@ def validate_request(value: object) -> JsonObject:
     return out
 
 def validate_resolution(value: object) -> JsonObject:
-    out=allowed(value,'note decision at')
+    out=allowed(value,'note decision at confirmedMatch')
     out.setdefault('note','')
     text(out['note'],maximum=16384)
     if 'decision' in out and (type(out['decision']) is not str or out['decision'] not in DECISIONS): raise ApValidationError('Choose a valid review decision.')
     if 'at' in out: text(out['at'],maximum=40)
+    if 'confirmedMatch' in out:
+        proof=allowed(out['confirmedMatch'],'statementReference statementAmount candidate','statementReference statementAmount candidate')
+        text(proof['statementReference'],maximum=256,blank=False)
+        integer(proof['statementAmount'])
+        proof['candidate']=validate_record(proof['candidate'])
+        out['confirmedMatch']=proof
     return out
 
 def validate_statement(value: object) -> JsonObject:

@@ -2,19 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import * as referenceReview from '../app/ap_statements/frontend/reference-review.mjs';
 import {reconcile,money,statuses} from '../app/ap_statements/frontend/core.mjs';
 import {defaultReviewDecision} from '../app/ap_statements/frontend/simple-flow.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const doc=()=>({id:'s',vendor:'Example Supplier',statementDate:'2026-07-03',layout:'rinella',confirmed:true,rows:[{id:'r',type:'invoice',invoiceNumber:'261601',amount:13800,balance:13800,page:1,confidence:99}]});
 const bill=(invoiceNumber,id=invoiceNumber)=>({id,vendor:'Example Supplier',invoiceNumber,amount:13800,comparisonScope:'invoice-only',status:'PaidInFull'});
-function render(row,statement=doc()){
-  const context={docDetail:()=>null,defaultReviewDecision,reviewDecision:()=>null,money,esc,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}},statuses};
+function render(row,statement=doc(),resolution=null){
+  const context={...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row,resolution).label,docDetail:()=>null,defaultReviewDecision,reviewDecision:()=>resolution,money,esc,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:resolution?{[row.id]:resolution}:{}},statuses};
   vm.runInNewContext(source.slice(source.indexOf('function reportedMoney('),source.indexOf('function toast(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   return context.reviewView(statement,row,[row],false);
 }
 function compare(records){return reconcile(doc(),{loaded:true,records})[0];}
+
+test('manual confirmation shows the selected invoice while keeping the old unselected reason in collapsed evidence',()=>{
+  const row=compare([bill('261768'),bill('261874')]);
+  const saved={...referenceReview.confirmInvoiceCandidate(doc(),row,1),at:'2026-10-21T16:00:00Z'};
+  const html=render(row,doc(),saved);
+  assert.match(html,/<summary>Original comparison: Multiple matches<\/summary>/);
+  assert.match(html,/<h3>Confirmed BILL invoice<\/h3>/);assert.match(html,/You confirmed BILL invoice/);
+});
 
 test('same-amount invoices are an unselected list, never a first-record comparison',()=>{
   const row=compare(['261768','261874','261673'].map(ref=>bill(ref)));

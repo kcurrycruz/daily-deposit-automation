@@ -185,6 +185,21 @@ class ApService:
                 text(row_id,maximum=512,blank=False); resolutions[row_id]=validate_resolution(decision)
                 resolutions[row_id].pop('at',None)
             data['resolutions']=resolutions; data['results']=self._results(data['results'])
+            for row_id,resolution in resolutions.items():
+                proof=resolution.get('confirmedMatch')
+                if proof is None: continue
+                row=next((item for item in data['results'] if item['id']==row_id),None)
+                bill=proof['candidate']
+                if (not data['doc']['confirmed'] or row is None or
+                    not any(item['id']==row_id for item in data['doc']['rows']) or
+                    row['status'] not in ('possible','ambiguous','amount') or
+                    row.get('matchMethod') not in ('amount','reference') or
+                    row.get('kind','invoice')!='invoice' or row.get('duplicate') or
+                    proof['statementReference']!=row.get('invoiceNumber') or
+                    proof['statementAmount']!=row.get('originalAmount') or
+                    row['candidates'].count(bill)!=1 or bill.get('sourceIssues') or
+                    bill.get('currency') not in (None,'','USD') or bill.get('kind','invoice')!='invoice'):
+                    raise ApValidationError('Check the PDF and choose a valid candidate from this invoice comparison before confirming.')
             if data['rule_version']!=RULE_VERSION: raise ApValidationError('Reload the app before saving comparisons from a different rule version.')
             return self._tx('save_revision',data,request_id,authorization)
         if action=='save_mapping':

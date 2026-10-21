@@ -52,6 +52,17 @@ def fixture():
     return ApService(repo,CONFIG,lambda:clock[0],revalidate),repo,revalidate(),state,clock
 
 class ServiceTests(unittest.TestCase):
+    def test_adventure_reference_evidence_can_be_saved_without_reinterpreting_legacy_results(self):
+        from app.ap_shared.models import ApValidationError
+        service,_,_,_,_=fixture()
+        row={'id':'row','status':'presence','candidates':[],
+             'referenceRule':'adventure-trailing-letter-v1'}
+        self.assertEqual(service._results([row])[0]['referenceRule'],'adventure-trailing-letter-v1')
+        legacy={key:value for key,value in row.items() if key!='referenceRule'}
+        self.assertNotIn('referenceRule',service._results([legacy])[0])
+        with self.assertRaises(ApValidationError):
+            service._results([{**row,'referenceRule':'ignore-any-invoice-number'}])
+
     def test_current_frontend_rule_can_save_through_server_validation(self):
         import subprocess
         from pathlib import Path

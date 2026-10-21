@@ -1,5 +1,6 @@
 import {resolveStatementVendor} from './vendor-identity.mjs';
-export const MATCH_RULE_VERSION = 'ap-match-v3';
+import {adventureReferenceKeys} from './adventure-reference.mjs';
+export const MATCH_RULE_VERSION = 'ap-match-v4';
 export const money = cents => cents == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 export function cents(value) {
   if (typeof value === 'number') {
@@ -257,8 +258,8 @@ export function reconcile(statement, provider, mappings = {}) {
   const records = provider.scopes?(complete?scope.records:[]):(provider.records??[]);
   const sourceAsOf=scope?.metadata?.asOf??provider.asOf;
   return groupInvoices(statement).map(row => {
-    let matchMethod = null;
-    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
+    let matchMethod = null,referenceRule=null;
+    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
     if (row.kind === 'opening') return result('history', 'Carried-forward balance: older invoice detail is needed. It is not a new invoice.');
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
     if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
@@ -267,6 +268,8 @@ export function reconcile(statement, provider, mappings = {}) {
     const kindRecords = records.filter(r => (r.kind ?? 'invoice') === row.kind);
     const references = kindRecords.filter(r => invoiceKey(row.invoiceNumber) && invoiceKey(r.invoiceNumber) === invoiceKey(row.invoiceNumber));
     let candidates = references.filter(r => vendorKey(r.vendor) === vendor);
+    const adventureKeys=provider.simulated?[]:adventureReferenceKeys(identity.vendor,row.invoiceNumber,row.kind);
+    if(adventureKeys.length)candidates=kindRecords.filter(r=>vendorKey(r.vendor)===vendor&&adventureKeys.includes(invoiceKey(r.invoiceNumber)));
     if (candidates.length) matchMethod = 'reference';
     else if (references.length && !vendor) {
       matchMethod = 'reference';
@@ -283,6 +286,13 @@ export function reconcile(statement, provider, mappings = {}) {
     if (bill.currency && bill.currency !== 'USD') return result('amount', 'Currency differs from this USD statement. Review currency before comparing amounts.', candidates);
     if (matchMethod === 'amount') return result('possible', 'Invoice number was not found. The original numeric amount agrees with another reference for the same vendor. Verify both references against the originals; this is a suggestion, not a verified invoice or balance.', candidates);
     if (row.kind === 'credit') return result('credit', 'Credit reference found. Verify the credited amount and where it was applied.', candidates);
+    if(adventureKeys.length&&matchMethod==='reference'){
+      referenceRule='adventure-trailing-letter-v1';
+      const currencyWarning=bill.currency?'':' Currency is not supplied; currency is not verified.';
+      if(row.originalAmount!==bill.amount)return result('amount',`Amount discrepancy: Adventure in Food statement ${row.invoiceNumber} is ${money(row.originalAmount)}; BILL ${bill.invoiceNumber} is ${money(bill.amount)}. Difference: ${money(Math.abs(row.originalAmount-bill.amount))}. The invoice digits agree (one trailing letter is ignored). Check the original invoice and payment before deciding the follow-up.${currencyWarning}`,candidates);
+      const scheduled=bill.status==='Scheduled'||bill.scheduledAmount>0?' BILL reports a scheduled payment; this is not proof of settlement.':'';
+      return result('presence',`Invoice found: Adventure in Food statement ${row.invoiceNumber} / BILL ${bill.invoiceNumber}. The invoice digits and original amount agree; one trailing letter is ignored. Original references are retained.${scheduled} Payment settlement and outstanding balance are not verified.${currencyWarning}`,candidates);
+    }
     if (row.originalAmount !== bill.amount) return result('amount', bill.comparisonScope === 'invoice-only' && !bill.currency
       ? `Statement original amount ${money(row.originalAmount)}; BILL export original numeric amount ${(bill.amount / 100).toFixed(2)} (currency not supplied).`
       : `Statement original amount ${money(row.originalAmount)}; BILL original amount ${money(bill.amount)}.`, candidates);

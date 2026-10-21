@@ -5,7 +5,7 @@ import {reviewNotesOnly} from './session.mjs';
 const clone=value=>JSON.parse(JSON.stringify(value));
 const unloaded=()=>({loaded:false,simulated:false,records:[],label:'Loading shared BILL records…'});
 const fields=(value,names)=>Object.fromEntries(names.split(' ').filter(k=>value[k]!==undefined).map(k=>[k,value[k]]));
-export function comparisonSnapshot(doc,provider,mappings){return reconcile(doc,provider,mappings).map(row=>fields(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod statementId vendor simulated'));}
+export function comparisonSnapshot(doc,provider,mappings){return reconcile(doc,provider,mappings).map(row=>fields(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod referenceRule statementId vendor simulated'));}
 export function legacyMigrationPreview(session,mappings={}){
   const real=(session?.statements||[]).filter(doc=>!doc.demo);
   return {statements:real.map(doc=>({doc:{...clone(doc),confirmed:false},resolutions:reviewNotesOnly(Object.fromEntries(Object.entries(session.resolutions||{}).filter(([id])=>doc.rows.some(row=>row.id===id))))})),

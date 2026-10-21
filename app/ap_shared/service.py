@@ -47,10 +47,11 @@ class ApService:
         statuses=set('matched missing amount balance scheduled paid ambiguous extraction unverified credit history presence source possible vendor'.split())
         output=[]
         for row in value:
-            out=allowed(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod statementId vendor simulated','id status candidates')
+            out=allowed(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod referenceRule statementId vendor simulated','id status candidates')
             text(out['id'],maximum=512,blank=False)
             if type(out['status']) is not str or out['status'] not in statuses or out.get('simulated') is True: raise ApValidationError('Invalid comparison evidence.')
             if out.get('matchMethod') not in (None,'reference','amount'): raise ApValidationError('Invalid comparison method.')
+            if 'referenceRule' in out and out['referenceRule']!='adventure-trailing-letter-v1': raise ApValidationError('Invalid reference rule.')
             if type(out['candidates']) is not list: raise ApValidationError('Invalid candidates.')
             out['candidates']=[validate_record(candidate) for candidate in out['candidates']]
             if out.get('matchMethod')=='amount' and out['status']=='matched': raise ApValidationError('Amount-only suggestions are not verified matches.')

@@ -6,6 +6,7 @@ import * as referenceReview from '../app/ap_statements/frontend/reference-review
 import {completionReviews,confirmVendor} from '../app/ap_statements/frontend/simple-flow.mjs';
 import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import {completionPayload} from '../app/ap_statements/frontend/history.mjs';
+import {MATCH_RULE_VERSION} from '../app/ap_statements/frontend/core.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
 
 test('clear reference matches preselect no action without creating a saved review',()=>{
@@ -13,7 +14,7 @@ test('clear reference matches preselect no action without creating a saved revie
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const row={id:'r',status:'presence',matchMethod:'reference',candidates:[{vendor:'Alpha',invoiceNumber:'00042',amount:18400}],activity:[]};
   const html=context.reviewView({confirmed:true},row,[row]);
-  assert.match(html,/<option selected>Reviewed — no action needed<\/option>/);
+  assert.match(html,/<option value="Reviewed — no action needed" selected>Reviewed — no action needed<\/option>/);
   assert.deepEqual(resolutions,{});
   context.docDetail=()=>({readOnly:true});
   assert.doesNotMatch(context.reviewView({confirmed:true},row,[row]),/<option selected>Reviewed — no action needed/);
@@ -145,7 +146,7 @@ test('export of a selected historical revision uses only that revision evidence 
 test('export of an older editable draft labels its pinned source rather than the latest weekly export',()=>{
   const doc={id:'s',vendor:'Synthetic',filename:'draft.pdf',statementDate:'2026-10-01',notes:''},row={id:'r',statementId:'s',vendor:'Synthetic',status:'possible'};
   const detail={doc,readOnly:false,importId:'old-import',importInfo:{metadata:{label:'pinned.csv'}}};
-  let exported;const context={...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{statements:[doc],resolutions:{},provider:{label:'latest.csv'}},shared:{state:{details:new Map([['s',detail]])}},historicalDetail:null,docDetail:()=>detail,results:()=>[row],reviewDecision:()=>null,statuses:{possible:{label:'Possible'}},toCSV:rows=>rows,download:(name,rows)=>exported=rows,toast(){},action:'export'};
+  let exported;const context={...referenceReview,MATCH_RULE_VERSION,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{statements:[doc],resolutions:{},provider:{label:'latest.csv'}},shared:{state:{details:new Map([['s',detail]])}},historicalDetail:null,docDetail:()=>detail,results:()=>[row],reviewDecision:()=>null,statuses:{possible:{label:'Possible'}},toCSV:rows=>rows,download:(name,rows)=>exported=rows,toast(){},action:'export'};
   vm.runInNewContext(source.slice(source.indexOf("if (action === 'export')"),source.indexOf('} catch(error)',source.indexOf("if (action === 'export')"))),context);
   assert.ok(exported[1].includes('pinned.csv'));assert.ok(!exported[1].includes('latest.csv'));
 });

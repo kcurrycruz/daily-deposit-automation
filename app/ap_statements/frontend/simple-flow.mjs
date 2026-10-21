@@ -1,9 +1,10 @@
 import {reconcile,totals} from './core.mjs';
 import {providerVendors} from './vendor-identity.mjs';
-import {confirmedInvoiceCandidate} from './reference-review.mjs';
+import {confirmedInvoiceCandidate,adventureAmountDiscrepancy} from './reference-review.mjs';
 export const invoiceFound=(row,resolution)=>['matched','presence'].includes(row.status)||!!confirmedInvoiceCandidate(row,resolution);
 export function defaultReviewDecision(row,resolution){
   if(resolution?.decision)return resolution.decision;
+  if(adventureAmountDiscrepancy(row))return 'Investigate amount difference';
   if(invoiceFound(row)&&!row.preview&&!row.simulated&&row.matchMethod==='reference'&&row.candidates?.length===1)
     return 'Reviewed — no action needed';
   return '';

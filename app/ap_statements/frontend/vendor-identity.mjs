@@ -10,6 +10,9 @@ function nameStem(value){
   while(suffix.test(result))result=result.replace(suffix,'').trim();
   return result.replace(/\s+&$/,'').trim();
 }
+export function isAdventureInFoodVendor(value){
+  return ['adventure in food','adventure in food trading'].includes(nameStem(value));
+}
 export function resolveStatementVendor(name,records=[],mappings={}){
   const names=[...new Map(records.filter(r=>key(r.vendor)).map(r=>[key(r.vendor),r.vendor])).values()];
   const choices=names.sort((a,b)=>a.localeCompare(b));

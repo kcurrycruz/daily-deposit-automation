@@ -1,5 +1,6 @@
 import {comparisonInputKey,groupInvoices,invoiceKey,vendorKey} from './core.mjs';
 import {resolveStatementVendor} from './vendor-identity.mjs';
+import {adventureReferenceKeys} from './adventure-reference.mjs';
 const fail=()=>Error('The BILL comparison source is incomplete or unavailable. Retry before reviewing.');
 const hash=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const validHash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -57,6 +58,7 @@ export function createComparisonSource(client,{onChange=()=>{}}={}){
         if(!['invoice','credit'].includes(row.kind))continue;
         const reference=invoiceKey(row.invoiceNumber);
         if(reference)refs.set(JSON.stringify([reference,row.kind]),{invoiceKey:reference,kind:row.kind});
+        for(const alias of adventureReferenceKeys(resolved.vendor,reference,row.kind))refs.set(JSON.stringify([alias,row.kind]),{invoiceKey:alias,kind:row.kind});
         if(vendor&&Number.isSafeInteger(row.originalAmount))amounts.set(JSON.stringify([vendor,row.kind,row.originalAmount]),{vendorKey:vendor,kind:row.kind,amount:row.originalAmount});
       }
       const keys=[...[...refs.values()].map(value=>({type:'references',value})),...[...amounts.values()].map(value=>({type:'amounts',value}))],all=new Map();

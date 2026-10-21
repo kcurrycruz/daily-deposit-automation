@@ -3,12 +3,14 @@ import {createBillUpdateUI,billUpdateHTML,draftSourceHTML} from './bill-update-u
 import {createBillWarnings,billWarningsHTML} from './bill-warnings.mjs';
 import { loadSession, loadVendorMappings, reviewNotesOnly } from './session.mjs';
 import {createSharedWorkspace,legacyMigrationPreview} from './shared-workspace.mjs';
-import {completionPayload,historyFilters,historyView,nyTimestamp} from './history.mjs';
+import {completionPayload,historyFilters,nyTimestamp} from './history.mjs';
 import { backButtonHtml, requestProgramHub } from './navigation.mjs';
 import { emptyWorkspace, workflowGuide } from './guide.mjs';
 import {statementComparisons,invoiceFound,completionReviews,confirmVendor,readingIssues,defaultReviewDecision} from './simple-flow.mjs';
 import {billDataHTML,uploadReviewHTML,vendorQuestionHTML,statementOverviewHTML} from './simple-flow-view.mjs';
 import {billExportGuideHTML} from './bill-export-guide.mjs';
+import {loadHistoryIndex,historyBrowserHTML,createHistoryPreview,historyPreviewHTML} from './history-browser.mjs';
+import {prepareStatementUpload,sameStatementVendor} from './statement-duplicates.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -44,8 +46,10 @@ const browserStorage = () => { try { return window.localStorage; } catch { retur
 let restoredNotice = '';
 let shared,saveState='loading',retryOperation=null,sharedError=null;
 let historyPage={items:[],nextCursor:null},historySelection=null,activeHistoryFilters={};
+let historyLoading=false,historyError=null,historyLimit=50,historyLoadToken=0,historyPreview=null,previewTimer=null,previewReturnFocus=null;
 let historicalDetail=null;
 let migrationPreview=null,pendingAttachment=null;
+let duplicatePrompt=null;
 let billUpdater=null,billUpdating=false,billUpdateProgress=null;
 let billWarnings=null;
 function docDetail(id){return historicalDetail?.doc.id===id?historicalDetail:shared?.state.details.get(id);}
@@ -67,9 +71,9 @@ function receiveShared(snapshot){
   }
 }
 async function startShared(){if(shared||!window.hwfcSharedClient)return;shared=createSharedWorkspace(window.hwfcSharedClient,{onState:receiveShared,onSaveState:sharedStatus});try{await retrySharedLoad();}catch{}}
-async function retrySharedLoad(){try{await shared.load();sharedStatus('saved');render();}catch(error){error.retry=retrySharedLoad;sharedStatus('not_saved',error);render();throw error;}}
+async function retrySharedLoad(){sharedStatus('loading');render();try{await shared.load();sharedStatus('saved');render();}catch(error){error.retry=retrySharedLoad;sharedStatus('not_saved',error);render();throw error;}}
 window.addEventListener('hwfc:shared-ready',startShared);
-window.addEventListener('pagehide',()=>{billUpdater?.dispose();billWarnings?.dispose();shared?.dispose();files.clear();state.statements=[];state.resolutions={};state.provider=emptyWorkspace().provider;overlay.innerHTML='';app.innerHTML='';},{once:true});
+window.addEventListener('pagehide',()=>{clearTimeout(previewTimer);historyLoadToken++;historyPreview?.dispose();document.querySelector('#history-preview-root')?.remove();billUpdater?.dispose();billWarnings?.dispose();shared?.dispose();files.clear();historyPage.items=[];state.statements=[];state.resolutions={};state.provider=emptyWorkspace().provider;overlay.innerHTML='';app.innerHTML='';},{once:true});
 function showBillProgress(progress){
   billUpdateProgress=progress;let panel=document.querySelector('#bill-update-status');
   if(!panel){document.querySelector('.content')?.insertAdjacentHTML('afterbegin','<div id="bill-update-status"></div>');panel=document.querySelector('#bill-update-status');}
@@ -112,8 +116,38 @@ function decorateSharedUi(){
   if(state.view==='history'&&content){const heading=content.querySelector('.heading h1');if(heading)heading.textContent='Previous Statements';const subtitle=content.querySelector('.heading p');if(subtitle)subtitle.textContent='Find completed work and open the exact evidence saved by your team.';content.querySelector('.connection-layout')?.remove();content.insertAdjacentHTML('beforeend',historyPanel());}
   for(const button of document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]'))if(!shared?.state.ready||saveState==='saving')button.disabled=true;
 }
-function historyPanel(){return `<section class="panel wide-panel history-filters"><div class="form-grid">${[['vendor','Vendor','text'],['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><button class="button primary" data-action="history-search">Search previous work</button></section>${historyView(historyPage)}`;}
-async function refreshHistory(more=false){ready();const page=await shared.history(historyFilters(activeHistoryFilters),more?historyPage.nextCursor:null);historyPage={items:more?[...historyPage.items,...page.items]:page.items,nextCursor:page.nextCursor};render();}
+function historyPanel(){
+  const filters=`<details class="panel wide-panel history-filters"><summary>Filter previous work</summary><div class="form-grid">${[['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="action-row"><button class="button primary" data-action="history-search">Apply filters</button><button class="button" data-action="history-reset">Clear filters</button></div></details>`;
+  if(historyLoading)return '<section class="panel history-loading" role="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Loading saved statements and vendors…</section>';
+  if(historyError)return '<section class="panel wide-panel" role="alert"><h2>Previous statements could not load</h2><p>Your saved work has not changed.</p><button class="button" data-action="history-refresh">Retry loading</button></section>';
+  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit);
+}
+async function refreshHistory(more=false){
+  ready();historyPreview?.hide(true);
+  if(more){historyLimit+=50;render();return;}
+  const token=++historyLoadToken;historyLoading=true;historyError=null;render();
+  try{const items=await loadHistoryIndex(cursor=>shared.history({},cursor));if(token!==historyLoadToken)return;historyPage={items,nextCursor:null};historyLimit=50;}
+  catch(error){if(token===historyLoadToken)historyError=error;}
+  finally{if(token===historyLoadToken){historyLoading=false;render();}}
+}
+function quickPreview(item,pinned=false){
+  if(!item||state.view!=='history'||state.selected)return;
+  clearTimeout(previewTimer);
+  historyPreview??=createHistoryPreview({loadPdf:id=>shared.originalPdf(id),paint:async file=>{
+    extractor??=await import('./extraction.mjs');const canvas=document.createElement('canvas');await extractor.renderPage(file,1,canvas);
+    const thumbnail=document.createElement('canvas');thumbnail.width=520;thumbnail.height=Math.round(canvas.height*520/canvas.width);
+    thumbnail.getContext('2d').drawImage(canvas,0,0,thumbnail.width,thumbnail.height);return thumbnail.toDataURL('image/jpeg',.8);
+  },onChange:snapshot=>{
+    let root=document.querySelector('#history-preview-root');
+    if(!root){root=document.createElement('div');root.id='history-preview-root';document.body.append(root);}
+    const focused=root.contains(document.activeElement)?document.activeElement?.dataset?.action:null;
+    root.innerHTML=historyPreviewHTML(snapshot);
+    if(focused)root.querySelector(`[data-action="${focused}"]`)?.focus({preventScroll:true});
+  }});
+  const opening=pinned&&!historyPreview.state.pinned;if(opening)previewReturnFocus=document.activeElement;
+  historyPreview.show(item,{pinned});if(opening)document.querySelector('.history-preview .close')?.focus({preventScroll:true});
+}
+function closeQuickPreview(){clearTimeout(previewTimer);historyPreview?.hide(true);previewReturnFocus?.focus?.({preventScroll:true});previewReturnFocus=null;}
 const results = () => state.statements.flatMap(statement => comparisonsFor(statement));
 const reviewDecision = id => historicalDetail?(historicalDetail.resolutions[id]?.decision?historicalDetail.resolutions[id]:null):(state.resolutions[id]?.decision ? state.resolutions[id] : null);
 const isAttention = row => !['matched','presence'].includes(row.status) && !reviewDecision(row.id);
@@ -142,6 +176,11 @@ function docSummary(doc) {
   return { status: 'balance', label: `${rows.filter(isAttention).length} to review` };
 }
 function render() {
+  if(!shared?.state.ready){
+    const failed=!!sharedError;
+    app.innerHTML=`<main class="workspace-startup" ${failed?'':'aria-busy="true"'}><section class="startup-card"><div class="brand-icon">${icon('ledger')}</div><div class="eyebrow">Statement Desk</div><h1>${failed?'Your workspace could not load':'Loading your AP workspace…'}</h1><p>${failed?'Your saved data has not changed. Check your connection and try again.':'Getting your saved BILL data, statements, and invoice checks ready.'}</p>${failed?'<button class="button primary" data-action="retry-shared">Retry loading</button>':'<span class="startup-spinner" aria-hidden="true"></span><span class="sr-only" role="status">Loading your AP workspace</span>'}${backButtonHtml()}</section></main>`;
+    return;
+  }
   const priorMain = app.querySelector('.main');
   const scrollTop = priorMain?.dataset.workspaceView === state.view ? priorMain.scrollTop : 0;
   const data = stats();
@@ -251,7 +290,7 @@ function showBillExportGuide(step=0) {
   overlay.innerHTML=billExportGuideHTML(step);
   overlay.querySelector('[data-guide-title]')?.focus();
 }
-function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
+function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}if(duplicatePrompt){duplicatePrompt('cancel');duplicatePrompt=null;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
 function getDoc() { return historicalDetail?.doc.id===state.selected?historicalDetail.doc:(state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc); }
 function openDoc(id,row=null,{historical=false,tab=null}={}) {
   if(!historical)historicalDetail=null;priorFocus=document.activeElement;state.selected=id;state.selectedRow=row;
@@ -283,7 +322,7 @@ function renderDrawer() {
 function extractionView(doc, check, warnings) {
   return `${warnings.length ? `<div class="notice amber">${icon('info')}<div>${warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div></div>` : `<div class="notice">${icon('check')}<div>Extracted activity agrees with the statement total. Verify invoice numbers before confirming.</div></div>`}<div class="form-grid"><label class="field">Statement vendor<input id="doc-vendor" value="${esc(doc.vendor)}"></label><label class="field">Statement date<input type="date" id="doc-date" value="${esc(doc.statementDate)}"></label><label class="field">Printed statement total (USD)<input id="doc-total" value="${doc.declaredTotal == null ? '' : (doc.declaredTotal / 100).toFixed(2)}" inputmode="decimal"></label><label class="field">Extracted activity total<input readonly value="${money(check.sum)}"></label></div><div class="source-layout"><div><div class="page-control"><strong>Extracted transactions · ${doc.rows.length}</strong><button class="button small" data-action="add-row">${icon('plus')}Add row</button></div><div class="table-wrap"><table class="edit-table"><thead><tr><th>Reference</th><th>Type</th><th>Amount</th><th>Invoice balance</th><th>Page</th><th></th></tr></thead><tbody>${doc.rows.map(row => `<tr data-row="${row.id}"><td><input class="ref" name="reference" value="${esc(row.invoiceNumber)}" aria-label="Invoice reference"></td><td><select name="type" aria-label="Transaction type">${['invoice','credit','payment','opening'].map(type => `<option ${row.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td><td><input name="amount" value="${(row.amount / 100).toFixed(2)}" inputmode="decimal" aria-label="Original amount"></td><td><input name="balance" value="${row.balance == null ? '' : (row.balance / 100).toFixed(2)}" inputmode="decimal" aria-label="Invoice outstanding balance"></td><td><input class="small-col" name="page" type="number" min="1" max="${doc.pageCount}" value="${row.page}" aria-label="Source page"></td><td><button data-action="delete-row" data-id="${row.id}" aria-label="Remove row">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div><p style="font-size:10px;line-height:1.7;color:#849277">Amounts are signed: invoices positive, credits and payments negative. Leave invoice balance blank when only a running account balance is supplied. Reference numbers remain text.</p><div class="action-row"><button class="button" data-action="save-extraction">Save corrections</button><button class="button primary" data-action="confirm-extraction">${icon('check')}Confirm extracted rows</button></div><details style="margin-top:20px;font-size:11px;color:#748967"><summary>Extracted source text</summary><pre class="raw-text">${esc(doc.rawText || doc.rows.map(r => r.source).join('\n'))}</pre></details></div>${pdfPanel(doc)}</div>`;
 }
-function pdfPanel(doc) { const available=files.has(doc.id)||shared?.state.details.get(doc.id)?.originalAvailable;return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${available?'<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading private original…</div></div>':`<div class="no-source">${icon('ledger')}<br>Original PDF not attached. This migrated draft is incomplete.</div>`}</div>`; }
+function pdfPanel(doc) { const available=files.has(doc.id)||docDetail(doc.id)?.originalAvailable;return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${available?'<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading private original…</div></div>':`<div class="no-source">${icon('ledger')}<br>Original PDF not attached. This migrated draft is incomplete.</div>`}</div>`; }
 function reviewView(doc, row, rows, showPDF=true) {
   const bill = row.candidates.length === 1 && row.matchMethod !== 'amount'
     && !['ambiguous','possible','vendor'].includes(row.status) ? row.candidates[0] : null;
@@ -341,6 +380,19 @@ function collectDoc(doc, excludedRow = null) {
   // Commit only after every input validates; rejected edits preserve evidence.
   Object.assign(doc, { rows, vendor, statementDate, declaredTotal: total ? cents(total) : null, confirmed: false });
 }
+function promptStatementSimilarity(assessment,doc){
+  const prior=assessment.match.doc;
+  return new Promise(resolve=>{
+    duplicatePrompt=resolve;
+    const summary=value=>`<strong>${esc(value.filename||'Statement')}</strong><p>${esc(value.vendor)} · ${esc(value.statementDate||'Date not read')}</p><ul>${groupInvoices(value).filter(row=>['invoice','credit'].includes(row.kind)).slice(0,8).map(row=>`<li>${esc(row.invoiceNumber)} · ${money(row.originalAmount)}</li>`).join('')}</ul>`;
+    modal('Similar statement found',`<p>This vendor has a statement with overlapping invoice numbers. Check the dates and amounts before adding another. Nothing has been added yet.</p><div class="duplicate-comparison"><section><h3>Saved statement</h3>${summary(prior)}</section><section><h3>New upload</h3>${summary(doc)}</section></div><p>${assessment.repeated} repeated invoice(s) · ${assessment.added} new or changed invoice(s). Later statements may legitimately repeat unpaid invoices.</p>`,'duplicate-continue','Keep as a new statement');
+    overlay.querySelector('.modal .action-row')?.insertAdjacentHTML('beforeend','<button class="button" data-action="duplicate-existing">Open saved statement</button>');
+  });
+}
+function openExistingStatement(match){
+  if(match.event||match.detail.completed||match.detail.archived){historySelection=match.event||null;historicalDetail={...match.detail,readOnly:true};openDoc(match.doc.id,null,{historical:true});}
+  else{shared.adopt(match.detail);openDoc(match.doc.id);}
+}
 async function uploadPDFs(fileList) {
   ready();
   if (state.busy) return;
@@ -349,18 +401,34 @@ async function uploadPDFs(fileList) {
   if (pdfs.length > 20) { toast('Upload at most 20 PDFs in one batch, up to 20 MiB each.', true); return; }
   if(pendingAttachment){if(pdfs.length!==1)throw Error('Select one original PDF for this migrated statement.');const saved=await shared.attachOriginal(pdfs[0],pendingAttachment.id,pendingAttachment.version);pendingAttachment=null;files.set(saved.doc.id,pdfs[0]);renderDrawer();document.querySelector('#pdf-input').value='';return;}
   state.busy = true; state.errors = []; state.query = ''; state.filter = 'all'; state.view = 'statements'; render();
+  let savedHistory=null,existingToOpen=null,reused=0,cancelled=0,repeated=0,added=0;
+  const priorDetails=new Map();
+  const findCandidates=async doc=>{
+    savedHistory??=await loadHistoryIndex(cursor=>shared.history({},cursor));
+    const candidates=state.statements.filter(prior=>sameStatementVendor(doc.vendor,prior.vendor,state.mappings)).map(prior=>({doc:prior,detail:shared.state.details.get(prior.id)}));
+    for(const event of savedHistory){
+      if(!sameStatementVendor(doc.vendor,event.vendor,state.mappings)||candidates.some(item=>item.doc.id===event.statementId))continue;
+      if(!priorDetails.has(event.revisionId))priorDetails.set(event.revisionId,await shared.statement(event.statementId,event.revisionId));
+      const detail=priorDetails.get(event.revisionId);candidates.push({doc:detail.doc,detail,event});
+    }
+    return candidates;
+  };
   try {
     for (let i = 0; i < pdfs.length; i++) {
       const file = pdfs[i];
       try {
-        const saved=await shared.uploadStatement(file,async original=>{extractor ??= await import('./extraction.mjs');return extractor.extractPDF(original, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const status = document.querySelector('.guide-progress'); if (status) status.textContent = `Reading your PDFs… ${state.progress}`; });});
-        files.set(saved.doc.id,file);
+        const result=await prepareStatementUpload({file,mappings:state.mappings,findCandidates,choose:promptStatementSimilarity,upload:(original,extract)=>shared.uploadStatement(original,extract),extract:async original=>{extractor ??= await import('./extraction.mjs');return extractor.extractPDF(original, progress => { state.progress = `${i+1}/${pdfs.length} · ${file.name} · page ${progress.page}/${progress.total} · ${progress.stage}`; state.fraction = (i + progress.fraction) / pdfs.length; const status = document.querySelector('.guide-progress'); if (status) status.textContent = `Reading your PDFs… ${state.progress}`; });}});
+        if(result.kind==='duplicate'){existingToOpen=result.match;reused++;}
+        else if(result.kind==='cancelled')cancelled++;
+        else if(result.saved.duplicate){existingToOpen={doc:result.saved.doc,detail:result.saved,event:savedHistory?.find(event=>event.statementId===result.saved.doc.id&&event.revisionId===result.saved.revisionId)};reused++;}
+        else{files.set(result.saved.doc.id,file);repeated+=result.repeated||0;added+=result.added||0;}
       } catch (error) { state.errors.push(`${file.name}: ${error.message}`); }
       render();
     }
   } catch(error) { state.errors.push(`PDF processing unavailable: ${error.message}`); }
   finally { await extractor?.stopOCR?.(); state.busy = false; state.progress = ''; render(); document.querySelector('#pdf-input').value = ''; }
-  toast(`${state.statements.length} statements ready. Open a statement to see the automatic invoice check and verify the PDF reading.`, !!state.errors.length);
+  if(existingToOpen)openExistingStatement(existingToOpen);
+  toast(`${state.statements.length} statements ready.${reused?` ${reused} duplicate(s) reused the saved copy.`:''}${cancelled?` ${cancelled} upload(s) cancelled.`:''}${repeated?` ${repeated} repeated invoice(s), ${added} new invoice(s). Original statements remain separate.`:''} Verify the PDF reading before finishing.`, !!state.errors.length);
 }
 function bindDropzone() {
   const zone = document.querySelector('#dropzone'); if (!zone) return;
@@ -387,6 +455,15 @@ document.addEventListener('change', e => {
   if (e.target.id === 'row-select') { if(saveState==='saving'){e.target.value=state.selectedRow;toast('Wait for the save to finish before selecting another invoice.',true);return;}if(dirty.has(state.selected)){e.target.value=state.selectedRow;toast('Save your edits before selecting another invoice.',true);return;}state.selectedRow = e.target.value; const row = comparisonsFor(getDoc()).find(r => r.id === state.selectedRow); state.page = row?.page || 1; renderDrawer(); }
   if (e.target.id === 'provider-date') state.provider.asOf = e.target.value;
 });
+document.addEventListener('pointerover',e=>{
+  const row=e.target.closest?.('[data-history-preview]');
+  if(row&&!row.contains(e.relatedTarget)){clearTimeout(previewTimer);if(historyPreview?.state.pinned)return;previewTimer=setTimeout(()=>quickPreview(historyPage.items.find(item=>item.id===row.dataset.historyPreview)),450);}
+  if(e.target.closest?.('.history-preview'))clearTimeout(previewTimer);
+});
+document.addEventListener('pointerout',e=>{
+  const row=e.target.closest?.('[data-history-preview]'),card=e.target.closest?.('.history-preview');
+  if((row&&!row.contains(e.relatedTarget))||(card&&!card.contains(e.relatedTarget))){clearTimeout(previewTimer);previewTimer=setTimeout(()=>historyPreview?.hide(),250);}
+});
 document.addEventListener('click', async e => {
   if (e.target.classList.contains('overlay')) { closeOverlay(); return; }
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
@@ -398,10 +475,17 @@ document.addEventListener('click', async e => {
     if(action==='migration-preview'){ready();const legacy=loadSession(browserStorage()),mappings=loadVendorMappings(browserStorage());if(legacy.error||mappings.error)throw Error(legacy.error||mappings.error);migrationPreview=legacyMigrationPreview(legacy.session,mappings.mappings);modal('Import old browser work?',`<p>${migrationPreview.statements.length} real statements found. None of their original PDFs are saved in browser storage.</p><p>This creates unconfirmed shared drafts and retains notes. No completion history or reviewer initials will be invented. Existing browser data is not deleted.</p>${migrationPreview.importMetadata?`<p>Older BILL source: ${esc(migrationPreview.importMetadata.label)}. Select its original CSV once through Import BILL CSV to store the full shared comparison source.</p>`:''}<p>Imported drafts require the original PDFs and a fresh extraction check.</p>`,'confirm-migration','Import previous work');}
     if(action==='confirm-migration'){await shared.migrateLegacy(migrationPreview,true);migrationPreview=null;closeOverlay();render();toast('Previous notes imported as unconfirmed drafts. Attach their original PDFs to continue.');}
     if(state.selected&&docDetail(state.selected)?.readOnly&&['save-extraction','confirm-extraction','add-row','delete-row','save-notes','resolve','reopen','remove-doc','save-session','attach-original','vendor-confirm','vendor-choose','confirm-reading','complete-dialog','complete-statement'].includes(action))throw Error('This saved revision is read-only. Explicitly reopen the current statement to continue work.');
-    if(action==='history-view'){state.view='history';historySelection=null;await refreshHistory();}
-    if(action==='history-search'){for(const key of ['vendor','statementDate','initials','status','completedFrom','completedTo'])activeHistoryFilters[key]=document.querySelector(`#history-${key}`).value;await refreshHistory();}
+    if(action==='history-view'){closeQuickPreview();state.view='history';historySelection=null;await refreshHistory();}
+    if(action==='history-search'){const next={...activeHistoryFilters};for(const key of ['statementDate','initials','status','completedFrom','completedTo'])next[key]=document.querySelector(`#history-${key}`).value;historyFilters(next);activeHistoryFilters=next;historyLimit=50;closeQuickPreview();render();}
+    if(action==='history-vendor'){closeQuickPreview();activeHistoryFilters.vendor=target.dataset.vendor;historyLimit=50;render();}
+    if(action==='history-reset'){closeQuickPreview();activeHistoryFilters={};historyLimit=50;render();}
+    if(action==='history-refresh')await refreshHistory();
+    if(action==='history-preview')quickPreview(historyPage.items.find(item=>item.id===target.dataset.event),true);
+    if(action==='history-preview-close')closeQuickPreview();
+    if(action==='history-preview-retry')quickPreview(historyPreview.state.item,true);
+    if(action==='duplicate-existing'||action==='duplicate-continue'){const resolve=duplicatePrompt;duplicatePrompt=null;closeOverlay();resolve?.(action==='duplicate-existing'?'existing':'continue');}
     if(action==='history-more')await refreshHistory(true);
-    if(action==='history-open'){historySelection=historyPage.items.find(item=>item.id===target.dataset.event);historicalDetail=await shared.statement(historySelection.statementId,historySelection.revisionId);openDoc(historicalDetail.doc.id,null,{historical:true});}
+    if(action==='history-open'){closeQuickPreview();historySelection=historyPage.items.find(item=>item.id===target.dataset.event);historicalDetail=await shared.statement(historySelection.statementId,historySelection.revisionId);openDoc(historicalDetail.doc.id,null,{historical:true});}
     if(action==='vendor-confirm'||action==='vendor-choose'){
       const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before confirming the vendor.');
       ready();const name=action==='vendor-confirm'?target.dataset.vendor:document.querySelector('#statement-bill-vendor').value;
@@ -427,7 +511,7 @@ document.addEventListener('click', async e => {
     if (action === 'reload-latest') modal('Reload latest shared work?','<p>This discards unsaved edits in this tab. Shared records are retained.</p>','confirm-reload','Reload latest');
     if (action === 'confirm-reload') {await shared.load({replace:true});dirty.clear();sharedError=null;sharedStatus('saved');closeOverlay();render();}
     if (action === 'confirm-back-to-programs') {billUpdater?.dispose();requestProgramHub(window, true);}
-    if (action === 'view') { state.view = target.dataset.view; state.filter = state.view === 'exceptions' ? 'attention' : 'all'; state.query = ''; render(); }
+    if (action === 'view') { closeQuickPreview();state.view = target.dataset.view; state.filter = state.view === 'exceptions' ? 'attention' : 'all'; state.query = ''; render(); }
     if (action === 'filter') { state.filter = target.dataset.filter; render(); }
     if (action === 'upload') document.querySelector('#pdf-input').click();
     if (action === 'guide-step') goToGuideStep(target.dataset.step);
@@ -490,6 +574,7 @@ document.addEventListener('click', async e => {
   } catch(error) {if(error.retry||error.code){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
 });
 document.addEventListener('keydown', e => {
+  if(e.key==='Escape'&&historyPreview?.state.item){closeQuickPreview();e.preventDefault();return;}
   if (e.key === 'Escape' && overlay.innerHTML) closeOverlay();
   if (e.key === 'Tab' && overlay.innerHTML) {
     const elements = [...overlay.querySelectorAll('button:not(:disabled),input,select,textarea,summary,[tabindex="0"]')].filter(n => n.getClientRects().length);

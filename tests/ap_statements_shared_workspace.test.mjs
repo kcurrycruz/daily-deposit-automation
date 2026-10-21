@@ -64,7 +64,7 @@ test('original is saved before extraction fails, leaving an unconfirmed draft',a
 test('same hash uses existing corrected statement without re-extraction',async()=>{
   const existing=doc();let extracted=0;
   const workspace=createSharedWorkspace({dispose(){},async request(action){if(action==='upload_begin')return {upload_id:crypto.randomUUID()};if(action==='upload_finish')return {statement_id:existing.id,version:4,duplicate:true};if(action==='statement')return {doc:existing,version:4,originalAvailable:true,resolutions:{}};return {};}});
-  const result=await workspace.uploadStatement(new File(['%PDF-synthetic'],'new-name.pdf'),async()=>{extracted++;});assert.equal(result.doc.notes,'Keep this note');assert.equal(extracted,0);
+  const result=await workspace.uploadStatement(new File(['%PDF-synthetic'],'new-name.pdf'),async()=>{extracted++;});assert.equal(result.doc.notes,'Keep this note');assert.equal(extracted,0);assert.equal(result.duplicate,true);
 });
 test('failed save preserves edits; retry uses the same mutation identity and saved only on acknowledgement',async()=>{
   const states=[],requests=[];let fail=true;const item=doc(),revisionId=crypto.randomUUID();

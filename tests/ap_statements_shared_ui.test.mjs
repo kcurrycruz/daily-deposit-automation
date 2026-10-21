@@ -38,7 +38,7 @@ test('automatic redraw preserves keyboard focus and the statement scroll positio
 });
 
 test('changing the review dropdown protects the unsaved choice from comparison redraws',()=>{
-  let changed;const context={saveState:'saved',state:{selected:'s'},dirty:new Set(),sharedStatus(){},document:{addEventListener(type,handler){changed=handler;}}};
+  let changed;const context={saveState:'saved',state:{selected:'s'},dirty:new Set(),sharedStatus(){},document:{addEventListener(type,handler){if(type==='change')changed=handler;}}};
   vm.runInNewContext(source.slice(source.indexOf('function markDirty('),source.indexOf('function decorateSharedUi(')),context);
   vm.runInNewContext(source.slice(source.indexOf("document.addEventListener('change'"),source.indexOf("document.addEventListener('click'")),context);
   changed({target:{id:'review-decision',value:'Follow up with vendor'}});
@@ -87,6 +87,11 @@ test('invoice details can render beneath the overview without duplicating the or
   const row={id:'r',status:'presence',candidates:[],activity:[]};
   context.reviewView({confirmed:true},row,[row],false);assert.equal(previews,0);
 });
+test('a frozen history revision uses its own original-PDF availability',()=>{
+  const context={icon:()=>'',files:new Map(),shared:{state:{details:new Map()}},docDetail:()=>({readOnly:true,originalAvailable:true}),state:{page:1}};
+  vm.runInNewContext(source.slice(source.indexOf('function pdfPanel('),source.indexOf('function reviewView(')),context);
+  assert.match(context.pdfPanel({id:'completed',pageCount:1}),/<canvas/);
+});
 
 test('closing a statement cannot destroy unsaved optional notes',()=>{
   const state={selected:'s',selectedRow:'r'},overlay={innerHTML:'unsaved note editor',querySelector:()=>({})};
@@ -122,7 +127,7 @@ test('startup retry assembles the entire workspace rather than returning a raw b
 test('opening an old completion does not substitute current draft fields or change draft decisions',async()=>{
   const id=crypto.randomUUID(),draft={id,vendor:'Edited vendor',notes:'Unsaved draft notes'},frozen={id,vendor:'Old vendor',notes:'Old completed notes'};
   const details=new Map([[id,{doc:draft,version:8}]]),current={note:'Draft review',decision:'Follow up with vendor'};
-  const context={historicalDetail:null,historySelection:null,historyPage:{items:[{id:'event',statementId:id,revisionId:'revision'}]},state:{selected:id,statements:[draft],resolutions:{r:current}},shared:{state:{details},statement:async()=>({doc:frozen,resolutions:{r:{decision:'Reviewed — no action needed'}},results:[],readOnly:true})},target:{dataset:{event:'event'}},action:'history-open',openDoc(){}};
+  const context={closeQuickPreview(){},historicalDetail:null,historySelection:null,historyPage:{items:[{id:'event',statementId:id,revisionId:'revision'}]},state:{selected:id,statements:[draft],resolutions:{r:current}},shared:{state:{details},statement:async()=>({doc:frozen,resolutions:{r:{decision:'Reviewed — no action needed'}},results:[],readOnly:true})},target:{dataset:{event:'event'}},action:'history-open',openDoc(){}};
   const action=source.slice(source.indexOf("if(action==='history-open')"),source.indexOf("if(action==='complete-dialog')"));
   await vm.runInNewContext('(async()=>{'+action+'})()',context);
   vm.runInNewContext(source.slice(source.indexOf('function getDoc('),source.indexOf('function openDoc(')),context);

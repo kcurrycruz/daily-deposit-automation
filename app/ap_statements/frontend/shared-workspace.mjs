@@ -129,8 +129,12 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       state.provider=provider;state.importId=home.activeImport?.id||null;state.importVersion=home.importVersion||0;
       comparison?.dispose();comparison=pendingComparison;state.activeImport=home.activeImport;state.capabilities=home.capabilities||{};
       for(const detail of details){if(!snapshotCapable&&detail.importId!==state.importId||JSON.stringify(detail.mappingSnapshot||{})!==JSON.stringify(state.mappings))detail.resolutions=reviewNotesOnly(detail.resolutions||{});adopt(detail);}
+      // Initial dashboard counts must not race the scoped invoice lookups.
+      if(comparison){
+        const checks=await Promise.allSettled(state.statements.map(doc=>ensureComparisons(doc)));check();
+        const failed=checks.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+      }
       state.ready=true;loaded=true;emit();
-      if(comparison)for(const doc of state.statements)ensureComparisons(doc).catch(()=>{});
       return state;
     }catch(error){if(pendingComparison&&pendingComparison!==comparison)pendingComparison.dispose();if(!loaded){state.ready=false;state.provider=unloaded();emit();}throw error;}
   }
@@ -172,7 +176,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     return write(async request=>{
       finished=await upload(file,'pdf',request);
       const stored=await request('statement',{statement_id:finished.statement_id});adopt(stored);emit();
-      if(finished.duplicate){localFiles.delete(file);return stored;}
+      if(finished.duplicate){localFiles.delete(file);return {...stored,duplicate:true};}
       if(!extracted){try{extracted=await extract(file);}catch(error){extracted={...stored.doc,confirmed:false,warnings:[...(stored.doc.warnings||[]),`Extraction could not finish: ${error.message}. Review the original and add rows manually.`]};}}
       extracted={...extracted,id:finished.statement_id,fileSize:file.size,fileModified:file.lastModified||0,confirmed:false};
       await ensureComparisons(extracted);

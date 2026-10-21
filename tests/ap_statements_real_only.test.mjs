@@ -13,6 +13,8 @@ const billTutorial=await import('../app/ap_statements/frontend/bill-export-guide
 import { createDemo, simulateRecords } from './fixtures/legacy_ap_demo.mjs';
 import { importBillSource } from '../app/ap_statements/frontend/bill-import.mjs';
 import { backButtonHtml, requestProgramHub } from '../app/ap_statements/frontend/navigation.mjs';
+import * as historyBrowser from '../app/ap_statements/frontend/history-browser.mjs';
+import * as duplicates from '../app/ap_statements/frontend/statement-duplicates.mjs';
 
 const KEY = 'hwfc-ap-statements-session-v1';
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -76,7 +78,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
@@ -220,9 +222,9 @@ test('actual initialization never restores legacy data or demos without explicit
 test('multi-PDF upload continues to retain the imported BILL source and existing real notes', async () => {
   const state = { ...realSession(), busy: false };
   const files = new Map(), input = { value: 'selected' };
-  const context = { state, files, extractor: { extractPDF: async file => ({ ...realDoc(), id: file.name, filename: file.name }), stopOCR: async () => {} },
+  const context = { ...historyBrowser,...duplicates,state,files,promptStatementSimilarity:async()=> 'continue',extractor: { extractPDF: async file => ({ ...realDoc(),id:file.name,filename:file.name,rows:[{...realDoc().rows[0],invoiceNumber:file.name}] }), stopOCR: async () => {} },
     document: { querySelector: selector => selector === '#pdf-input' ? input : null }, render() {}, toast() {} };
-  context.pendingAttachment=null;context.ready=()=>{};context.shared={async uploadStatement(file,extract){const doc=await extract(file);state.statements.push(doc);return {doc};}};
+  context.pendingAttachment=null;context.ready=()=>{};context.shared={state:{details:new Map()},history:async()=>({items:[],nextCursor:null}),async uploadStatement(file,extract){const doc=await extract(file);state.statements.push(doc);this.state.details.set(doc.id,{doc});return {doc};}};
   vm.runInNewContext(source.slice(source.indexOf('async function uploadPDFs('), source.indexOf('function bindDropzone(')), context);
   await vm.runInNewContext("uploadPDFs([{name:'vendor-a.pdf',size:1,lastModified:1},{name:'vendor-b.pdf',size:2,lastModified:2}])", context);
   assert.equal(state.statements.length, 3);

@@ -329,10 +329,22 @@ function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.s
 function getDoc() { return historicalDetail?.doc.id===state.selected?historicalDetail.doc:(state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc); }
 function openDoc(id,row=null,{historical=false,tab=null}={}) {
   if(!historical)historicalDetail=null;priorFocus=document.activeElement;state.selected=id;state.selectedRow=row;
-  state.drawerTab=tab||(row||getDoc().rows.length?'review':'extraction');state.invoiceDetailsOpen=!!row;
+  state.drawerTab=tab||(row||getDoc().rows.length?'review':'extraction');state.invoiceDetailsOpen=!!row;state.invoiceListScroll=0;
   state.page=row?comparisonsFor(getDoc()).find(r=>r.id===row)?.page||1:1;
   if(!historical&&!dirty.has(id))shared?.prepareStatement?.(getDoc()).catch(error=>{if(state.selected===id)toast(error.message,true);});
   renderDrawer();overlay.querySelector('.close')?.focus();
+}
+function showInvoicePage(open,focus=false) {
+  const details=overlay.querySelector('#invoice-details'),list=overlay.querySelector('#invoice-list');
+  if(!details||!list)return;
+  state.invoiceDetailsOpen=!!open;
+  details.hidden=!open;list.hidden=!!open;
+  const back=overlay.querySelector('[data-invoice-back]');if(back)back.hidden=!open;
+  const drawer=overlay.querySelector('.drawer');drawer?.classList.toggle('invoice-detail-page',!!open);
+  if(focus){
+    if(drawer)drawer.scrollTop=open?0:state.invoiceListScroll||0;
+    overlay.querySelector(open?'#invoice-detail-title':'[data-action="select-invoice"][aria-current="true"]')?.focus({preventScroll:true});
+  }
 }
 function renderDrawer() {
   const doc = getDoc(); if (!doc) return;
@@ -345,7 +357,7 @@ function renderDrawer() {
   if(!vendorPicker||vendorPickerDoc!==doc.id){vendorPicker=createVendorPicker(vendorPickerNames,{onChange:updateVendorPicker});vendorPickerDoc=doc.id;}else vendorPicker.setNames(vendorPickerNames);
   if (check.difference !== 0 && check.difference !== null) warnings.push(`Extracted activity differs from the statement total by ${money(check.difference)}. Check missing rows, credits, or duplicate totals.`);
   if (check.difference === null) warnings.push('No statement total was identified. Enter it or verify completeness manually.');
-  overlay.innerHTML = `<div class="overlay"><section class="drawer full-review" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-head"><div><div class="eyebrow">Statement review</div><h2 id="drawer-title">${esc(doc.vendor)}</h2><small>${esc(doc.filename)} · ${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · scanned PDF' : ''}</small></div><button class="close" data-action="close" aria-label="Close statement">${icon('close')}</button></header><div class="drawer-body"><div class="drawer-tabs"><button class="button ${state.drawerTab === 'extraction' ? 'primary' : ''}" data-action="drawer-tab" data-tab="extraction">Check PDF</button><button class="button ${state.drawerTab === 'review' ? 'primary' : ''}" data-action="drawer-tab" data-tab="review">Results</button><button class="button ${state.drawerTab === 'notes' ? 'primary' : ''}" data-action="drawer-tab" data-tab="notes">Notes</button><button class="button subtle danger" data-action="remove-doc">Remove statement</button></div>${state.drawerTab === 'extraction' ? extractionView(doc, check, warnings) : state.drawerTab === 'notes' ? notesView(doc) : `<div class="review-workspace"><div class="review-evidence-column">${vendorQuestionHTML(doc,state.provider,state.mappings,!!docDetail(doc.id)?.readOnly,vendorPicker.state)}${statementOverviewHTML(doc,reviewRows,!!docDetail(doc.id)?.readOnly,historicalDetail?.resolutions||state.resolutions)}${row ? `<details id="invoice-details" class="invoice-details" tabindex="-1" ${state.invoiceDetailsOpen?'open':''}><summary>Invoice ${esc(row.invoiceNumber||row.kind)} · details & follow-up</summary><button class="button small" data-action="back-invoices">↑ Back to invoice list</button>${reviewView(doc,row,reviewRows,false)}</details>` : '<div class="empty">No rows read. Open Check PDF to correct the statement.</div>'}</div><aside class="review-source-column">${pdfPanel(doc)}${row?`<div class="source-excerpt"><strong>Selected invoice: ${esc(row.invoiceNumber||row.kind)} · ${money(row.originalAmount)}</strong><p id="source-location-status" role="status">Opening source page ${row.page}…</p><details><summary>Extracted source text</summary><pre>${esc(row.activity.map(item=>item.source||'').filter(Boolean).join('\n')||'No extracted source line is available. Check the original PDF.')}</pre></details></div>`:''}</aside></div>`}</div></section></div>`;
+  overlay.innerHTML = `<div class="overlay"><section class="drawer full-review" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-head"><div><button class="button small invoice-back" data-action="back-invoices" data-invoice-back hidden>← Back to invoice list</button><div class="eyebrow">Statement review</div><h2 id="drawer-title">${esc(doc.vendor)}</h2><small>${esc(doc.filename)} · ${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · scanned PDF' : ''}</small></div><button class="close" data-action="close" aria-label="Close statement">${icon('close')}</button></header><div class="drawer-body"><div class="drawer-tabs"><button class="button ${state.drawerTab === 'extraction' ? 'primary' : ''}" data-action="drawer-tab" data-tab="extraction">Check PDF</button><button class="button ${state.drawerTab === 'review' ? 'primary' : ''}" data-action="drawer-tab" data-tab="review">Results</button><button class="button ${state.drawerTab === 'notes' ? 'primary' : ''}" data-action="drawer-tab" data-tab="notes">Notes</button><button class="button subtle danger" data-action="remove-doc">Remove statement</button></div>${state.drawerTab === 'extraction' ? extractionView(doc, check, warnings) : state.drawerTab === 'notes' ? notesView(doc) : `<div class="review-workspace"><div class="review-evidence-column"><div id="invoice-list">${vendorQuestionHTML(doc,state.provider,state.mappings,!!docDetail(doc.id)?.readOnly,vendorPicker.state)}${statementOverviewHTML(doc,reviewRows,!!docDetail(doc.id)?.readOnly,historicalDetail?.resolutions||state.resolutions)}</div>${row ? `<section id="invoice-details" class="invoice-details" aria-labelledby="invoice-detail-title" hidden><h3 id="invoice-detail-title" tabindex="-1">Invoice ${esc(row.invoiceNumber||row.kind)} · details & follow-up</h3><div id="invoice-reference-review"></div>${reviewView(doc,row,reviewRows,false)}</section>` : '<div class="empty">No rows read. Open Check PDF to correct the statement.</div>'}</div><aside class="review-source-column">${pdfPanel(doc)}${row?`<div class="source-excerpt"><strong>Selected invoice: ${esc(row.invoiceNumber||row.kind)} · ${money(row.originalAmount)}</strong><p id="source-location-status" role="status">Opening source page ${row.page}…</p><details><summary>Extracted source text</summary><pre>${esc(row.activity.map(item=>item.source||'').filter(Boolean).join('\n')||'No extracted source line is available. Check the original PDF.')}</pre></details></div>`:''}</aside></div>`}</div></section></div>`;
   if (state.drawerTab !== 'notes') previewPDF(doc);
   if(saveState==='saving')sharedStatus('saving',sharedError);
   overlay.querySelectorAll('input:not(#vendor-search):not(#statement-bill-vendor),textarea').forEach(input=>input.addEventListener('input',markDirty));
@@ -353,9 +365,10 @@ function renderDrawer() {
   const noteLabel=overlay.querySelector('#review-note')?.parentElement;if(noteLabel)noteLabel.firstChild.textContent='Review note (optional)';
   const reviewNote=overlay.querySelector('#review-note');if(reviewNote&&historicalDetail)reviewNote.value=historicalDetail.resolutions[state.selectedRow]?.note||'';
   const detail=docDetail(doc.id),body=overlay.querySelector('.drawer-body');
-  if(state.drawerTab==='review'&&row&&!confirmedInvoiceCandidate(row,reviewDecision(row.id)))overlay.querySelector('#invoice-details>summary')?.insertAdjacentHTML('afterend',referenceReviewHTML(doc,row,!!detail?.readOnly));
+  if(state.drawerTab==='review'&&row&&!confirmedInvoiceCandidate(row,reviewDecision(row.id)))overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend',referenceReviewHTML(doc,row,!!detail?.readOnly));
   if(detail?.readOnly){body.insertAdjacentHTML('afterbegin',`<div class="notice blue"><div><strong>Saved revision · read-only</strong><p>${esc(historySelection?.initials||'')} · ${esc(nyTimestamp(historySelection?.completedAt))} · ${esc(detail.ruleVersion)} · Import ${esc(detail.importId||'none')}</p><p>These are the original saved comparisons, not results recalculated against the latest import.</p><button class="button" data-action="reopen-statement">Reopen current statement as a draft</button> <button class="button" data-action="export">Export saved evidence</button></div></div>`);overlay.querySelectorAll('input,textarea,select,[data-action="save-extraction"],[data-action="confirm-extraction"],[data-action="save-notes"],[data-action="resolve"],[data-action="adventure-follow-up"],[data-action="reopen"],[data-action="add-row"],[data-action="delete-row"],[data-action="remove-doc"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=true;});}
-  else if(body){body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
+  else if(body){body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row statement-completion"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
+  showInvoicePage(state.drawerTab==='review'&&state.invoiceDetailsOpen);
   if(detail&&!detail.originalAvailable&&body)body.insertAdjacentHTML('afterbegin','<div class="notice amber"><div><strong>Original PDF not attached</strong><p>Select the original PDF to finish this migrated draft. Your previous notes and corrections are retained.</p><button class="button" data-action="attach-original">Attach original PDF</button></div></div>');
 }
 function extractionView(doc, check, warnings) {
@@ -372,7 +385,7 @@ function reviewView(doc, row, rows, showPDF=true) {
     : row.status==='unverified'||!state.provider.loaded
       ? 'The BILL comparison is not ready or is unavailable. Wait for it to finish loading, or retry the comparison. This does not mean the invoice is missing.'
       : row.status==='vendor'
-        ? 'Confirm the statement vendor above before matching this invoice.'
+        ? 'Confirm the statement vendor in the invoice list before matching this invoice.'
         : row.status==='history'
           ? 'This is account activity or a carried-forward balance, not a new invoice to match.'
           : row.status==='missing'
@@ -553,11 +566,22 @@ document.addEventListener('click', async e => {
       doc.confirmed=true;await persistDoc(doc);render();renderDrawer();toast('PDF reading confirmed and saved.');
     }
     if(action==='select-invoice'){
-      if(dirty.has(state.selected))throw Error('Save edits before selecting another invoice.');
-      state.invoiceDetailsOpen=true;state.selectedRow=target.dataset.id;state.page=comparisonsFor(getDoc()).find(row=>row.id===state.selectedRow)?.page||1;renderDrawer();
-      const details=document.querySelector('#invoice-details');details?.focus({preventScroll:true});details?.scrollIntoView({block:'start',behavior:'instant'});
+      if(saveState==='saving')throw Error('Wait for the save to finish before selecting another invoice.');
+      const sameRow=state.selectedRow===target.dataset.id;
+      if(dirty.has(state.selected)&&!sameRow)throw Error('Save edits before selecting another invoice.');
+      if(!state.invoiceDetailsOpen)state.invoiceListScroll=overlay.querySelector('.drawer')?.scrollTop||0;
+      const sourcePage=comparisonsFor(getDoc()).find(row=>row.id===target.dataset.id)?.page||1,pageChanged=state.page!==sourcePage;
+      state.page=sourcePage;
+      if(!sameRow||!overlay.querySelector('#invoice-details')){
+        state.selectedRow=target.dataset.id;
+        state.invoiceDetailsOpen=true;renderDrawer();
+      }else if(pageChanged){
+        const select=overlay.querySelector('#page-select');if(select)select.value=String(sourcePage);
+        previewPDF(getDoc());
+      }
+      showInvoicePage(true,true);
     }
-    if(action==='back-invoices'){state.invoiceDetailsOpen=false;const details=document.querySelector('#invoice-details');if(details)details.open=false;document.querySelector('#invoice-overview')?.scrollIntoView({block:'start',behavior:'instant'});overlay.querySelector('[data-action="select-invoice"][aria-current="true"]')?.focus({preventScroll:true});}
+    if(action==='back-invoices')showInvoicePage(false,true);
     if(action==='refresh-comparisons'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before comparing with current BILL data.');await shared.prepareStatement(doc);render();renderDrawer();toast('Compared with current BILL data. Notes and corrections retained; review the updated results.');}
     if(action==='bill-warnings'||action==='bill-warnings-more')await loadBillWarnings(action==='bill-warnings-more');
     if(action==='bill-cancel-update'){if(sharedError?.cancel)await sharedError.cancel();sharedError=null;retryOperation=null;render();toast('Update cancelled. You can select another BILL export.');}

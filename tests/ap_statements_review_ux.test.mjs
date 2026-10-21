@@ -51,17 +51,52 @@ test('default attention selection opens its source page without resetting delibe
   const context={row:{id:'page-two',page:2},state:{selectedRow:null,page:1}};vm.runInNewContext(block,context);assert.equal(context.state.page,2);
   context.state.page=1;vm.runInNewContext(block,context);assert.equal(context.state.page,1);
 });
-test('choosing an invoice opens its source page and moves focus to inline follow-up details',async()=>{
-  let focused=false,moved=false;const context={action:'select-invoice',target:{dataset:{id:'r2'}},dirty:new Set(),state:{selected:'s'},getDoc:()=>({}),comparisonsFor:()=>[{id:'r2',page:2}],renderDrawer(){},document:{querySelector:()=>({focus(){focused=true;},scrollIntoView(){moved=true;}})}};
-  const block=app.slice(app.indexOf("if(action==='select-invoice')"),app.indexOf("if(action==='refresh-comparisons')"));
-  await vm.runInNewContext('(async()=>{'+block+'})()',context);
-  assert.equal(context.state.page,2);assert.equal(focused,true);assert.equal(moved,true);
+function invoiceNavigation(){
+  const focused=[],classes=new Set(),note={value:'Unsaved follow-up'};
+  const drawer={scrollTop:620,classList:{toggle(name,on){on?classes.add(name):classes.delete(name);}}};
+  const list={hidden:false},details={hidden:true,focus(){},scrollIntoView(){}},back={hidden:true},title={focus(){focused.push('detail');}},selected={focus(){focused.push('row');}};
+  const nodes={'.drawer':drawer,'#invoice-list':list,'#invoice-details':details,'[data-invoice-back]':back,'#invoice-detail-title':title,'[data-action="select-invoice"][aria-current="true"]':selected};
+  const context={action:'select-invoice',target:{dataset:{id:'r2'}},saveState:'saved',dirty:new Set(),state:{selected:'s',selectedRow:'r1',invoiceDetailsOpen:false},getDoc:()=>({}),comparisonsFor:()=>[{id:'r1',page:1},{id:'r2',page:2}],renders:0,
+    renderDrawer(){context.renders++;note.value='';},overlay:{querySelector:s=>nodes[s]||null},document:{querySelector:s=>nodes[s]||null}};
+  const start=app.indexOf('function showInvoicePage(');
+  if(start>=0)vm.runInNewContext(app.slice(start,app.indexOf('function renderDrawer(',start)),context);
+  const act=async action=>{context.action=action;await vm.runInNewContext('(async()=>{'+app.slice(app.indexOf("if(action==='select-invoice')"),app.indexOf("if(action==='refresh-comparisons')"))+'})()',context);};
+  return {context,act,drawer,list,details,back,note,focused,classes};
+}
+
+test('an invoice opens a separate detail screen at the top with its source page and Back navigation',async()=>{
+  const nav=invoiceNavigation();await nav.act('select-invoice');
+  assert.equal(nav.context.state.page,2);assert.equal(nav.context.state.selectedRow,'r2');
+  assert.equal(nav.context.state.invoiceListScroll,620);assert.equal(nav.drawer.scrollTop,0);
+  assert.equal(nav.list.hidden,true);assert.equal(nav.details.hidden,false);assert.equal(nav.back.hidden,false);
+  assert.equal(nav.classes.has('invoice-detail-page'),true);assert.deepEqual(nav.focused,['detail']);
 });
-test('returning to invoice list preserves unsaved review fields without rerendering',async()=>{
-  let rendered=0;const details={open:true},note={value:'Unsaved follow-up'},context={action:'back-invoices',state:{selected:'s',invoiceDetailsOpen:true},dirty:new Set(['s']),renderDrawer(){rendered++;note.value='';},document:{querySelector:selector=>selector==='#invoice-details'?details:{scrollIntoView(){}}},overlay:{querySelector:()=>({focus(){}})}};
-  const block=app.slice(app.indexOf("if(action==='back-invoices')"),app.indexOf("if(action==='refresh-comparisons')"));
-  await vm.runInNewContext('(async()=>{'+block+'})()',context);
-  assert.equal(rendered,0);assert.equal(details.open,false);assert.equal(note.value,'Unsaved follow-up');assert.equal(context.dirty.has('s'),true);
+
+test('Back restores list position and focus while preserving unsaved fields, including reopening that invoice',async()=>{
+  const nav=invoiceNavigation();await nav.act('select-invoice');
+  nav.context.dirty.add('s');nav.note.value='Unsaved follow-up';nav.drawer.scrollTop=850;
+  await nav.act('back-invoices');
+  assert.equal(nav.drawer.scrollTop,620);assert.equal(nav.list.hidden,false);assert.equal(nav.details.hidden,true);assert.equal(nav.back.hidden,true);
+  assert.equal(nav.note.value,'Unsaved follow-up');assert.equal(nav.context.dirty.has('s'),true);
+  nav.context.target.dataset.id='r2';await nav.act('select-invoice');
+  assert.equal(nav.context.renders,1);assert.equal(nav.note.value,'Unsaved follow-up');
+  assert.equal(nav.list.hidden,true);assert.equal(nav.details.hidden,false);assert.deepEqual(nav.focused,['detail','row','detail']);
+});
+
+test('another invoice cannot replace unsaved fields or interrupt a pending save',async()=>{
+  const nav=invoiceNavigation();nav.context.dirty.add('s');
+  await assert.rejects(nav.act('select-invoice'),/Save edits/);
+  nav.context.dirty.clear();nav.context.saveState='saving';
+  await assert.rejects(nav.act('select-invoice'),/save to finish/i);
+  assert.equal(nav.context.renders,0);assert.equal(nav.context.state.selectedRow,'r1');assert.equal(nav.list.hidden,false);
+});
+test('reopening the same invoice returns to its source page after manual PDF navigation without dropping a note',async()=>{
+  const nav=invoiceNavigation();await nav.act('select-invoice');await nav.act('back-invoices');
+  nav.context.state.page=1;nav.context.dirty.add('s');nav.note.value='Keep this note';
+  let previewPage=null;nav.context.previewPDF=()=>{previewPage=nav.context.state.page;};
+  await nav.act('select-invoice');
+  assert.equal(nav.context.state.page,2);assert.equal(previewPage,2);
+  assert.equal(nav.note.value,'Keep this note');assert.equal(nav.context.renders,1);
 });
 test('PDF source locator highlights only a unique exact reference and amount, never suffixes or duplicate lines',()=>{
   assert.ok(sourceModule,'The source line locator must exist');

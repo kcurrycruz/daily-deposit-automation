@@ -1,4 +1,4 @@
-import {cents,invoiceKey} from './core.mjs';
+import {cents,invoiceKey,dateISO} from './core.mjs';
 // Preview-only evidence. No fuzzy references, amount-only hits, or OCR guesses.
 export function findSourceLine(items,{reference,amount}){
   const wanted=invoiceKey(reference);if(!wanted||!Number.isSafeInteger(amount))return null;
@@ -12,7 +12,9 @@ export function findSourceLine(items,{reference,amount}){
     if(!refs.includes(wanted)||!values.includes(amount))continue;
     // A shared baseline may contain separate invoice columns. Never pair a
     // reference with another region's amount; uncertain lines use the excerpt.
-    const identifiers=text.replace(/\(?[+-]?\$?\d[\d,]*\.\d{2}\)?/g,' ').split(/\s+/).map(value=>value.replace(/^[#:]+|[:,;]+$/g,'')).filter(value=>/\d/.test(value));
+    // Valid invoice/due-date cells are not extra invoice references. Keep a
+    // date-shaped selected reference, but never ignore other numeric IDs.
+    const identifiers=text.replace(/\(?[+-]?\$?\d[\d,]*\.\d{2}\)?/g,' ').split(/\s+/).map(value=>value.replace(/^[#:]+|[:,;]+$/g,'')).filter(value=>/\d/.test(value)&&(invoiceKey(value)===wanted||!dateISO(value)));
     if(identifiers.length!==1||invoiceKey(identifiers[0])!==wanted)continue;
     const left=Math.min(...words.map(item=>item.transform[4])),right=Math.max(...words.map(item=>item.transform[4]+(item.width||0))),height=Math.max(...words.map(item=>item.height||Math.abs(item.transform[3])||10));
     hits.push({text,x:left,y:group.y,width:right-left,height});

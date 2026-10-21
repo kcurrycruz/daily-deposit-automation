@@ -1,5 +1,6 @@
 import * as pdfjs from './vendor/pdf.mjs';
 import { parseStatement, layouts } from './core.mjs';
+import {findSourceLine} from './source-location.mjs';
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.mjs', import.meta.url).href;
 let ocrWorker = null;
 let dotWorker = null;
@@ -220,12 +221,21 @@ export async function extractPDF(file, onProgress = () => {}) {
 function documentCanvas(viewport) {
   const canvas = globalThis.document.createElement('canvas'); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height); return canvas;
 }
-export async function renderPage(file, number, canvas) {
+export async function renderPage(file, number, canvas, selection=null) {
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), useSystemFonts: true }).promise;
   try {
     const page = await doc.getPage(Math.min(number, doc.numPages));
     const viewport = page.getViewport({ scale: 1.3 });
     canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    if(selection){
+      const text=await page.getTextContent(),line=findSourceLine(text.items,selection);
+      if(line){
+        const a=viewport.convertToViewportPoint(line.x,line.y+line.height),b=viewport.convertToViewportPoint(line.x+line.width,line.y);
+        const bounds={x:Math.min(a[0],b[0])-5,y:Math.min(a[1],b[1])-4,width:Math.abs(b[0]-a[0])+10,height:Math.abs(b[1]-a[1])+8};
+        const context=canvas.getContext('2d');context.save();context.fillStyle='rgba(255,215,60,.22)';context.strokeStyle='#c88c00';context.lineWidth=2;context.fillRect(bounds.x,bounds.y,bounds.width,bounds.height);context.strokeRect(bounds.x,bounds.y,bounds.width,bounds.height);context.restore();return bounds;
+      }
+    }
+    return null;
   } finally { await doc.destroy(); }
 }

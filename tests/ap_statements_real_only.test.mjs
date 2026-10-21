@@ -15,6 +15,7 @@ import { importBillSource } from '../app/ap_statements/frontend/bill-import.mjs'
 import { backButtonHtml, requestProgramHub } from '../app/ap_statements/frontend/navigation.mjs';
 import * as historyBrowser from '../app/ap_statements/frontend/history-browser.mjs';
 import * as duplicates from '../app/ap_statements/frontend/statement-duplicates.mjs';
+import * as dropzone from '../app/ap_statements/frontend/statement-dropzone.mjs';
 
 const KEY = 'hwfc-ap-statements-session-v1';
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -78,7 +79,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };

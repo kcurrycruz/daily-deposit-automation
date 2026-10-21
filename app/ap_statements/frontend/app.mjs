@@ -9,8 +9,12 @@ import { emptyWorkspace, workflowGuide } from './guide.mjs';
 import {statementComparisons,invoiceFound,completionReviews,confirmVendor,readingIssues,defaultReviewDecision} from './simple-flow.mjs';
 import {billDataHTML,uploadReviewHTML,vendorQuestionHTML,statementOverviewHTML} from './simple-flow-view.mjs';
 import {billExportGuideHTML} from './bill-export-guide.mjs';
-import {loadHistoryIndex,historyBrowserHTML,createHistoryPreview,historyPreviewHTML} from './history-browser.mjs';
+import {loadHistoryIndex,historyBrowserHTML,vendorDirectoryHTML,createHistoryPreview,historyPreviewHTML} from './history-browser.mjs';
 import {prepareStatementUpload,sameStatementVendor} from './statement-duplicates.mjs';
+import {createVendorPicker,vendorOptionsHTML} from './vendor-picker.mjs';
+import {providerVendors} from './vendor-identity.mjs';
+import {bindStatementDropzone} from './statement-dropzone.mjs';
+import {referenceReviewHTML,confirmReferenceReview} from './reference-review.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -50,13 +54,22 @@ let historyLoading=false,historyError=null,historyLimit=50,historyLoadToken=0,hi
 let historicalDetail=null;
 let migrationPreview=null,pendingAttachment=null;
 let duplicatePrompt=null;
+let vendorHistorySelection=null,vendorDirectoryQuery='',vendorPicker=null,vendorPickerDoc=null,vendorPickerNames=[];
 let billUpdater=null,billUpdating=false,billUpdateProgress=null;
 let billWarnings=null;
 function docDetail(id){return historicalDetail?.doc.id===id?historicalDetail:shared?.state.details.get(id);}
 const comparisonsFor=doc=>docDetail(doc.id)?.readOnly?docDetail(doc.id).results:statementComparisons(doc,state.provider,state.mappings);
 const dirty=new Set();
 function ready(){if(!shared?.state.ready)throw Error('Shared workspace is not ready. Finish setup or retry loading.');}
-function sharedStatus(status,error){saveState=status;sharedError=error||null;retryOperation=error?.retry||null;const badge=document.querySelector('#shared-save-status');if(badge)badge.textContent=({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[status]||status;overlay.querySelectorAll?.('input,textarea,select,button[data-action="resolve"],button[data-action="save-extraction"],button[data-action="confirm-extraction"],button[data-action="save-notes"],button[data-action="vendor-confirm"],button[data-action="vendor-choose"],button[data-action="confirm-reading"],button[data-action="complete-dialog"],button[data-action="complete-statement"]').forEach(el=>{if(el.id==='row-select')el.disabled=status==='saving';else if(el.id!=='page-select')el.disabled=status==='saving'||!!docDetail(state.selected)?.readOnly;});document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});}
+function sharedStatus(status,error){
+  saveState=status;sharedError=error||null;retryOperation=error?.retry||null;
+  const badge=document.querySelector('#shared-save-status');if(badge)badge.textContent=({saving:'Saving…',saved:'Saved to shared workspace',not_saved:'Not saved',loading:'Loading shared workspace…',unsaved:'Unsaved changes'})[status]||status;
+  overlay.querySelectorAll?.('input,textarea,select,button[data-action="resolve"],button[data-action="confirm-reference"],button[data-action="save-extraction"],button[data-action="confirm-extraction"],button[data-action="save-notes"],button[data-action="vendor-confirm"],button[data-action="vendor-choose"],button[data-action="confirm-reading"],button[data-action="complete-dialog"],button[data-action="complete-statement"]').forEach(el=>{
+    if(el.id==='row-select')el.disabled=status==='saving';
+    else if(el.id!=='page-select')el.disabled=status==='saving'||!!docDetail(state.selected)?.readOnly||(el.dataset?.action==='vendor-choose'&&!document.querySelector('#statement-bill-vendor')?.value);
+  });
+  document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
+}
 function receiveShared(snapshot){
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();
   const drawer=overlay.querySelector('.drawer');
@@ -102,7 +115,9 @@ async function persistDoc(doc){ready();const detail=shared.state.details.get(doc
 function markDirty(){if(saveState==='saving')return;if(state.selected){dirty.add(state.selected);sharedStatus('unsaved');}}
 function decorateSharedUi(){
   if(billUpdateProgress)showBillProgress(billUpdateProgress);
-  const nav=document.querySelector('.nav');if(nav&&!nav.querySelector('[data-action="history-view"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="history-view" class="${state.view==='history'?'active':''}">${icon('clock')}Previous Statements</button>`);
+  const nav=document.querySelector('.nav');
+  if(nav&&!nav.querySelector('[data-action="vendor-history-view"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="vendor-history-view" class="${state.view==='vendor-history'?'active':''}" ${state.view==='vendor-history'?'aria-current="page"':''}>${icon('users')}Vendor</button>`);
+  if(nav&&!nav.querySelector('[data-action="history-view"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="history-view" class="${state.view==='history'?'active':''}">${icon('clock')}Previous Statements</button>`);
   const note=document.querySelector('.local-note');if(note)note.innerHTML=`${icon('shield')}<strong>Private shared workspace</strong>Original PDFs, BILL imports and acknowledged saves are kept for your team. Initials are self-reported. Unsaved edits remain in this tab.`;
   const profile=document.querySelector('.profile small');if(profile)profile.textContent='Shared AP workspace';
   for(const button of document.querySelectorAll('[data-action="save-session"]'))button.innerHTML=`${icon('save')}Save changes`;
@@ -114,13 +129,28 @@ function decorateSharedUi(){
   if(sharedError?.cancel)document.querySelector('#shared-error > div')?.insertAdjacentHTML('beforeend',' <button class="button small" data-action="bill-cancel-update">Cancel update / choose another file</button>');
   const retryButton=document.querySelector('[data-action="retry-shared"]');if(retryButton)retryButton.disabled=!retryOperation;
   if(state.view==='history'&&content){const heading=content.querySelector('.heading h1');if(heading)heading.textContent='Previous Statements';const subtitle=content.querySelector('.heading p');if(subtitle)subtitle.textContent='Find completed work and open the exact evidence saved by your team.';content.querySelector('.connection-layout')?.remove();content.insertAdjacentHTML('beforeend',historyPanel());}
+  if(state.view==='vendor-history'&&content){content.querySelector('.bill-data-strip')?.remove();const crumb=document.querySelector('.breadcrumb strong');if(crumb)crumb.textContent='Vendor';content.insertAdjacentHTML('beforeend',vendorDirectoryPanel());}
   for(const button of document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]'))if(!shared?.state.ready||saveState==='saving')button.disabled=true;
 }
 function historyPanel(){
   const filters=`<details class="panel wide-panel history-filters"><summary>Filter previous work</summary><div class="form-grid">${[['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="action-row"><button class="button primary" data-action="history-search">Apply filters</button><button class="button" data-action="history-reset">Clear filters</button></div></details>`;
   if(historyLoading)return '<section class="panel history-loading" role="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Loading saved statements and vendors…</section>';
   if(historyError)return '<section class="panel wide-panel" role="alert"><h2>Previous statements could not load</h2><p>Your saved work has not changed.</p><button class="button" data-action="history-refresh">Retry loading</button></section>';
-  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit);
+  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit,{showVendors:false});
+}
+function vendorDirectoryPanel(){
+  if(historyLoading||historyError)return historyPanel();
+  if(vendorHistorySelection)return `<div class="vendor-history-heading"><button class="button" data-action="vendor-history-back">← All vendors</button><p>Saved statements for <strong>${esc(vendorHistorySelection)}</strong></p></div>${historyPanel()}`;
+  return `<label class="field vendor-directory-search">Find a vendor<input id="vendor-directory-search" type="search" placeholder="Type a vendor name…" value="${esc(vendorDirectoryQuery)}"></label><div class="vendor-directory-results">${vendorDirectoryHTML(historyPage.items,vendorDirectoryQuery)}</div>`;
+}
+function updateVendorPicker(){
+  const input=document.querySelector('#vendor-search');if(!input||!vendorPicker)return;
+  const value=vendorPicker.state;input.value=value.query;input.setAttribute('aria-expanded',String(value.open));
+  if(value.active>=0)input.setAttribute('aria-activedescendant','vendor-option-'+value.active);else input.removeAttribute('aria-activedescendant');
+  const options=document.querySelector('#vendor-options');options.hidden=!value.open;options.innerHTML=vendorOptionsHTML(vendorPickerNames,value);
+  document.querySelector('#statement-bill-vendor').value=value.selected;
+  document.querySelector('[data-action="vendor-choose"]').disabled=!value.selected;
+  if(value.active>=0)document.querySelector('#vendor-option-'+value.active)?.scrollIntoView({block:'nearest'});
 }
 async function refreshHistory(more=false){
   ready();historyPreview?.hide(true);
@@ -131,7 +161,7 @@ async function refreshHistory(more=false){
   finally{if(token===historyLoadToken){historyLoading=false;render();}}
 }
 function quickPreview(item,pinned=false){
-  if(!item||state.view!=='history'||state.selected)return;
+  if(!item||!['history','vendor-history'].includes(state.view)||state.selected)return;
   clearTimeout(previewTimer);
   historyPreview??=createHistoryPreview({loadPdf:id=>shared.originalPdf(id),paint:async file=>{
     extractor??=await import('./extraction.mjs');const canvas=document.createElement('canvas');await extractor.renderPage(file,1,canvas);
@@ -184,8 +214,8 @@ function render() {
   const priorMain = app.querySelector('.main');
   const scrollTop = priorMain?.dataset.workspaceView === state.view ? priorMain.scrollTop : 0;
   const data = stats();
-  const title = { statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', connection: 'Your saved BILL data' }[state.view];
-  const subtitle = { statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
+  const title = { statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
+  const subtitle = { statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
   app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : ''}</div></main></div>`;
   bindDropzone();
   decorateSharedUi();
@@ -304,17 +334,21 @@ function renderDrawer() {
   const check = totals(doc);
   const reviewRows = comparisonsFor(doc);
   const row = reviewRows.find(r => r.id === state.selectedRow) || reviewRows.find(isAttention) || reviewRows[0];
-  if (row && !state.selectedRow) state.selectedRow = row.id;
+  if (row && !state.selectedRow) {state.selectedRow = row.id;state.page=row.page||1;}
   const warnings = [...doc.warnings];
+  vendorPickerNames=[...new Set(providerVendors(state.provider,doc.id).map(item=>item.vendor))].sort((a,b)=>a.localeCompare(b));
+  if(!vendorPicker||vendorPickerDoc!==doc.id){vendorPicker=createVendorPicker(vendorPickerNames,{onChange:updateVendorPicker});vendorPickerDoc=doc.id;}else vendorPicker.setNames(vendorPickerNames);
   if (check.difference !== 0 && check.difference !== null) warnings.push(`Extracted activity differs from the statement total by ${money(check.difference)}. Check missing rows, credits, or duplicate totals.`);
   if (check.difference === null) warnings.push('No statement total was identified. Enter it or verify completeness manually.');
-  overlay.innerHTML = `<div class="overlay"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-head"><div><div class="eyebrow">Statement review</div><h2 id="drawer-title">${esc(doc.vendor)}</h2><small>${esc(doc.filename)} · ${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · scanned PDF' : ''}</small></div><button class="close" data-action="close" aria-label="Close statement">${icon('close')}</button></header><div class="drawer-body"><div class="drawer-tabs"><button class="button ${state.drawerTab === 'extraction' ? 'primary' : ''}" data-action="drawer-tab" data-tab="extraction">Check PDF</button><button class="button ${state.drawerTab === 'review' ? 'primary' : ''}" data-action="drawer-tab" data-tab="review">Results</button><button class="button ${state.drawerTab === 'notes' ? 'primary' : ''}" data-action="drawer-tab" data-tab="notes">Notes</button><button class="button subtle danger" data-action="remove-doc">Remove statement</button></div>${state.drawerTab === 'extraction' ? extractionView(doc, check, warnings) : state.drawerTab === 'notes' ? notesView(doc) : `<div class="source-layout result-overview-layout"><div>${vendorQuestionHTML(doc,state.provider,state.mappings,!!docDetail(doc.id)?.readOnly)}${statementOverviewHTML(doc,reviewRows,!!docDetail(doc.id)?.readOnly)}</div>${pdfPanel(doc)}</div>${row ? `<details class="invoice-details" ${state.invoiceDetailsOpen?'open':''}><summary>Invoice details & follow-up</summary>${reviewView(doc,row,reviewRows,false)}</details>` : '<div class="empty">No rows read. Open Check PDF to correct the statement.</div>'}`}</div></section></div>`;
+  overlay.innerHTML = `<div class="overlay"><section class="drawer full-review" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer-head"><div><div class="eyebrow">Statement review</div><h2 id="drawer-title">${esc(doc.vendor)}</h2><small>${esc(doc.filename)} · ${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · scanned PDF' : ''}</small></div><button class="close" data-action="close" aria-label="Close statement">${icon('close')}</button></header><div class="drawer-body"><div class="drawer-tabs"><button class="button ${state.drawerTab === 'extraction' ? 'primary' : ''}" data-action="drawer-tab" data-tab="extraction">Check PDF</button><button class="button ${state.drawerTab === 'review' ? 'primary' : ''}" data-action="drawer-tab" data-tab="review">Results</button><button class="button ${state.drawerTab === 'notes' ? 'primary' : ''}" data-action="drawer-tab" data-tab="notes">Notes</button><button class="button subtle danger" data-action="remove-doc">Remove statement</button></div>${state.drawerTab === 'extraction' ? extractionView(doc, check, warnings) : state.drawerTab === 'notes' ? notesView(doc) : `<div class="review-workspace"><div class="review-evidence-column">${vendorQuestionHTML(doc,state.provider,state.mappings,!!docDetail(doc.id)?.readOnly,vendorPicker.state)}${statementOverviewHTML(doc,reviewRows,!!docDetail(doc.id)?.readOnly)}${row ? `<details id="invoice-details" class="invoice-details" tabindex="-1" ${state.invoiceDetailsOpen?'open':''}><summary>Invoice ${esc(row.invoiceNumber||row.kind)} · details & follow-up</summary><button class="button small" data-action="back-invoices">↑ Back to invoice list</button>${reviewView(doc,row,reviewRows,false)}</details>` : '<div class="empty">No rows read. Open Check PDF to correct the statement.</div>'}</div><aside class="review-source-column">${pdfPanel(doc)}${row?`<div class="source-excerpt"><strong>Selected invoice: ${esc(row.invoiceNumber||row.kind)} · ${money(row.originalAmount)}</strong><p id="source-location-status" role="status">Opening source page ${row.page}…</p><details><summary>Extracted source text</summary><pre>${esc(row.activity.map(item=>item.source||'').filter(Boolean).join('\n')||'No extracted source line is available. Check the original PDF.')}</pre></details></div>`:''}</aside></div>`}</div></section></div>`;
   if (state.drawerTab !== 'notes') previewPDF(doc);
   if(saveState==='saving')sharedStatus('saving',sharedError);
-  overlay.querySelectorAll('input,textarea').forEach(input=>input.addEventListener('input',markDirty));
+  overlay.querySelectorAll('input:not(#vendor-search):not(#statement-bill-vendor),textarea').forEach(input=>input.addEventListener('input',markDirty));
+  overlay.querySelectorAll('[data-action="select-invoice"]').forEach(item=>{if(item.dataset.id===state.selectedRow)item.setAttribute('aria-current','true');});
   const noteLabel=overlay.querySelector('#review-note')?.parentElement;if(noteLabel)noteLabel.firstChild.textContent='Review note (optional)';
   const reviewNote=overlay.querySelector('#review-note');if(reviewNote&&historicalDetail)reviewNote.value=historicalDetail.resolutions[state.selectedRow]?.note||'';
   const detail=docDetail(doc.id),body=overlay.querySelector('.drawer-body');
+  if(state.drawerTab==='review'&&row)overlay.querySelector('#invoice-details>summary')?.insertAdjacentHTML('afterend',referenceReviewHTML(doc,row,!!detail?.readOnly));
   if(detail?.readOnly){body.insertAdjacentHTML('afterbegin',`<div class="notice blue"><div><strong>Saved revision · read-only</strong><p>${esc(historySelection?.initials||'')} · ${esc(nyTimestamp(historySelection?.completedAt))} · ${esc(detail.ruleVersion)} · Import ${esc(detail.importId||'none')}</p><p>These are the original saved comparisons, not results recalculated against the latest import.</p><button class="button" data-action="reopen-statement">Reopen current statement as a draft</button> <button class="button" data-action="export">Export saved evidence</button></div></div>`);overlay.querySelectorAll('input,textarea,select,[data-action="save-extraction"],[data-action="confirm-extraction"],[data-action="save-notes"],[data-action="resolve"],[data-action="reopen"],[data-action="add-row"],[data-action="delete-row"],[data-action="remove-doc"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=true;});}
   else if(body){body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
   if(detail&&!detail.originalAvailable&&body)body.insertAdjacentHTML('afterbegin','<div class="notice amber"><div><strong>Original PDF not attached</strong><p>Select the original PDF to finish this migrated draft. Your previous notes and corrections are retained.</p><button class="button" data-action="attach-original">Attach original PDF</button></div></div>');
@@ -352,7 +386,15 @@ function notesView(doc) { return `<label class="field">Assigned reviewer (option
 async function previewPDF(doc) {
   const canvas = document.querySelector('#pdf-canvas'); if (!canvas) return;
   const token = ++renderToken;
-  try { extractor ??= await import('./extraction.mjs'); const original=files.get(doc.id)||await shared.originalPdf(doc.id); if (token !== renderToken) return; await extractor.renderPage(original, state.page, canvas); if (token === renderToken) document.querySelector('#pdf-loading')?.remove(); }
+  try {
+    extractor ??= await import('./extraction.mjs');const page=state.page,original=files.get(doc.id)||await shared.originalPdf(doc.id);if(token!==renderToken)return;
+    const row=state.drawerTab==='review'?comparisonsFor(doc).find(item=>item.id===state.selectedRow):null;
+    const selection=row&&row.page===page?{reference:row.invoiceNumber,amount:row.originalAmount}:null;
+    const buffer=document.createElement('canvas'),bounds=await extractor.renderPage(original,page,buffer,selection);if(token!==renderToken)return;
+    canvas.width=buffer.width;canvas.height=buffer.height;canvas.getContext('2d').drawImage(buffer,0,0);document.querySelector('#pdf-loading')?.remove();
+    const note=document.querySelector('#source-location-status');if(note)note.textContent=bounds?`Source page ${page} · matching invoice line highlighted.`:selection?`Source page ${page} · exact line could not be located reliably. Check the original and extracted text.`:`Viewing page ${page}. The selected invoice was read from page ${row?.page||page}.`;
+    const view=canvas.closest?.('.pdf-view');if(view)view.scrollTop=bounds?Math.max(0,bounds.y*(canvas.clientWidth/canvas.width)-40):0;
+  }
   catch(error) { if (token === renderToken) { const loading = document.querySelector('#pdf-loading'); if (loading) loading.textContent = `Preview unavailable: ${error.message}`; } }
 }
 function collectRows(doc, excludedRow = null) {
@@ -431,10 +473,7 @@ async function uploadPDFs(fileList) {
   toast(`${state.statements.length} statements ready.${reused?` ${reused} duplicate(s) reused the saved copy.`:''}${cancelled?` ${cancelled} upload(s) cancelled.`:''}${repeated?` ${repeated} repeated invoice(s), ${added} new invoice(s). Original statements remain separate.`:''} Verify the PDF reading before finishing.`, !!state.errors.length);
 }
 function bindDropzone() {
-  const zone = document.querySelector('#dropzone'); if (!zone) return;
-  zone.addEventListener('dragover', e => { e.preventDefault(); if (!state.busy) zone.classList.add('dragging'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragging'); uploadPDFs(e.dataTransfer.files); });
+  bindStatementDropzone(document.querySelector('#dropzone'),{canUpload:()=>!!shared?.state.ready&&!state.busy&&saveState!=='saving',onFiles:uploadPDFs,onError:error=>toast(error.message,true)});
 }
 document.querySelector('#pdf-input').addEventListener('change', e => uploadPDFs(e.target.files));
 document.querySelector('#csv-input').addEventListener('change', async e => {
@@ -447,6 +486,8 @@ document.querySelector('#csv-input').addEventListener('change', async e => {
   e.target.value = '';
 });
 document.addEventListener('input', e => {
+  if(e.target.id==='vendor-search'){vendorPicker?.input(e.target.value);return;}
+  if(e.target.id==='vendor-directory-search'){vendorDirectoryQuery=e.target.value;document.querySelector('.vendor-directory-results').innerHTML=vendorDirectoryHTML(historyPage.items,vendorDirectoryQuery);return;}
   if (e.target.id === 'search') { const pos = e.target.selectionStart; state.query = e.target.value; render(); const input = document.querySelector('#search'); input?.focus(); input?.setSelectionRange(pos,pos); }
 });
 document.addEventListener('change', e => {
@@ -475,10 +516,14 @@ document.addEventListener('click', async e => {
     if(action==='migration-preview'){ready();const legacy=loadSession(browserStorage()),mappings=loadVendorMappings(browserStorage());if(legacy.error||mappings.error)throw Error(legacy.error||mappings.error);migrationPreview=legacyMigrationPreview(legacy.session,mappings.mappings);modal('Import old browser work?',`<p>${migrationPreview.statements.length} real statements found. None of their original PDFs are saved in browser storage.</p><p>This creates unconfirmed shared drafts and retains notes. No completion history or reviewer initials will be invented. Existing browser data is not deleted.</p>${migrationPreview.importMetadata?`<p>Older BILL source: ${esc(migrationPreview.importMetadata.label)}. Select its original CSV once through Import BILL CSV to store the full shared comparison source.</p>`:''}<p>Imported drafts require the original PDFs and a fresh extraction check.</p>`,'confirm-migration','Import previous work');}
     if(action==='confirm-migration'){await shared.migrateLegacy(migrationPreview,true);migrationPreview=null;closeOverlay();render();toast('Previous notes imported as unconfirmed drafts. Attach their original PDFs to continue.');}
     if(state.selected&&docDetail(state.selected)?.readOnly&&['save-extraction','confirm-extraction','add-row','delete-row','save-notes','resolve','reopen','remove-doc','save-session','attach-original','vendor-confirm','vendor-choose','confirm-reading','complete-dialog','complete-statement'].includes(action))throw Error('This saved revision is read-only. Explicitly reopen the current statement to continue work.');
-    if(action==='history-view'){closeQuickPreview();state.view='history';historySelection=null;await refreshHistory();}
+    if(action==='history-view'){closeQuickPreview();state.view='history';historySelection=null;activeHistoryFilters={};await refreshHistory();}
+    if(action==='vendor-history-view'){closeQuickPreview();state.view='vendor-history';vendorHistorySelection=null;vendorDirectoryQuery='';activeHistoryFilters={};await refreshHistory();}
+    if(action==='vendor-history-open'){vendorHistorySelection=target.dataset.vendor;activeHistoryFilters={vendor:vendorHistorySelection};historyLimit=50;render();}
+    if(action==='vendor-history-back'){vendorHistorySelection=null;activeHistoryFilters={};render();}
+    if(action==='vendor-picker-select'){vendorPicker?.choose(target.dataset.vendor);document.querySelector('#vendor-search')?.focus();}
     if(action==='history-search'){const next={...activeHistoryFilters};for(const key of ['statementDate','initials','status','completedFrom','completedTo'])next[key]=document.querySelector(`#history-${key}`).value;historyFilters(next);activeHistoryFilters=next;historyLimit=50;closeQuickPreview();render();}
     if(action==='history-vendor'){closeQuickPreview();activeHistoryFilters.vendor=target.dataset.vendor;historyLimit=50;render();}
-    if(action==='history-reset'){closeQuickPreview();activeHistoryFilters={};historyLimit=50;render();}
+    if(action==='history-reset'){closeQuickPreview();activeHistoryFilters=state.view==='vendor-history'&&vendorHistorySelection?{vendor:vendorHistorySelection}:{};historyLimit=50;render();}
     if(action==='history-refresh')await refreshHistory();
     if(action==='history-preview')quickPreview(historyPage.items.find(item=>item.id===target.dataset.event),true);
     if(action==='history-preview-close')closeQuickPreview();
@@ -499,7 +544,9 @@ document.addEventListener('click', async e => {
     if(action==='select-invoice'){
       if(dirty.has(state.selected))throw Error('Save edits before selecting another invoice.');
       state.invoiceDetailsOpen=true;state.selectedRow=target.dataset.id;state.page=comparisonsFor(getDoc()).find(row=>row.id===state.selectedRow)?.page||1;renderDrawer();
+      const details=document.querySelector('#invoice-details');details?.focus({preventScroll:true});details?.scrollIntoView({block:'start',behavior:'instant'});
     }
+    if(action==='back-invoices'){state.invoiceDetailsOpen=false;const details=document.querySelector('#invoice-details');if(details)details.open=false;document.querySelector('#invoice-overview')?.scrollIntoView({block:'start',behavior:'instant'});overlay.querySelector('[data-action="select-invoice"][aria-current="true"]')?.focus({preventScroll:true});}
     if(action==='refresh-comparisons'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before comparing with current BILL data.');await shared.prepareStatement(doc);render();renderDrawer();toast('Compared with current BILL data. Notes and corrections retained; review the updated results.');}
     if(action==='bill-warnings'||action==='bill-warnings-more')await loadBillWarnings(action==='bill-warnings-more');
     if(action==='bill-cancel-update'){if(sharedError?.cancel)await sharedError.cancel();sharedError=null;retryOperation=null;render();toast('Update cancelled. You can select another BILL export.');}
@@ -543,6 +590,12 @@ document.addEventListener('click', async e => {
     if (action === 'add-row') { const doc = getDoc(); const priorRows = groupInvoices(doc); collectDoc(doc); invalidateReviewDecisions(priorRows); doc.rows.push({ id: uid(), type: 'invoice', invoiceNumber: '', amount: 0, balance: null, page: state.page, confidence: 99, source: 'Manually added row' }); doc.confirmed = false; render(); renderDrawer(); }
     if (action === 'delete-row') { const doc = getDoc(); const priorRows = groupInvoices(doc); collectDoc(doc, target.dataset.id); invalidateReviewDecisions(priorRows); render(); renderDrawer(); }
     if (action === 'save-notes') { const doc = getDoc(); doc.notes = document.querySelector('#doc-notes').value; doc.assignee = document.querySelector('#assignee').value; await persistDoc(doc);toast('Optional notes saved to the shared workspace.'); }
+    if(action==='confirm-reference'){
+      const doc=getDoc();if(docDetail(doc.id)?.readOnly)throw Error('Saved reviews are read-only.');
+      const row=comparisonsFor(doc).find(item=>item.id===state.selectedRow),prior=state.resolutions[row.id]||{};
+      state.resolutions[row.id]=confirmReferenceReview(doc,row,{...prior,decision:document.querySelector('#review-decision')?.value||prior.decision,note:document.querySelector('#review-note')?.value||prior.note||''});
+      await persistDoc(doc);render();renderDrawer();toast('Reference confirmation saved. Original references and matching evidence were retained.');
+    }
     if (action === 'resolve') { if(!document.querySelector('#review-decision').value)throw Error('Choose a review decision before saving.');if(!getDoc().confirmed)throw Error('Check and confirm the PDF reading before saving a decision.');const current=comparisonsFor(getDoc()).find(row=>row.id===state.selectedRow);if(current?.status==='vendor'&&document.querySelector('#review-decision').value==='Reviewed — no action needed')throw Error('Confirm the vendor above, or record a follow-up decision.');const note = document.querySelector('#review-note').value.trim(); state.resolutions[state.selectedRow] = { note, decision: document.querySelector('#review-decision').value };await persistDoc(getDoc()); render(); renderDrawer(); toast('Review saved. The matching evidence is preserved.'); }
     if (action === 'reopen') { delete state.resolutions[state.selectedRow];await persistDoc(getDoc()); render(); renderDrawer(); }
     if (action === 'mapping') {
@@ -574,6 +627,8 @@ document.addEventListener('click', async e => {
   } catch(error) {if(error.retry||error.code){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
 });
 document.addEventListener('keydown', e => {
+  if(e.target.id==='vendor-search'&&vendorPicker?.key(e.key)){e.preventDefault();return;}
+  const invoice=e.target.closest?.('tr[data-action="select-invoice"]');if(invoice&&['Enter',' '].includes(e.key)){e.preventDefault();invoice.click();return;}
   if(e.key==='Escape'&&historyPreview?.state.item){closeQuickPreview();e.preventDefault();return;}
   if (e.key === 'Escape' && overlay.innerHTML) closeOverlay();
   if (e.key === 'Tab' && overlay.innerHTML) {

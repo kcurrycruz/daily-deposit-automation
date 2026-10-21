@@ -17,6 +17,7 @@ import * as historyBrowser from '../app/ap_statements/frontend/history-browser.m
 import * as duplicates from '../app/ap_statements/frontend/statement-duplicates.mjs';
 import * as dropzone from '../app/ap_statements/frontend/statement-dropzone.mjs';
 import * as referenceReview from '../app/ap_statements/frontend/reference-review.mjs';
+import * as statementList from '../app/ap_statements/frontend/statement-list.mjs';
 
 const KEY = 'hwfc-ap-statements-session-v1';
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -80,7 +81,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
@@ -170,6 +171,30 @@ test('rerendering the same workspace preserves the list scroll position',()=>{
   const app=scrollableApp(realSession());vm.runInNewContext('render()',app.context);
   app.main().scrollTop=350;app.state.filter='presence';vm.runInNewContext('render()',app.context);
   assert.equal(app.main().scrollTop,350);
+});
+
+test('date header click reverses live statement rows and toggles history without changing data',async()=>{
+  const data=realSession();data.statements[0].statementDate='2026-09-01';
+  data.statements.push({...realDoc(),id:'new-doc',filename:'new.pdf',statementDate:'2026-10-01',rows:[]});
+  const app=browserApp(data);vm.runInNewContext('render()',app.context);
+  const rowOrder=()=>[...app.nodes['#app'].innerHTML.matchAll(/<tr data-action="open-doc" data-id="([^"]+)"/g)].map(m=>m[1]);
+  assert.deepEqual(rowOrder(),['new-doc','real-doc']);
+  const click=async list=>app.events.click({target:{classList:{contains:()=>false},closest:()=>({dataset:{action:'statement-date-sort',list}})}});
+  await click('statements');assert.deepEqual(rowOrder(),['real-doc','new-doc']);
+  assert.match(app.nodes['#app'].innerHTML,/aria-sort="ascending"/);
+  await click('statements');assert.deepEqual(rowOrder(),['new-doc','real-doc']);
+  await click('history');assert.equal(vm.runInNewContext('historyDateSort',app.context),'asc');
+  await click('history');assert.equal(vm.runInNewContext('historyDateSort',app.context),'desc');
+  assert.deepEqual(app.state.statements.map(d=>d.id),['real-doc','new-doc']);
+});
+
+test('an explicit live follow-up remains follow-up even for a found invoice',()=>{
+  const data=realSession();data.statements[0].declaredTotal=10000;
+  const app=browserApp(data);vm.runInNewContext('render()',app.context);
+  const html=app.nodes['#app'].innerHTML;
+  assert.match(html,/<span class="badge red"><span class="dot"><\/span>Follow-up/);
+  assert.match(html,/0 of 1 items resolved/);
+  assert.doesNotMatch(html,/Ready to finish/);
 });
 
 test('switching workspace views starts the new view at the top',()=>{

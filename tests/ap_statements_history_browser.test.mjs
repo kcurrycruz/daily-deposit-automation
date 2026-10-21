@@ -30,6 +30,18 @@ test('history browser escapes vendors and provides keyboard preview and full rev
   assert.doesNotMatch(html,/2\.pdf/);
 });
 
+test('history sorts by statement date before limiting, and toggles for Vendor and Previous Statements',()=>{
+  const items=[{...item('older'),statementDate:'2026-01-01'}, {...item('latest','Beta','2026-10-01T14:00:00Z'),statementDate:'2026-10-20'}];
+  assert.equal(api().filterHistory(items)[0].id,'latest');
+  const newest=api().historyBrowserHTML(items,{},1,{showVendors:false});
+  assert.match(newest,/latest\.pdf/);assert.doesNotMatch(newest,/older\.pdf/);
+  assert.match(newest,/aria-sort="descending"/);
+  const oldest=api().historyBrowserHTML(items,{},1,{showVendors:false,direction:'asc'});
+  assert.match(oldest,/older\.pdf/);assert.doesNotMatch(oldest,/latest\.pdf/);
+  assert.match(oldest,/aria-sort="ascending"/);
+  assert.match(api().historyBrowserHTML(items,{},1,{direction:'asc'}),/aria-sort="ascending"/);
+});
+
 test('preview loads only on demand, caches a thumbnail in memory and discards stale results',async()=>{
   let requested=0,painted=0,release;const states=[];
   const preview=api().createHistoryPreview({loadPdf:async id=>{requested++;if(id==='s-1')await new Promise(r=>release=r);return new Blob([id]);},paint:async file=>{painted++;return 'data:image/png;base64,'+btoa(await file.text());},onChange:s=>states.push({...s})});

@@ -1,4 +1,5 @@
 import {historyView,nyTimestamp} from './history.mjs';
+import {sortStatements} from './statement-list.mjs';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const status=value=>({reconciled:'Reconciled',reviewed:'Reviewed · limits remain',follow_up:'Follow-up'})[value]||value;
 
@@ -18,20 +19,19 @@ export function historyVendors(items){
   const vendors=new Map();for(const item of items)vendors.set(item.vendor,(vendors.get(item.vendor)||0)+1);
   return [...vendors].map(([vendor,count])=>({vendor,count})).sort((a,b)=>a.vendor.localeCompare(b.vendor));
 }
-export function filterHistory(items,filters={}){
-  return items.filter(item=>['vendor','statementDate','initials','status'].every(key=>!filters[key]||item[key]===filters[key])&&
+export function filterHistory(items,filters={},direction='desc'){
+  return sortStatements(items.filter(item=>['vendor','statementDate','initials','status'].every(key=>!filters[key]||item[key]===filters[key])&&
     (!filters.completedFrom||Date.parse(item.completedAt)>=Date.parse(filters.completedFrom))&&
-    (!filters.completedTo||Date.parse(item.completedAt)<=Date.parse(filters.completedTo)))
-    .sort((a,b)=>Date.parse(b.completedAt)-Date.parse(a.completedAt)||b.id.localeCompare(a.id));
+    (!filters.completedTo||Date.parse(item.completedAt)<=Date.parse(filters.completedTo))),direction);
 }
 export function vendorDirectoryHTML(items,query=''){
   const vendors=historyVendors(items).filter(item=>item.vendor.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return `<div class="vendor-directory">${vendors.map(({vendor,count})=>`<button class="panel vendor-directory-card" data-action="vendor-history-open" data-vendor="${esc(vendor)}"><strong>${esc(vendor)}</strong><span>${count} saved review${count===1?'':'s'}</span><small>View previous statements →</small></button>`).join('')}${!vendors.length?'<p class="empty">No saved vendors match this search.</p>':''}</div>`;
 }
-export function historyBrowserHTML(items,filters={},limit=50,{showVendors=true}={}){
-  const rows=filterHistory(items,filters),vendors=historyVendors(items);
-  if(!showVendors)return historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null});
-  return `<div class="history-browser"><aside class="history-vendors panel"><h2>Vendors</h2><nav aria-label="Statement vendors"><button data-action="history-vendor" data-vendor="" ${!filters.vendor?'aria-current="true"':''}>All vendors <span>${items.length}</span></button>${vendors.map(({vendor,count})=>`<button data-action="history-vendor" data-vendor="${esc(vendor)}" ${filters.vendor===vendor?'aria-current="true"':''}><span>${esc(vendor)}</span><small>${count}</small></button>`).join('')}</nav></aside><div class="history-results">${historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null})}</div></div>`;
+export function historyBrowserHTML(items,filters={},limit=50,{showVendors=true,direction='desc'}={}){
+  const rows=filterHistory(items,filters,direction),vendors=historyVendors(items);
+  if(!showVendors)return historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction);
+  return `<div class="history-browser"><aside class="history-vendors panel"><h2>Vendors</h2><nav aria-label="Statement vendors"><button data-action="history-vendor" data-vendor="" ${!filters.vendor?'aria-current="true"':''}>All vendors <span>${items.length}</span></button>${vendors.map(({vendor,count})=>`<button data-action="history-vendor" data-vendor="${esc(vendor)}" ${filters.vendor===vendor?'aria-current="true"':''}><span>${esc(vendor)}</span><small>${count}</small></button>`).join('')}</nav></aside><div class="history-results">${historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction)}</div></div>`;
 }
 
 // A small in-memory thumbnail cache, cleared when AP closes. Never localStorage.

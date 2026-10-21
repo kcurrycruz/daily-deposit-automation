@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlparse
 from .models import (ApConfig, JsonObject, SharedSnapshot, require_uuid, integer,
                      validate_record, PAGE_SIZE, PREVIEW_SECONDS)
+from .review_progress import review_progress
 
 class ApStoreError(RuntimeError):
     def __init__(self, code='unavailable'):
@@ -176,7 +177,8 @@ class ApRepository:
             doc=revision['doc']
             items.append({'id':event['id'],'statementId':event['statement_id'],'revisionId':event['revision_id'],
                           'vendor':doc['vendor'],'filename':doc['filename'],'statementDate':doc.get('statementDate',''),
-                          'initials':event['initials'],'status':event['status'],'completedAt':event['created_at'],'notes':event['note']})
+                          'initials':event['initials'],'status':event['status'],'completedAt':event['created_at'],'notes':event['note'],
+                          'progress':review_progress(revision)})
         following=base64.urlsafe_b64encode(json.dumps([events[-1]['created_at'],events[-1]['id']]).encode('utf-8')).decode('ascii') if len(events)==limit else None
         return {'items':items,'nextCursor':following}
 

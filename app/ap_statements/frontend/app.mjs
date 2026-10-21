@@ -10,6 +10,7 @@ import {statementComparisons,invoiceFound,completionReviews,confirmVendor,readin
 import {billDataHTML,uploadReviewHTML,vendorQuestionHTML,statementOverviewHTML} from './simple-flow-view.mjs';
 import {billExportGuideHTML} from './bill-export-guide.mjs';
 import {loadHistoryIndex,historyBrowserHTML,vendorDirectoryHTML,createHistoryPreview,historyPreviewHTML} from './history-browser.mjs';
+import {sortStatements,statementDateHeader,reviewProgress,progressHTML,reviewStatusHTML} from './statement-list.mjs';
 import {prepareStatementUpload,sameStatementVendor} from './statement-duplicates.mjs';
 import {createVendorPicker,vendorOptionsHTML} from './vendor-picker.mjs';
 import {providerVendors} from './vendor-identity.mjs';
@@ -50,6 +51,7 @@ const browserStorage = () => { try { return window.localStorage; } catch { retur
 let restoredNotice = '';
 let shared,saveState='loading',retryOperation=null,sharedError=null;
 let historyPage={items:[],nextCursor:null},historySelection=null,activeHistoryFilters={};
+let statementDateSort='desc',historyDateSort='desc';
 let historyLoading=false,historyError=null,historyLimit=50,historyLoadToken=0,historyPreview=null,previewTimer=null,previewReturnFocus=null;
 let historicalDetail=null;
 let migrationPreview=null,pendingAttachment=null;
@@ -136,7 +138,7 @@ function historyPanel(){
   const filters=`<details class="panel wide-panel history-filters"><summary>Filter previous work</summary><div class="form-grid">${[['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="action-row"><button class="button primary" data-action="history-search">Apply filters</button><button class="button" data-action="history-reset">Clear filters</button></div></details>`;
   if(historyLoading)return '<section class="panel history-loading" role="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Loading saved statements and vendors…</section>';
   if(historyError)return '<section class="panel wide-panel" role="alert"><h2>Previous statements could not load</h2><p>Your saved work has not changed.</p><button class="button" data-action="history-refresh">Retry loading</button></section>';
-  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit,{showVendors:false});
+  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit,{showVendors:false,direction:historyDateSort});
 }
 function vendorDirectoryPanel(){
   if(historyLoading||historyError)return historyPanel();
@@ -202,6 +204,7 @@ function docSummary(doc) {
   const check = totals(doc);
   if (!doc.confirmed) return { status: 'extraction', label: rows.length ? `${rows.filter(foundInvoice).length} found · check PDF` : 'Check PDF reading' };
   if (check.difference !== 0 && check.difference !== null) return { status: 'extraction', label: 'Check statement total' };
+  if(rows.some(row=>state.resolutions[row.id]?.decision&&state.resolutions[row.id].decision!=='Reviewed — no action needed'))return {status:'follow_up',label:'Follow-up'};
   if (rows.every(r => r.status === 'matched') && rows.length) return { status: 'matched' };
   if (!state.provider.loaded) return { status: 'unverified' };
   if(rows.length&&!rows.some(isAttention))return {status:'presence',label:'Ready to finish'};
@@ -257,11 +260,11 @@ function toolbar() {
 }
 function matchesQuery(text) { return text.toLowerCase().includes(state.query.toLowerCase().trim()); }
 function statementPanel(data) {
-  const docs = state.statements.filter(doc => {
+  const docs = sortStatements(state.statements.filter(doc => {
     const rows = comparisonsFor(doc);
     return matchesQuery(`${doc.vendor} ${doc.filename} ${doc.rows.map(r => r.invoiceNumber).join(' ')}`) && (state.filter === 'all' || state.filter === 'attention' && (rows.some(isAttention) || !doc.confirmed) || state.filter === 'matched' && rows.some(foundInvoice) || state.filter === 'reviewed' && rows.some(r => reviewDecision(r.id)));
-  });
-  return `<div class="panel-title"><h2>Vendor statements</h2><small>${state.statements.length} documents</small></div>${toolbar()}${docs.length ? `<div class="table-wrap"><table class="main-table"><thead><tr><th>Vendor / statement</th><th>As of</th><th>Invoices</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>${docs.map(doc => { const summary = docSummary(doc); return `<tr data-action="open-doc" data-id="${doc.id}"><td><button data-action="open-doc" data-id="${doc.id}" style="text-align:left;padding:0">${vendorCell(doc)}</button></td><td class="numeric">${esc(doc.statementDate || 'Set date')}</td><td>${groupInvoices(doc).filter(r => r.kind === 'invoice').length}<small style="display:block;color:#9aa18f;font-size:9px;margin-top:4px">${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · OCR' : ''}</small></td><td class="numeric">${money(doc.declaredTotal ?? totals(doc).sum)}</td><td>${badge(summary.status, summary.label)}</td><td>${icon('arrow')}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="empty">${icon('folder')}<h3>${state.statements.length ? 'No statements match this filter' : 'Ready for your first statement'}</h3>${state.statements.length ? 'Try another filter or search.' : 'Upload a PDF to review its invoices, credits, and balances.'}</div>`}<div class="table-foot"><span>${docs.length} statements shown</span><button class="mini-link" data-action="clear">Clear workspace</button></div>`;
+  }),statementDateSort);
+  return `<div class="panel-title"><h2>Vendor statements</h2><small>${state.statements.length} documents</small></div>${toolbar()}${docs.length ? `<div class="table-wrap"><table class="main-table"><thead><tr><th>Vendor / statement</th>${statementDateHeader(statementDateSort,'statements')}<th>Invoices</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>${docs.map(doc => { const summary = docSummary(doc),progress=reviewProgress(comparisonsFor(doc),state.resolutions,doc.confirmed); return `<tr data-action="open-doc" data-id="${doc.id}"><td><button data-action="open-doc" data-id="${doc.id}" style="text-align:left;padding:0">${vendorCell(doc)}</button></td><td class="numeric">${esc(doc.statementDate || 'Set date')}</td><td>${groupInvoices(doc).filter(r => r.kind === 'invoice').length}<small style="display:block;color:#9aa18f;font-size:9px;margin-top:4px">${doc.pageCount} ${doc.pageCount === 1 ? 'page' : 'pages'}${doc.ocr ? ' · OCR' : ''}</small></td><td class="numeric">${money(doc.declaredTotal ?? totals(doc).sum)}</td><td>${summary.status==='follow_up'?reviewStatusHTML('follow_up',progress):badge(summary.status, summary.label)+(progress?progressHTML(progress):'')}</td><td>${icon('arrow')}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="empty">${icon('folder')}<h3>${state.statements.length ? 'No statements match this filter' : 'Ready for your first statement'}</h3>${state.statements.length ? 'Try another filter or search.' : 'Upload a PDF to review its invoices, credits, and balances.'}</div>`}<div class="table-foot"><span>${docs.length} statements shown</span><button class="mini-link" data-action="clear">Clear workspace</button></div>`;
 }
 function exceptionPanel() {
   const rows = results().filter(row => matchesQuery(`${row.vendor} ${row.invoiceNumber} ${row.reason}`) && (state.filter === 'all' || state.filter === 'attention' && isAttention(row) || state.filter === 'matched' && foundInvoice(row) || state.filter === 'reviewed' && reviewDecision(row.id)));
@@ -515,6 +518,11 @@ document.addEventListener('click', async e => {
   try {
     if(billUpdating&&!['back-to-programs','confirm-back-to-programs','close'].includes(action))throw Error('Please wait for the BILL update to finish.');
     if(saveState==='saving'&&!['close','confirm-back-to-programs'].includes(action))throw Error('Please wait for the current save to finish.');
+    if(action==='statement-date-sort'){
+      if(target.dataset.list==='history'){historyDateSort=historyDateSort==='desc'?'asc':'desc';closeQuickPreview();}
+      else statementDateSort=statementDateSort==='desc'?'asc':'desc';
+      render();document.querySelector(`[data-action="statement-date-sort"][data-list="${target.dataset.list}"]`)?.focus({preventScroll:true});
+    }
     if(action==='attach-original'){const detail=shared.state.details.get(state.selected);pendingAttachment={id:state.selected,version:detail.version};document.querySelector('#pdf-input').click();}
     if(action==='migration-preview'){ready();const legacy=loadSession(browserStorage()),mappings=loadVendorMappings(browserStorage());if(legacy.error||mappings.error)throw Error(legacy.error||mappings.error);migrationPreview=legacyMigrationPreview(legacy.session,mappings.mappings);modal('Import old browser work?',`<p>${migrationPreview.statements.length} real statements found. None of their original PDFs are saved in browser storage.</p><p>This creates unconfirmed shared drafts and retains notes. No completion history or reviewer initials will be invented. Existing browser data is not deleted.</p>${migrationPreview.importMetadata?`<p>Older BILL source: ${esc(migrationPreview.importMetadata.label)}. Select its original CSV once through Import BILL CSV to store the full shared comparison source.</p>`:''}<p>Imported drafts require the original PDFs and a fresh extraction check.</p>`,'confirm-migration','Import previous work');}
     if(action==='confirm-migration'){await shared.migrateLegacy(migrationPreview,true);migrationPreview=null;closeOverlay();render();toast('Previous notes imported as unconfirmed drafts. Attach their original PDFs to continue.');}

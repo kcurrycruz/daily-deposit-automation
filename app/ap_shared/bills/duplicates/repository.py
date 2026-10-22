@@ -1,7 +1,9 @@
 """Workspace-scoped cloud boundary for detector metadata and review history."""
 from functools import wraps
+import hashlib
+from pathlib import Path
 from ...models import require_uuid, integer
-from .contracts import DuplicateError, MESSAGES, canonical_hash, digest, validate_pin
+from .contracts import DuplicateError, MESSAGES, canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
 
 OPERATIONS = frozenset('ensure claim checkpoint restart publish fail reserve review'.split())
 
@@ -82,3 +84,30 @@ class DuplicateRepository:
             output.append(dict(key=key, decision=row['decision'], initials=row['initials'], note=row['note'],
                                version=row['version'], at=row['at'], reviewedImportId=row['reviewed_import_id']))
         return dict(reviews=output, nextCursor=output[-1]['key'] if len(rows) > limit else None)
+
+    @private_operation
+    def put_result(self, scan, path, request_id):
+        require_uuid(request_id); require_uuid(scan['id'])
+        if scan['workspace_id'] != self.config.workspace_id:
+            raise PermissionError('AP workspace access denied.')
+        info = scan['result_info']
+        key = f'{self.config.workspace_id}/bill-duplicates/v1/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
+        manifest = validate_manifest({**info, 'key': key})
+        if manifest['importId'] != scan['import_id'] or manifest['sourceDigest'] != scan['source_digest']:
+            raise DuplicateError('duplicate_invalid_source')
+        with open(path, 'rb') as source:
+            data = source.read(MAX_ARCHIVE_BYTES + 1)
+        if not data or len(data) != manifest['bytes'] or len(data) > MAX_ARCHIVE_BYTES or hashlib.sha256(data).hexdigest() != manifest['hash']:
+            raise DuplicateError('duplicate_invalid_source')
+        self.base.write_bytes(self.config.workspace_id, key, data, 'application/gzip')
+        return manifest
+
+    @private_operation
+    def read_result(self, manifest, target):
+        manifest = validate_manifest(manifest)
+        if not manifest['key'].startswith(self.config.workspace_id + '/'):
+            raise PermissionError('AP workspace access denied.')
+        data = self.base.read_bytes(self.config.workspace_id, manifest['key'])
+        if len(data) != manifest['bytes'] or len(data) > MAX_ARCHIVE_BYTES or hashlib.sha256(data).hexdigest() != manifest['hash']:
+            raise DuplicateError('duplicate_invalid_source')
+        Path(target).write_bytes(data)

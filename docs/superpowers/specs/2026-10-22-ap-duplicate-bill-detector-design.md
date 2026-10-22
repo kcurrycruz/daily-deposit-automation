@@ -2,7 +2,7 @@
 
 Date: October 22, 2026
 
-Status: Written specification awaiting user review. The conversational design is approved; implementation planning and product changes require subsequent approval.
+Status: Approved for implementation planning on October 22, 2026. Product changes require review of the implementation plan and selection of an execution method.
 
 ## Purpose and accepted scope
 

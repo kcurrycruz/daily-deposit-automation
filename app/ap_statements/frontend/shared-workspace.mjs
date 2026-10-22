@@ -2,6 +2,7 @@ import {reconcile,groupInvoices,vendorKey,MATCH_RULE_VERSION,comparisonInputKey}
 import {createComparisonSource} from './comparison-source.mjs';
 import {LIMITS} from './shared-client.mjs';
 import {reviewNotesOnly} from './session.mjs';
+import {createDuplicateBills} from './duplicate-bills.mjs';
 const clone=value=>JSON.parse(JSON.stringify(value));
 const unloaded=()=>({loaded:false,simulated:false,records:[],label:'Loading shared BILL records…'});
 const fields=(value,names)=>Object.fromEntries(names.split(' ').filter(k=>value[k]!==undefined).map(k=>[k,value[k]]));
@@ -15,8 +16,12 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   const state={ready:false,provider:unloaded(),importId:null,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map(),preparations=new Map();let disposed=false,loaded=false;
   let comparison=null,adoption=0;
+  let foreground=0,externalBusy=false;
+  const duplicates=createDuplicateBills(client,{onChange:()=>{if(loaded&&!disposed)onState(state);}});
+  const updateDuplicateBusy=()=>duplicates.setBusy(foreground>0||externalBusy);
+  async function inForeground(work){foreground++;updateDuplicateBusy();try{return await work();}finally{foreground--;updateDuplicateBusy();}}
   function check(){if(disposed)throw Error('AP is locked.');}
-  const emit=()=>{check();onState(state);};
+  const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills});onState(state);};
   function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=provider;if(loaded)emit();}}});return source;}
   async function ensureComparisons(doc){
     check();if(!comparison||!state.provider.loaded)return null;
@@ -29,7 +34,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
       comparison.invalidate(doc.id);
     }
-    const result=await comparison.ensure(doc,state.mappings,{importInfo:info});check();
+    const result=await inForeground(()=>comparison.ensure(doc,state.mappings,{importInfo:info}));check();
     const scope=state.provider.scopes?.[doc.id];
     if(info&&(!scope?.complete||scope.importId!==info.id||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
     return result;
@@ -88,7 +93,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
         if('reply' in steps[current])return clone(steps[current].reply);
         const reply=await client.request(action,payload,{requestId:steps[current].id});check();steps[current].reply=clone(reply);return reply;
       };
-      try{const result=await operation(request);check();onSaveState('saved');return result;}
+      try{const result=await inForeground(()=>operation(request));check();onSaveState('saved');return result;}
       catch(error){error.retry=execute;if(!disposed)onSaveState('not_saved',error);throw error;}
     }
     return execute();
@@ -203,7 +208,8 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     return write(async request=>{const reply=await request('save_mapping',payload);if(vendorKey(state.mappings[payload.vendor]||payload.vendor)!==vendorKey(payload.bill_vendor))for(const doc of state.statements.filter(d=>d.vendor===payload.vendor))for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};state.mappings[payload.vendor]=payload.bill_vendor;state.mappingVersions[payload.vendor]=reply.version;emit();return reply;});
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
-  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,prepareStatement,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,
+  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,prepareStatement,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,duplicates,
+    setDuplicateBusy(value){externalBusy=!!value;updateDuplicateBusy();},
     attachOriginal(file,id,expectedVersion){return write(async request=>{await upload(file,'pdf',request,{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     migrateLegacy(preview,confirmed=false){if(!confirmed)return Promise.resolve({cancelled:true});const items=clone(preview.statements);if(!items.length)return Promise.reject(Error('No real legacy statements to migrate.'));return write(async request=>{const results=[];for(const item of items)results.push(await request('migrate_legacy',{confirmed:true,statements:[item]}));await load({replace:true});return results;});},
     async completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)throw Error('Open the current editable draft before completing.');const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;await ensureComparisons(doc);const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,mappingSnapshot:snapshot.mapping_snapshot,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
@@ -213,5 +219,5 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     archiveStatement(id,expectedVersion){return write(async request=>{const reply=await request('archive_statement',{statement_id:id,expected_version:expectedVersion});state.statements=state.statements.filter(doc=>doc.id!==id);emit();return reply;});},
     async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return {...detail,readOnly:!!revisionId||detail.completed};},
     write,adopt,
-    dispose(){disposed=true;comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
+    dispose(){disposed=true;duplicates.dispose();comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
 }

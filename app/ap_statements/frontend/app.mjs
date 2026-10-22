@@ -104,9 +104,10 @@ async function updateBillFile(file){
 async function runBillUpdate(operation){
   if(billUpdating)throw Error('A BILL update is already in progress.');
   billUpdating=true;
+  shared?.setDuplicateBusy(true);
   try{const result=await operation();sharedError=null;retryOperation=null;render();if(state.selected)renderDrawer();return result;}
   catch(error){if(error.retry){const retry=error.retry;error.retry=()=>runBillUpdate(retry);}throw error;}
-  finally{billUpdating=false;}
+  finally{billUpdating=false;shared?.setDuplicateBusy(state.busy||saveState==='saving');}
 }
 async function loadBillWarnings(more=false){
   ready();
@@ -211,6 +212,7 @@ function docSummary(doc) {
   return { status: 'balance', label: `${rows.filter(isAttention).length} to review` };
 }
 function render() {
+  shared?.setDuplicateBusy(state.busy||billUpdating||saveState==='saving');
   if(!shared?.state.ready){
     const failed=!!sharedError;
     app.innerHTML=failed?`<main class="workspace-startup"><section class="startup-card"><div class="brand-icon">${icon('ledger')}</div><div class="eyebrow">Statement Desk</div><h1>Your workspace could not load</h1><p>Your saved data has not changed. Check your connection and try again.</p><button class="button primary" data-action="retry-shared">Retry loading</button>${backButtonHtml()}</section></main>`:'<main class="workspace-startup" aria-busy="true"><span class="startup-spinner" aria-hidden="true"></span><span class="sr-only" role="status">Loading your AP workspace</span></main>';

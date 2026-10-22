@@ -89,7 +89,7 @@ function browserApp(data) {
   // Tests of controls supply an acknowledged synthetic shared snapshot,
   // never an implicit localStorage restore.
   if(data){context.fixtureSession=session.loadSession(localStorage).session;vm.runInNewContext('Object.assign(state,fixtureSession)',context);}
-  context.cloud={state:{ready:true,capabilities:{billSnapshots:2},details:new Map()},async adoptImport(result){const current=vm.runInNewContext('state',context);current.provider={loaded:true,records:[],recordCount:result.recordCount,label:result.metadata.label};},extractionOnly(){const current=vm.runInNewContext('state',context);current.provider={loaded:false,records:[]};current.resolutions=session.reviewNotesOnly(current.resolutions);}};
+  context.cloud={state:{ready:true,capabilities:{billSnapshots:2},details:new Map()},setDuplicateBusy(){},async adoptImport(result){const current=vm.runInNewContext('state',context);current.provider={loaded:true,records:[],recordCount:result.recordCount,label:result.metadata.label};},extractionOnly(){const current=vm.runInNewContext('state',context);current.provider={loaded:false,records:[]};current.resolutions=session.reviewNotesOnly(current.resolutions);}};
   vm.runInNewContext('shared=cloud',context);
   return { nodes, context, events, state: vm.runInNewContext('state', context) };
 }

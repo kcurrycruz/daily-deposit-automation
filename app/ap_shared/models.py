@@ -20,7 +20,8 @@ PREVIEW_SECONDS = 300
 MAX_SAFE_CENTS = 9007199254740991
 RULE_VERSION = 'ap-match-v4'
 BILL_ACTIONS = frozenset('bill_current bill_upload_begin bill_upload_chunk bill_upload_finish bill_prepare_step bill_activate bill_cancel bill_vendors_page bill_candidates_page bill_warnings_page'.split())
-ACTIONS = frozenset('bootstrap records_page statement history_page pdf_preview upload_begin upload_chunk upload_finish import_begin import_records import_finish save_revision save_mapping complete_revision reopen_statement archive_statement migrate_legacy'.split()) | BILL_ACTIONS
+DUPLICATE_ACTIONS = frozenset('duplicate_ensure duplicate_status duplicate_step duplicate_findings_page duplicate_members_page duplicate_review_save'.split())
+ACTIONS = frozenset('bootstrap records_page statement history_page pdf_preview upload_begin upload_chunk upload_finish import_begin import_records import_finish save_revision save_mapping complete_revision reopen_statement archive_statement migrate_legacy'.split()) | BILL_ACTIONS | DUPLICATE_ACTIONS
 DECISIONS = frozenset(['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'])
 
 class ApValidationError(ValueError):

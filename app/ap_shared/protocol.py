@@ -3,6 +3,7 @@ from .access import require_access
 from .models import validate_request,ApValidationError
 from .repository import ApStoreError
 from .bills.contracts import SnapshotError, MESSAGES as BILL_MESSAGES
+from .bills.duplicates.contracts import DuplicateError, MESSAGES as DUPLICATE_MESSAGES
 
 MESSAGES={'validation':'Check the fields and allowed size limits before retrying.',
     'denied':'AP access is locked or expired. Unlock AP again.',
@@ -23,10 +24,11 @@ def dispatch_request(value,session,config,service,now):
         reply['ok']=True
     except PermissionError: code='denied'
     except SnapshotError as error: code=error.code
+    except DuplicateError as error: code=error.code
     except ApValidationError: code='validation'
     except ApStoreError as error: code=error.code if error.code in MESSAGES else 'unavailable'
     except Exception: code='unavailable'
     if not reply['ok']:
-        reply['data']=None; reply['error']={'code':code,'message':BILL_MESSAGES[code] if code in BILL_MESSAGES else MESSAGES[code]}
+        reply['data']=None; reply['error']={'code':code,'message':DUPLICATE_MESSAGES[code] if code in DUPLICATE_MESSAGES else BILL_MESSAGES[code] if code in BILL_MESSAGES else MESSAGES[code]}
     return reply
 

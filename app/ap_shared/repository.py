@@ -110,7 +110,9 @@ class ApRepository:
             mapping_rows.extend(page)
             if len(page)<PAGE_SIZE: break
             offset+=PAGE_SIZE
-        return {'activeImport':active,'capabilities':{'billSnapshots':2} if 'import_version' in home else {},
+        capabilities={'billSnapshots':2} if 'import_version' in home else {}
+        if home.get('duplicate_schema_version')==1: capabilities['duplicateBills']=1
+        return {'activeImport':active,'capabilities':capabilities,
                 'importVersion':home.get('import_version'),
                 'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},
                 'mappingVersions':{r['vendor']:r['version'] for r in mapping_rows},'statements':statements,

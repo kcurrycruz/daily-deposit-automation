@@ -11,7 +11,7 @@ from uuid import UUID, uuid5
 from .access import require_access
 from .models import (ApConfig,Authorization,JsonObject,ApValidationError,allowed,text,integer,date_value,
     require_uuid,normalize_initials,validate_record,validate_statement,validate_resolution,validate_provider_metadata,
-    MAX_FILE_BYTES,MAX_CHUNK_BYTES,MAX_RECORDS,PAGE_SIZE,RULE_VERSION,BILL_ACTIONS)
+    MAX_FILE_BYTES,MAX_CHUNK_BYTES,MAX_RECORDS,PAGE_SIZE,RULE_VERSION,BILL_ACTIONS,DUPLICATE_ACTIONS)
 
 class ApService:
     def __init__(self,repository,config:ApConfig,clock,revalidate):
@@ -20,6 +20,7 @@ class ApService:
         self.clock=clock
         self.revalidate=revalidate
         self.bill_operations=None
+        self.duplicate_operations=None
 
     def _check(self,authorization):
         current=self.revalidate()
@@ -65,6 +66,14 @@ class ApService:
     def handle(self,action:str,payload:JsonObject,request_id:str,authorization:Authorization) -> JsonObject:
         require_uuid(request_id); self._check(authorization)
         workspace=self.config.workspace_id
+        if action in DUPLICATE_ACTIONS:
+            if self.duplicate_operations is None:
+                from .bills.operations import create_bill_operations
+                from .bills.duplicates.operations import create_duplicate_operations
+                if self.bill_operations is None:
+                    self.bill_operations=create_bill_operations(self.repository,self.config,self.clock,self.revalidate)
+                self.duplicate_operations=create_duplicate_operations(self.repository,self.bill_operations,self.config,self.clock,self.revalidate)
+            return self.duplicate_operations.handle(action,payload,request_id,authorization)
         if action in BILL_ACTIONS:
             if self.bill_operations is None:
                 from .bills.operations import create_bill_operations

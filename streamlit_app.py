@@ -175,6 +175,7 @@ from app.program_hub_ui import (
     normalize_program_selection,
     preserve_daily_program_state,
     render_program_hub,
+    render_program_transition,
     restore_daily_program_state,
     return_to_program_hub,
 )
@@ -448,6 +449,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+render_program_transition(st)
 
 st.markdown(
     """

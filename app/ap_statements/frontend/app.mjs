@@ -213,7 +213,7 @@ function docSummary(doc) {
 function render() {
   if(!shared?.state.ready){
     const failed=!!sharedError;
-    app.innerHTML=`<main class="workspace-startup" ${failed?'':'aria-busy="true"'}><section class="startup-card"><div class="brand-icon">${icon('ledger')}</div><div class="eyebrow">Statement Desk</div><h1>${failed?'Your workspace could not load':'Loading your AP workspace…'}</h1><p>${failed?'Your saved data has not changed. Check your connection and try again.':'Getting your saved BILL data, statements, and invoice checks ready.'}</p>${failed?'<button class="button primary" data-action="retry-shared">Retry loading</button>':'<span class="startup-spinner" aria-hidden="true"></span><span class="sr-only" role="status">Loading your AP workspace</span>'}${backButtonHtml()}</section></main>`;
+    app.innerHTML=failed?`<main class="workspace-startup"><section class="startup-card"><div class="brand-icon">${icon('ledger')}</div><div class="eyebrow">Statement Desk</div><h1>Your workspace could not load</h1><p>Your saved data has not changed. Check your connection and try again.</p><button class="button primary" data-action="retry-shared">Retry loading</button>${backButtonHtml()}</section></main>`:'<main class="workspace-startup" aria-busy="true"><span class="startup-spinner" aria-hidden="true"></span><span class="sr-only" role="status">Loading your AP workspace</span></main>';
     return;
   }
   const priorMain = app.querySelector('.main');

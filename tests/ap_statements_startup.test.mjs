@@ -5,12 +5,21 @@ import vm from 'node:vm';
 import {createSharedWorkspace} from '../app/ap_statements/frontend/shared-workspace.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
 
+test('pre-module startup uses the same circle-only loading screen',()=>{
+  const html=readFileSync(new URL('../app/ap_statements/frontend/index.html',import.meta.url),'utf8');
+  const startup=html.slice(html.indexOf('<div id="app">'),html.indexOf('<div id="overlay-root">'));
+  assert.match(startup,/startup-spinner/);
+  assert.match(startup,/role="status"/);
+  assert.doesNotMatch(startup,/<h1|startup-card|eyebrow/);
+});
+
 test('startup renders only a busy screen, not empty metrics or missing BILL prompts',()=>{
   const app={innerHTML:'',querySelector:()=>null};
   const context={app,shared:undefined,sharedError:null,state:{view:'statements'},esc:String,backButtonHtml:()=>'',icon:()=>'',stats(){throw Error('Unloaded dashboard must not be evaluated');}};
   vm.runInNewContext(source.slice(source.indexOf('function render()'),source.indexOf('function guidePanel()')),context);
   assert.doesNotThrow(()=>context.render());assert.match(app.innerHTML,/aria-busy="true"/);assert.match(app.innerHTML,/Loading your AP workspace/);
   assert.doesNotMatch(app.innerHTML,/No BILL data|Add your BILL|Statements uploaded/);
+  assert.doesNotMatch(app.innerHTML,/<h1|startup-card|brand-icon|<button/,'Loading uses only a circle and screen-reader status, not a card or menu.');
   context.sharedError=Error('offline');context.render();assert.match(app.innerHTML,/retry-shared/);assert.doesNotMatch(app.innerHTML,/aria-busy="true"/);
 });
 

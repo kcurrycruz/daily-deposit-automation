@@ -9,6 +9,7 @@ from typing import MutableMapping
 
 
 ACTIVE_PROGRAM_KEY = "active_finance_program"
+PROGRAM_OPENING_KEY = "_finance_program_opening"
 DAILY_DEPOSITS = "daily_deposits"
 AP_STATEMENTS = "ap_statements"
 SIDEBAR_COLLAPSE_REQUEST_KEY = "_collapse_navigation_sidebar"
@@ -87,7 +88,7 @@ def program_card_html(program: ProgramDefinition) -> str:
     return (
         f'<section class="hwfc-program-card {state_class}">'
         f'<div class="hwfc-program-card-top"><span class="hwfc-program-icon tone-{tone}">'
-        '<svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8"'
+        '<svg width="34" height="34" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8"'
         f' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{icon_path}</svg>'
         f'</span><span class="hwfc-program-status">{status}</span></div>'
         f'<h2 class="hwfc-program-card-title">{escape(program.title)}</h2>'
@@ -145,6 +146,8 @@ def render_program_hub(ui) -> str | None:
                 key=f"open_program_{program.key}",
                 disabled=not program.enabled,
                 use_container_width=True,
+                on_click=activate_program if program.enabled else None,
+                args=(ui.session_state, program.key) if program.enabled else None,
             ) and program.enabled:
                 selected_key = program.key
     ui.markdown(
@@ -182,8 +185,21 @@ def activate_program(
     if normalized_key is None:
         return False
     state[ACTIVE_PROGRAM_KEY] = normalized_key
+    state[PROGRAM_OPENING_KEY] = normalized_key
     state[SIDEBAR_COLLAPSE_REQUEST_KEY] = True
     return True
+
+
+def render_program_transition(ui) -> None:
+    """Mask only menu-to-program runs; never leave a mask over a stopped app."""
+    requested = normalize_program_selection(ui.session_state.pop(PROGRAM_OPENING_KEY, None))
+    active = normalize_program_selection(ui.session_state.get(ACTIVE_PROGRAM_KEY))
+    opening = ' data-program-opening="true"' if requested and requested == active else ''
+    styles = Path(__file__).with_name('program_transition.css').read_text(encoding='utf-8')
+    ui.markdown(
+        f'<style>{styles}</style><span id="hwfc-program-loader" role="status"{opening}>'
+        'Loading application</span>', unsafe_allow_html=True,
+    )
 
 
 def _is_daily_widget_value(key: object) -> bool:
@@ -436,3 +452,4 @@ def clear_daily_uploads(state: MutableMapping[str, object]) -> None:
 def return_to_program_hub(state: MutableMapping[str, object]) -> None:
     """Clear the active program while preserving all other state."""
     state.pop(ACTIVE_PROGRAM_KEY, None)
+    state.pop(PROGRAM_OPENING_KEY, None)

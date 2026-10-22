@@ -45,6 +45,7 @@ class RecordingColumn:
 
 class RecordingProgramHubUi(RecordingColumn):
     def __init__(self, clicked_keys=()):
+        self.session_state = {}
         self.clicked_keys = set(clicked_keys)
         self.flow = []
         self.markdown_calls = []
@@ -60,6 +61,51 @@ class RecordingProgramHubUi(RecordingColumn):
 
 
 class ProgramHubStateTests(unittest.TestCase):
+    def test_program_callback_selects_route_before_the_next_render(self):
+        from app.program_hub_ui import ACTIVE_PROGRAM_KEY, render_program_hub
+
+        for key in ('daily_deposits', 'ap_statements'):
+            with self.subTest(program=key):
+                ui = RecordingProgramHubUi()
+                ui.session_state['run_result'] = {'retained': True}
+                render_program_hub(ui)
+                options = next(options for _, _, options in ui.button_calls
+                               if options['key'] == 'open_program_' + key)
+                callback = options.get('on_click')
+                self.assertTrue(callable(callback), 'Selection must happen in the button callback, before rendering the menu again.')
+                callback(*options.get('args', ()))
+                self.assertEqual(ui.session_state[ACTIVE_PROGRAM_KEY], key)
+                self.assertEqual(ui.session_state['run_result'], {'retained': True})
+
+    def test_transition_marker_is_consumed_once_and_does_not_clear_work(self):
+        import app.program_hub_ui as hub
+
+        self.assertTrue(callable(getattr(hub, 'render_program_transition', None)), 'The routing transition renderer must exist.')
+        ui = RecordingProgramHubUi()
+        ui.session_state['run_result'] = {'retained': True}
+        hub.activate_program(ui.session_state, hub.DAILY_DEPOSITS)
+        hub.render_program_transition(ui)
+        first = ui.markdown_calls[-1][1]
+        parsed = CardMarkupParser(); parsed.feed(first)
+        loader = next(attrs for _, attrs in parsed.elements if attrs.get('id') == 'hwfc-program-loader')
+        self.assertIn('data-program-opening', loader)
+        self.assertEqual(loader['role'], 'status')
+        self.assertEqual(ui.session_state[hub.ACTIVE_PROGRAM_KEY], hub.DAILY_DEPOSITS)
+        self.assertEqual(ui.session_state['run_result'], {'retained': True})
+        hub.render_program_transition(ui)
+        parsed = CardMarkupParser(); parsed.feed(ui.markdown_calls[-1][1])
+        loader = next(attrs for _, attrs in parsed.elements if attrs.get('id') == 'hwfc-program-loader')
+        self.assertNotIn('data-program-opening', loader)
+
+    def test_card_icons_have_bounded_dimensions_even_without_styles(self):
+        from app.program_hub_ui import PROGRAMS, program_card_html
+
+        for program in PROGRAMS:
+            parsed = CardMarkupParser(); parsed.feed(program_card_html(program))
+            svg = next(attrs for tag, attrs in parsed.elements if tag == 'svg')
+            self.assertEqual(svg.get('width'), '34')
+            self.assertEqual(svg.get('height'), '34')
+
     def test_daily_and_ap_enabled_in_required_order(self):
         from app.program_hub_ui import PROGRAMS
 

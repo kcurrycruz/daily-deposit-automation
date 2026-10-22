@@ -1,0 +1,37 @@
+/* The mask is CSS-driven so even stale menu frames are covered immediately.
+   Streamlit's observed run/connection attributes release it on stop or failure. */
+#hwfc-program-loader { display: none; }
+.stApp[data-test-script-state="running"][data-test-connection-state="CONNECTED"]:is(:has(.hwfc-hub-hero), :has([data-testid="stElementContainer"][data-stale="false"] [data-program-opening]))::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: #fff;
+}
+.stApp[data-test-script-state="running"][data-test-connection-state="CONNECTED"]:is(:has(.hwfc-hub-hero), :has([data-testid="stElementContainer"][data-stale="false"] [data-program-opening]))::after {
+    content: "";
+    position: fixed;
+    top: calc(50dvh - 16px);
+    left: calc(50% - 16px);
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    border: 3px solid #e1e8e0;
+    border-top-color: #205845;
+    border-radius: 50%;
+    z-index: 10001;
+    animation: hwfc-program-spin .8s linear infinite;
+}
+.stApp[data-test-script-state="running"][data-test-connection-state="CONNECTED"]:is(:has(.hwfc-hub-hero), :has([data-testid="stElementContainer"][data-stale="false"] [data-program-opening])) #hwfc-program-loader {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+@keyframes hwfc-program-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .stApp::after { animation: none !important; }
+}

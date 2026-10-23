@@ -1,5 +1,6 @@
 import {money,invoiceKey,statuses} from './core.mjs';
 import {adventureAmountDiscrepancy} from './adventure-reference.mjs';
+import {manualCheckFor} from './manual-review.mjs';
 export {adventureAmountDiscrepancy} from './adventure-reference.mjs';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const canonical=value=>JSON.stringify(Object.fromEntries(Object.entries(value||{}).sort(([a],[b])=>a.localeCompare(b))));
@@ -29,7 +30,8 @@ export function confirmedInvoiceCandidate(row,resolution){
 }
 export function invoiceResult(row,resolution){
   const manual=!!confirmedInvoiceCandidate(row,resolution),automatic=['matched','presence'].includes(row.status);
-  return {found:manual||automatic,manual,label:manual?'Invoice found':adventureAmountDiscrepancy(row)?'Amount discrepancy':statuses[row.status]?.label||row.status,tone:manual||automatic?'green':statuses[row.status]?.tone||'amber'};
+  const checkedManually=!!manualCheckFor(row,resolution);
+  return {found:manual||automatic,manual,checkedManually,label:checkedManually?'Checked manually in BILL':manual?'Invoice found':adventureAmountDiscrepancy(row)?'Amount discrepancy':statuses[row.status]?.label||row.status,tone:checkedManually?(resolution.decision==='Reviewed — no action needed'?'green':'amber'):manual||automatic?'green':statuses[row.status]?.tone||'amber'};
 }
 export function reviewDecisionOptions(row){
   const options=['Follow up with vendor','Request missing invoice','Check payment timing','Check credit application','Investigate amount difference','Reviewed — no action needed'];

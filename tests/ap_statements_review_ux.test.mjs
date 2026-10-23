@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {groupInvoices,totals,reconcile} from '../app/ap_statements/frontend/core.mjs';
 import * as history from '../app/ap_statements/frontend/history-browser.mjs';
 import {uploadReviewHTML,statementOverviewHTML,vendorQuestionHTML} from '../app/ap_statements/frontend/simple-flow-view.mjs';
 const pickerModule=await import('../app/ap_statements/frontend/vendor-picker.mjs').catch(()=>null);
@@ -45,6 +46,54 @@ test('every invoice row is clickable and keyboard reachable, not only its refere
   const html=statementOverviewHTML({confirmed:true,rows:[],declaredTotal:0},[row]);
   assert.match(html,/<tr[^>]*data-action="select-invoice"[^>]*data-id="r"[^>]*tabindex="0"/);
   assert.match(html,/<button[^>]*data-action="select-invoice"[^>]*>271712<\/button>/);
+});
+
+const aceCreditStatement=()=>({id:'ace-doc',vendor:'Ace Endico',layout:'ace',confirmed:true,declaredTotal:318055,
+  rows:[
+    {id:'credit-a',type:'credit',invoiceNumber:'V09651-0A',amount:-1845,balance:-1845,page:1,confidence:99},
+    {id:'invoice-a',type:'invoice',invoiceNumber:'V09651-00',amount:256897,balance:255052,page:1,confidence:99},
+    {id:'credit-b',type:'credit',invoiceNumber:'V18221-0A',amount:-8437,balance:-8437,page:1,confidence:99},
+    {id:'invoice-b',type:'invoice',invoiceNumber:'V18221-00',amount:71440,balance:63003,page:1,confidence:99}
+  ]});
+const aceCreditResults=doc=>reconcile(doc,{loaded:true,records:[
+  {id:'bill-a',vendor:'Ace Endico',invoiceNumber:'V09651-00',amount:256897,comparisonScope:'invoice-only',status:'PaidInFull'},
+  {id:'bill-b',vendor:'Ace Endico',invoiceNumber:'V18221-00',amount:71440,comparisonScope:'invoice-only',status:'PaidInFull'}
+]});
+
+test('Ace statement credits remain visible below their parent invoice with unverified credit status',()=>{
+  const doc=aceCreditStatement(),rows=aceCreditResults(doc),html=statementOverviewHTML(doc,rows);
+  const credits=[...html.matchAll(/<tr[^>]*class="linked-credit-row"[\s\S]*?<\/tr>/g)].map(match=>match[0]);
+  assert.equal(credits.length,2);
+  assert.match(credits[0],/V09651-0A/);assert.match(credits[0],/-\$18\.45/);
+  assert.match(credits[1],/V18221-0A/);assert.match(credits[1],/-\$84\.37/);
+  for(const [index,parent] of ['invoice-a','invoice-b'].entries()){
+    assert.match(credits[index],/Credit not verified/);
+    assert.doesNotMatch(credits[index],/Invoice found|badge green/);
+    assert.ok(credits[index].includes(`data-action="select-invoice" data-id="${parent}"`));
+    assert.match(credits[index],/View invoice activity/);
+  }
+  assert.ok(html.indexOf('V09651-00')<html.indexOf('V09651-0A'));
+  assert.ok(html.indexOf('V18221-00')<html.indexOf('V18221-0A'));
+});
+
+test('showing linked credits never changes invoice counts, balances, totals or saved review evidence',()=>{
+  const doc=aceCreditStatement(),rows=aceCreditResults(doc),resolutions={'invoice-a':{decision:'Reviewed — no action needed',at:'2026-10-23T12:00:00Z'}},before=JSON.stringify({doc,rows,resolutions});
+  const html=statementOverviewHTML(doc,rows,false,resolutions);
+  assert.match(html,/2 found in BILL · 0 need attention/);
+  assert.match(html,/2 linked statement credits/);
+  assert.match(html,/credits are not verified by an invoice match/i);
+  assert.equal(groupInvoices(doc).length,2);
+  assert.deepEqual(rows.map(row=>row.outstanding),[255052,63003]);
+  assert.equal(totals(doc).sum,318055);assert.equal(totals(doc).difference,0);
+  assert.equal(JSON.stringify({doc,rows,resolutions}),before);
+});
+
+test('standalone Ace credits are not duplicated as linked credit lines',()=>{
+  const doc=aceCreditStatement();doc.rows=[doc.rows[0]];
+  const rows=aceCreditResults(doc),html=statementOverviewHTML(doc,rows);
+  assert.equal(rows.length,1);assert.equal(rows[0].kind,'credit');
+  assert.doesNotMatch(html,/class="linked-credit-row"/);
+  assert.equal((html.match(/<tr data-action="select-invoice"/g)||[]).length,1);
 });
 test('default attention selection opens its source page without resetting deliberate navigation',()=>{
   const block=app.slice(app.indexOf('if (row && !state.selectedRow)'),app.indexOf('const warnings = [...doc.warnings]'));

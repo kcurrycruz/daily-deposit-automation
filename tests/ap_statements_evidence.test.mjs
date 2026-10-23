@@ -12,6 +12,7 @@ const bill=(invoiceNumber,id=invoiceNumber)=>({id,vendor:'Example Supplier',invo
 function render(row,statement=doc(),resolution=null){
   const context={...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row,resolution).label,docDetail:()=>null,defaultReviewDecision,reviewDecision:()=>resolution,money,esc,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:resolution?{[row.id]:resolution}:{}},statuses};
   vm.runInNewContext(source.slice(source.indexOf('function reportedMoney('),source.indexOf('function toast(')),context);
+  vm.runInNewContext(source.slice(source.indexOf('function creditExportLimitationHTML('),source.indexOf('function connectionPanel(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   return context.reviewView(statement,row,[row],false);
 }

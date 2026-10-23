@@ -11,6 +11,7 @@ const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import
 
 test('clear reference matches preselect no action without creating a saved review',()=>{
   const resolutions={},context={...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,billEvidence:()=>[],reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function creditExportLimitationHTML('),source.indexOf('function connectionPanel(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const row={id:'r',status:'presence',matchMethod:'reference',candidates:[{vendor:'Alpha',invoiceNumber:'00042',amount:18400}],activity:[]};
   const html=context.reviewView({confirmed:true},row,[row]);
@@ -77,6 +78,7 @@ test('inline vendor confirmation refuses to discard unsaved edits',async()=>{
 
 test('preliminary results cannot invite saved review decisions before the PDF is confirmed',()=>{
   const context={shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function creditExportLimitationHTML('),source.indexOf('function connectionPanel(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const doc={confirmed:false},row={id:'r',status:'presence',candidates:[],activity:[]};
   assert.doesNotMatch(context.reviewView(doc,row,[row]),/data-action="resolve"|id="review-note"/);
@@ -85,6 +87,7 @@ test('preliminary results cannot invite saved review decisions before the PDF is
 
 test('invoice details can render beneath the overview without duplicating the original PDF',()=>{
   let previews=0;const context={shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,docDetail:()=>null,defaultReviewDecision:simpleFlow.defaultReviewDecision,reviewDecision:()=>null,money:String,esc:String,icon:()=>'',badge:()=>'',pdfPanel:()=>{previews++;return '<canvas></canvas>';},state:{provider:{loaded:true},resolutions:{}},statuses:{presence:{label:'Invoice found'}}};
+  vm.runInNewContext(source.slice(source.indexOf('function creditExportLimitationHTML('),source.indexOf('function connectionPanel(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const row={id:'r',status:'presence',candidates:[],activity:[]};
   context.reviewView({confirmed:true},row,[row],false);assert.equal(previews,0);

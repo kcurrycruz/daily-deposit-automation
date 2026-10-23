@@ -152,6 +152,7 @@ test('Adventure discrepancy UI offers credit and additional-bill follow-up witho
   const context={...review,defaultReviewDecision,money,statuses,esc:String,icon:()=>'',resultBadge:()=>review.invoiceResult(row).label,
     docDetail:()=>null,reviewDecision:()=>null,pdfPanel:()=>'',state:{provider:{loaded:true},resolutions:{}}};
   vm.runInNewContext(source.slice(source.indexOf('function reportedMoney('),source.indexOf('function toast(')),context);
+  vm.runInNewContext(source.slice(source.indexOf('function creditExportLimitationHTML('),source.indexOf('function connectionPanel(')),context);
   vm.runInNewContext(source.slice(source.indexOf('function reviewView('),source.indexOf('function notesView(')),context);
   const html=context.reviewView(doc(),row,[row],false);
   assert.match(html,/Amount discrepancy/);assert.match(html,/Request vendor credit/);assert.match(html,/Additional bill needed/);

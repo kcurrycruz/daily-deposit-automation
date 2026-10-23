@@ -278,6 +278,41 @@ test('BILL data explains the disconnected API and CSV comparison limits',()=>{
   assert.match(app.nodes['#app'].innerHTML,/QuickBooks sync/);
 });
 
+test('BILL data exposes the credit export limitation even before an export is uploaded',()=>{
+  const app=browserApp();app.state.view='connection';const before=JSON.stringify(app.state);
+  app.context.render();const html=app.nodes['#app'].innerHTML;
+  assert.match(html,/aria-label="Credit export limitation"/);
+  assert.match(html,/individual vendor credits/);
+  assert.match(html,/Credits Applied/);
+  assert.equal(JSON.stringify(app.state),before);
+});
+
+test('native credit results explain export coverage in the queue and selected detail without changing evidence',()=>{
+  const data=realSession();data.resolutions={};
+  Object.assign(data.statements[0].rows[0],{type:'credit',invoiceNumber:'CREDIT-001',amount:-7450});
+  const app=browserApp(data);app.state.view='exceptions';app.state.filter='attention';
+  const before=JSON.stringify(app.state),rows=vm.runInNewContext('results()',app.context),row=rows[0];
+  assert.equal(row.status,'missing');
+  app.context.render();
+  assert.match(app.nodes['#app'].innerHTML,/aria-label="Credit export limitation"/);
+  const detail=app.context.reviewView(app.state.statements[0],row,rows,false);
+  assert.match(detail,/aria-label="Credit export limitation"/);
+  assert.match(detail,/not proof that .* missing from BILL/);
+  assert.match(detail,/Check credits directly in BILL/);
+  assert.equal(JSON.stringify(app.state),before);
+  assert.equal(vm.runInNewContext('results()[0].status',app.context),'missing');
+  assert.equal(Object.keys(app.state.resolutions).length,0);
+});
+
+test('credit export notices do not clutter invoice-only queues or a credit-capable template source',()=>{
+  const app=browserApp(realSession());app.state.view='exceptions';app.context.render();
+  assert.doesNotMatch(app.nodes['#app'].innerHTML,/aria-label="Credit export limitation"/);
+  app.state.provider.sourceFormat='template';
+  Object.assign(app.state.statements[0].rows[0],{type:'credit',amount:-7450});
+  app.context.render();
+  assert.doesNotMatch(app.nodes['#app'].innerHTML,/aria-label="Credit export limitation"/);
+});
+
 test('statement and exception workspaces keep API status notices inside BILL data',()=>{
   const app=browserApp(realSession());
   for(const view of ['statements','exceptions','history']){

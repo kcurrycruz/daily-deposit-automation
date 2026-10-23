@@ -42,6 +42,10 @@ html body{background:#fff}.main{background:#fff}
 .statement-overview-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px}
 .statement-overview h3{font:700 16px 'Manrope',sans-serif;margin:0}.statement-overview p{font-size:12px;color:#647460;margin:7px 0 0;line-height:1.7}
 .statement-overview .notice{margin:0 18px 18px}.statement-overview .invoice-link{color:#205845;font-weight:650;border-bottom:1px solid #b6c9ac;padding:0}
+.statement-overview .linked-credit-row{background:#f7f9f5;cursor:default}
+.statement-overview .linked-credit-row td:first-child{padding-left:36px}
+.linked-credit-row small{display:block;margin-top:5px;color:#6d7e69;font-size:10px;line-height:1.5}
+.linked-credit-row .mini-link{display:block;margin-top:7px;text-align:left;white-space:normal}
 .statement-overview td small{font-size:10px;color:#86662c}.muted{color:#687864}
 .result-overview-layout{margin:0 0 24px;align-items:start}.invoice-details{margin:20px 0 24px;border:1px solid var(--line);border-radius:9px;padding:16px}.invoice-details>summary{font-size:13px;font-weight:650;color:#205845;cursor:pointer;margin-bottom:4px}.invoice-details[open]>summary{margin-bottom:18px}.invoice-review-detail{margin-top:18px}
 @media(max-width:800px){.bill-data-strip{flex-direction:column;align-items:flex-start;padding:16px}.statement-overview-heading{align-items:flex-start;flex-direction:column}.upload-review-start .dropzone{padding:16px}.top-actions{flex-wrap:wrap}.topbar{height:auto;min-height:56px;padding-top:8px;padding-bottom:8px}}

@@ -133,7 +133,7 @@ def validate_request(value: object) -> JsonObject:
     return out
 
 def validate_resolution(value: object) -> JsonObject:
-    out=allowed(value,'note decision at confirmedMatch')
+    out=allowed(value,'note decision at confirmedMatch manualCheck')
     out.setdefault('note','')
     text(out['note'],maximum=16384)
     if 'decision' in out and (type(out['decision']) is not str or out['decision'] not in DECISIONS): raise ApValidationError('Choose a valid review decision.')
@@ -144,12 +144,21 @@ def validate_resolution(value: object) -> JsonObject:
         integer(proof['statementAmount'])
         proof['candidate']=validate_record(proof['candidate'])
         out['confirmedMatch']=proof
+    if 'manualCheck' in out:
+        proof=allowed(out['manualCheck'],'vendor reference amount kind initials','vendor reference amount kind initials')
+        text(proof['vendor'],maximum=1024,blank=False)
+        text(proof['reference'],maximum=256)
+        integer(proof['amount'])
+        if proof['kind'] not in ('invoice','credit','payment','opening'):raise ApValidationError('Invalid manual-check kind.')
+        proof['initials']=normalize_initials(proof['initials'])
+        out['manualCheck']=proof
     return out
 
 def validate_statement(value: object) -> JsonObject:
-    keys='id vendor filename layout statementDate declaredTotal openingBalance confirmed demo pageCount ocr notes assignee createdAt fileSize fileModified rawText rows warnings'
+    keys='id vendor filename layout statementDate declaredTotal openingBalance confirmed demo pageCount ocr notes assignee createdAt fileSize fileModified rawText rows warnings reviewMode'
     out=allowed(value,keys,'id vendor filename rows warnings confirmed pageCount')
     out['id']=require_uuid(out['id'])
+    if 'reviewMode' in out and out['reviewMode'] not in ('manual','latest'):raise ApValidationError('Invalid review mode.')
     for key in ('vendor','filename'):
         text(out[key],maximum=1024,blank=False)
     for key in ('layout','notes','assignee','createdAt'):

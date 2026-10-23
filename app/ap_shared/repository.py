@@ -112,11 +112,25 @@ class ApRepository:
             offset+=PAGE_SIZE
         capabilities={'billSnapshots':2} if 'import_version' in home else {}
         if home.get('duplicate_schema_version')==1: capabilities['duplicateBills']=1
+        if home.get('rereview_schema_version')==1: capabilities['statementRereview']=1
         return {'activeImport':active,'capabilities':capabilities,
                 'importVersion':home.get('import_version'),
                 'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},
                 'mappingVersions':{r['vendor']:r['version'] for r in mapping_rows},'statements':statements,
                 'nextCursor':items[-1]['id'] if len(items)==limit else None}
+
+    @safe_backend
+    def rereview_enabled(self,workspace_id):
+        self._workspace(workspace_id);self._private_bucket()
+        home=self._one(self.client.table('ap_workspaces').select('*').eq('id',workspace_id))
+        return home.get('rereview_schema_version')==1
+
+    @safe_backend
+    def revision_for_save(self,workspace_id,statement_id,version):
+        self._workspace(workspace_id);self._private_bucket();require_uuid(statement_id);integer(version,minimum=1)
+        row=self._one(self._table('ap_statement_revisions').eq('statement_id',statement_id).eq('version',version))
+        return {'doc':row['doc'],'results':row['results'],'resolutions':row['resolutions'],
+                'importId':row['import_id'],'mappingSnapshot':row['mapping_snapshot'],'ruleVersion':row['rule_version']}
 
     @safe_backend
     def records_page(self,workspace_id,import_id,after_ordinal=-1,limit=PAGE_SIZE):

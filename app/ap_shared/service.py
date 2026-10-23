@@ -63,6 +63,32 @@ class ApService:
             output.append(out)
         return output
 
+    def _manual_evidence(self,data,authorization):
+        manual=data['doc'].get('reviewMode')=='manual'
+        if not manual and not any('manualCheck' in r for r in data['resolutions'].values()):return False
+        self._check(authorization)
+        if not manual or not self.repository.rereview_enabled(self.config.workspace_id):
+            raise ApValidationError('Manual review is unavailable. Reload the workspace.')
+        # Read the immutable expected revision, not a newer head: an acknowledged
+        # save may be retried after this or another session has advanced the head.
+        prior=self.repository.revision_for_save(self.config.workspace_id,data['statement_id'],data['expected_version'])
+        financial=lambda doc:{k:v for k,v in doc.items() if k not in ('notes','assignee','reviewMode')}
+        if (prior['doc'].get('reviewMode')!='manual' or financial(prior['doc'])!=financial(data['doc']) or
+            prior['results']!=data['results'] or prior['importId']!=data['import_id'] or
+            prior['mappingSnapshot']!=data['mapping_snapshot'] or prior['ruleVersion']!=data['rule_version']):
+            raise ApValidationError('Manual review must retain its saved comparison evidence. Recheck with latest BILL data before changing financial rows.')
+        for row_id,resolution in data['resolutions'].items():
+            proof=resolution.get('manualCheck')
+            if proof is None:continue
+            rows=[r for r in data['results'] if r['id']==row_id]
+            if len(rows)!=1 or 'decision' not in resolution:raise ApValidationError('Choose an item and review decision for the manual check.')
+            row=rows[0]
+            expected={'vendor':row.get('vendor',data['doc']['vendor']),'reference':row.get('invoiceNumber',''),
+                      'amount':row.get('originalAmount'),'kind':row.get('kind','invoice')}
+            if any(proof[key]!=value for key,value in expected.items()):
+                raise ApValidationError('The manual check no longer agrees with the statement item.')
+        return True
+
     def handle(self,action:str,payload:JsonObject,request_id:str,authorization:Authorization) -> JsonObject:
         require_uuid(request_id); self._check(authorization)
         workspace=self.config.workspace_id
@@ -210,7 +236,8 @@ class ApService:
                     row['candidates'].count(bill)!=1 or bill.get('sourceIssues') or
                     bill.get('currency') not in (None,'','USD') or bill.get('kind','invoice')!='invoice'):
                     raise ApValidationError('Check the PDF and choose a valid candidate from this invoice comparison before confirming.')
-            if data['rule_version']!=RULE_VERSION: raise ApValidationError('Reload the app before saving comparisons from a different rule version.')
+            manual=self._manual_evidence(data,authorization)
+            if not manual and data['rule_version']!=RULE_VERSION: raise ApValidationError('Reload the app before saving comparisons from a different rule version.')
             return self._tx('save_revision',data,request_id,authorization)
         if action=='save_mapping':
             data=allowed(payload,'vendor bill_vendor expected_version','vendor bill_vendor expected_version')
@@ -218,10 +245,13 @@ class ApService:
             integer(data['expected_version'],minimum=0)
             return self._tx('save_mapping',data,request_id,authorization)
         if action in ('complete_revision','reopen_statement','archive_statement'):
-            keys='statement_id expected_version initials notes' if action=='complete_revision' else 'statement_id expected_version'
+            keys='statement_id expected_version initials notes' if action=='complete_revision' else 'statement_id expected_version review_mode' if action=='reopen_statement' else 'statement_id expected_version'
             data=allowed(payload,keys,'statement_id expected_version'); require_uuid(data['statement_id']); integer(data['expected_version'],minimum=1)
             if action=='complete_revision':
                 data['initials']=normalize_initials(data.get('initials','')); data['notes']=text(data.get('notes',''),maximum=16384)
+            if action=='reopen_statement' and 'review_mode' in data:
+                if data['review_mode'] not in ('manual','latest') or not self.repository.rereview_enabled(workspace):
+                    raise ApValidationError('Statement re-review setup is unavailable. Reload the workspace.')
             return self._tx(action,data,request_id,authorization)
         if action=='migrate_legacy':
             data=allowed(payload,'confirmed statements','confirmed statements')

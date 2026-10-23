@@ -17,7 +17,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   const localFiles=new Map(),preparations=new Map();let disposed=false,loaded=false;
   let comparison=null,adoption=0,sourceUnavailableError=null;
   let foreground=0,externalBusy=false;
-  const duplicates=createDuplicateBills(client,{onChange:()=>{if(loaded&&!disposed)onState(state);}});
+  const duplicates=createDuplicateBills(client,{onChange:()=>{if(loaded&&!disposed)onState(state,{reason:'duplicates'});}});
   const updateDuplicateBusy=()=>duplicates.setBusy(foreground>0||externalBusy);
   async function inForeground(work){foreground++;updateDuplicateBusy();try{return await work();}finally{foreground--;updateDuplicateBusy();}}
   function check(){if(disposed)throw Error('AP is locked.');}

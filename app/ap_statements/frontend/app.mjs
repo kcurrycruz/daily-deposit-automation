@@ -93,13 +93,16 @@ function sharedStatus(status,error){
   });
   document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
 }
-function receiveShared(snapshot){
+function receiveShared(snapshot,change={}){
   if(snapshot.accessDenied){historyPreview?.hide(true);files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
   const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
   if(sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;duplicateSourceKey=sourceKey;}
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();
   const drawer=overlay.querySelector('.drawer');
-  if(state.selected&&!dirty.has(state.selected)&&drawer){
+  // Scan progress only changes navigation. Rebuilding the drawer here destroys
+  // its PDF canvas and repeatedly restarts the private-original request.
+  const duplicateOnly=change.reason==='duplicates'&&shared?.duplicates?.state.phase!=='locked';
+  if(!duplicateOnly&&state.selected&&!dirty.has(state.selected)&&drawer){
     const top=drawer.scrollTop,focused=drawer.contains?.(document.activeElement)?document.activeElement:null;
     const focusId=focused?.id,action=focused?.dataset?.action,item=focused?.dataset?.id;
     renderDrawer();const replacement=overlay.querySelector('.drawer');if(replacement)replacement.scrollTop=top;

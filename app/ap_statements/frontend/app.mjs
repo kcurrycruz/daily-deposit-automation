@@ -93,15 +93,31 @@ function sharedStatus(status,error){
   });
   document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
 }
+function renderDuplicateUpdate(){
+  const nav=document.querySelector('#duplicate-nav-slot');
+  const navHTML=duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'});
+  if(nav&&nav.innerHTML!==navHTML)nav.innerHTML=navHTML;
+  if(state.view!=='duplicates')return;
+  const slot=document.querySelector('#duplicate-view-slot');if(!slot)return;
+  const html=duplicateViewHTML(duplicateStateForView());if(slot.innerHTML===html)return;
+  const main=app.querySelector('.main'),top=main?.scrollTop;
+  const focused=document.activeElement;
+  const focus=focused?.id?.startsWith('duplicate-')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  slot.innerHTML=html;
+  if(main)main.scrollTop=top;
+  if(focus){const input=document.querySelector('#'+focus.id);input?.focus({preventScroll:true});if(typeof focus.start==='number')input?.setSelectionRange?.(focus.start,focus.end);}
+}
 function receiveShared(snapshot,change={}){
   if(snapshot.accessDenied){historyPreview?.hide(true);files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
   const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
+  const duplicateOnly=change.reason==='duplicates'&&!snapshot.accessDenied&&shared?.state?.ready&&sourceKey===duplicateSourceKey&&shared?.duplicates?.state.phase!=='locked';
   if(sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;duplicateSourceKey=sourceKey;}
-  state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();
+  state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;
+  if(duplicateOnly){renderDuplicateUpdate();return;}
+  render();
   const drawer=overlay.querySelector('.drawer');
   // Scan progress only changes navigation. Rebuilding the drawer here destroys
   // its PDF canvas and repeatedly restarts the private-original request.
-  const duplicateOnly=change.reason==='duplicates'&&shared?.duplicates?.state.phase!=='locked';
   if(!duplicateOnly&&state.selected&&!dirty.has(state.selected)&&drawer){
     const top=drawer.scrollTop,focused=drawer.contains?.(document.activeElement)?document.activeElement:null;
     const focusId=focused?.id,action=focused?.dataset?.action,item=focused?.dataset?.id;
@@ -253,6 +269,10 @@ function render() {
   const title = { duplicates:'Duplicate bills', statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
   const subtitle = { duplicates:'Review possible duplicate bills in your current saved export. Nothing is changed in BILL.', statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
   app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}${duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'})}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${state.view==='duplicates'?duplicateViewHTML(duplicateStateForView()):billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : ''}</div></main></div>`;
+  const duplicateNav=app.querySelector('[data-action="duplicate-view"]');
+  if(duplicateNav){duplicateNav.insertAdjacentHTML('beforebegin','<div id="duplicate-nav-slot" style="display:contents"></div>');document.querySelector('#duplicate-nav-slot').append(duplicateNav);}
+  const duplicateView=app.querySelector('.duplicate-workspace');
+  if(duplicateView){duplicateView.insertAdjacentHTML('beforebegin','<div id="duplicate-view-slot"></div>');document.querySelector('#duplicate-view-slot').append(duplicateView);}
   bindDropzone();
   decorateSharedUi();
   const nextMain = app.querySelector('.main');

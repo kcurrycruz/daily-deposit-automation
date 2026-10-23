@@ -1,4 +1,5 @@
 // Duplicate checking owns no source data, statement decisions, or bridge lifetime.
+import {duplicateProgressPresentation} from './duplicate-progress.mjs';
 const defaultFilters=()=>({review:'unreviewed',classification:null,search:''});
 export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancelSchedule=clearTimeout,now=Date.now}={}){
  const state={source:null,phase:'disabled',progress:null,page:null,selection:null,detail:null,error:null,
@@ -13,7 +14,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   const p=state.progress;
   if(p&&['failed','restart_required','superseded'].includes(p.state))return;
   if(p?.state==='ready'&&p.projectionReady&&state.page&&(!state.selection||state.detail))return;
-  timer=schedule(()=>{timer=null;return tick();},p?.canStep===false?1000:10);
+  timer=schedule(()=>{timer=null;return tick();},p?.canStep===false||duplicateProgressPresentation(state,now()).kind==='interrupted'?1000:10);
  }
  function enqueue(job){
   const t=token;pending++;cancel();

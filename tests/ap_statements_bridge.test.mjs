@@ -18,6 +18,13 @@ test('never_sends_component_values', async () => {
   attach(sdk); attach(sdk); assert.equal(values, 0);
 });
 
+test('bridge marks startup ready once after installing its client and reply listener',async()=>{
+ const attach=await bridge(),target=new EventTarget();let ready=0;
+ const sdk={setComponentReady(){},setFrameHeight(){},setComponentValue(){},RENDER_EVENT:'render',events:new EventTarget()};
+ target.hwfcStartupWatchdog={markBridgeReady(){assert.ok(target.hwfcSharedClient);ready++;}};
+ attach(sdk,900,target);attach(sdk,900,target);assert.equal(ready,1);target.dispatchEvent(new Event('pagehide'));
+});
+
 test('only_explicit_exit_event_sends_navigation_without_event_detail', async () => {
   const attach = await bridge(), target = new EventTarget(), values = [];
   const sdk = { setComponentReady() {}, setFrameHeight() {}, setComponentValue(value) { values.push(value); } };

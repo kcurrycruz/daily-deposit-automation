@@ -56,3 +56,19 @@ test('access denial clears retained evidence even when tagged as a duplicate not
  assert.ok(hidden);assert.equal(files.size,0);assert.equal(f.context.historyPage.items.length,0);
  assert.equal(f.context.state.selected,null);assert.equal(f.context.overlay.innerHTML,'');
 });
+
+test('duplicate status preserves expanded diagnostics and keyboard focus on an action',()=>{
+ const f=fixture('duplicates'),diagnostic={open:true};let focused=false;
+ f.slot.querySelector=s=>s==='.duplicate-diagnostics'?diagnostic:s==='[data-action="duplicate-refresh"]'?{focus(){focused=true;}}:null;
+ Object.defineProperty(f.slot,'innerHTML',{get(){return '';},set(){diagnostic.open=false;}});
+ f.document.activeElement={dataset:{action:'duplicate-refresh'}};
+ f.context.receiveShared(snapshot(),{reason:'duplicates'});
+ assert.equal(diagnostic.open,true,'inspection must stay expanded during background progress');assert.ok(focused);
+});
+
+test('diagnostic summary keyboard focus survives a status patch',()=>{
+ const f=fixture('duplicates');let focused=false;
+ f.document.activeElement={tagName:'SUMMARY',closest:s=>s==='.duplicate-diagnostics'?{}:null};
+ f.slot.querySelector=s=>s==='.duplicate-diagnostics summary'?{focus(){focused=true;}}:null;
+ f.context.receiveShared(snapshot(),{reason:'duplicates'});assert.ok(focused);
+});

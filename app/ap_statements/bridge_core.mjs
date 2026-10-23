@@ -16,6 +16,7 @@ export function attachStreamlitBridge(sdk, height = 900, target = undefined) {
       const args=event.detail?.args||{};
       for(const listener of listeners)listener(args.shared_reply);
     });
+    target.hwfcStartupWatchdog?.markBridgeReady();
     target.dispatchEvent(new Event('hwfc:shared-ready'));
     target.addEventListener('pagehide',()=>client.dispose(),{once:true});
   }

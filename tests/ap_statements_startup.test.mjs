@@ -5,6 +5,41 @@ import vm from 'node:vm';
 import {createSharedWorkspace} from '../app/ap_statements/frontend/shared-workspace.mjs';
 const source=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
 
+function watchdogFixture(){
+ const timers=new Map(),events=new Map();let reloads=0,mode='loading';
+ const button={addEventListener(type,fn){this[type]=fn;}};
+ const app={innerHTML:'',querySelector:selector=>selector==='#ap-startup-reload'?button:mode==='loading'?{}:null};
+ const window={location:{reload(){reloads++;}},addEventListener:(name,fn)=>events.set(name,fn)};
+ const context={window,document:{querySelector:()=>app},setTimeout(fn,ms){timers.set(1,{fn,ms});return 1;},clearTimeout(id){timers.delete(id);}};
+ const path=new URL('../app/ap_statements/frontend/startup-watchdog.js',import.meta.url);
+ try{vm.runInNewContext(readFileSync(path,'utf8'),context);}catch(error){if(error.code!=='ENOENT')throw error;}
+ return {window,timers,events,app,button,get reloads(){return reloads;},set mode(value){mode=value;}};
+}
+
+test('missing app or bridge initialization produces a bounded manual recovery screen',()=>{
+ for(const signal of ['markAppReady','markBridgeReady']){
+  const f=watchdogFixture();assert.ok(f.window.hwfcStartupWatchdog,'independent startup guard must be installed');
+  f.window.hwfcStartupWatchdog[signal]();const timer=f.timers.get(1);assert.equal(timer.ms,20000);timer.fn();
+  assert.match(f.app.innerHTML,/could not connect/i);assert.match(f.app.innerHTML,/Reload/);assert.equal(f.reloads,0);
+  f.button.click();assert.equal(f.reloads,1);
+ }
+});
+
+test('successful initialization cancels watchdog without waiting for workspace data',()=>{
+ const f=watchdogFixture();assert.ok(f.window.hwfcStartupWatchdog);
+ f.window.hwfcStartupWatchdog.markAppReady();f.window.hwfcStartupWatchdog.markBridgeReady();
+ assert.equal(f.timers.size,0);assert.equal(f.app.innerHTML,'');
+});
+
+test('late startup signals, existing workspace errors and pagehide never trigger automatic reload',()=>{
+ for(const mode of ['workspace','error']){
+  const f=watchdogFixture();assert.ok(f.window.hwfcStartupWatchdog);f.mode=mode;f.app.innerHTML='Keep existing '+mode;
+  f.timers.get(1).fn();assert.equal(f.app.innerHTML,'Keep existing '+mode);
+  f.window.hwfcStartupWatchdog.markAppReady();f.window.hwfcStartupWatchdog.markBridgeReady();assert.equal(f.reloads,0);
+ }
+ const f=watchdogFixture();assert.ok(f.window.hwfcStartupWatchdog);f.events.get('pagehide')();assert.equal(f.timers.size,0);
+});
+
 test('pre-module startup uses the same circle-only loading screen',()=>{
   const html=readFileSync(new URL('../app/ap_statements/frontend/index.html',import.meta.url),'utf8');
   const startup=html.slice(html.indexOf('<div id="app">'),html.indexOf('<div id="overlay-root">'));
@@ -21,6 +56,12 @@ test('startup renders only a busy screen, not empty metrics or missing BILL prom
   assert.doesNotMatch(app.innerHTML,/No BILL data|Add your BILL|Statements uploaded/);
   assert.doesNotMatch(app.innerHTML,/<h1|startup-card|brand-icon|<button/,'Loading uses only a circle and screen-reader status, not a card or menu.');
   context.sharedError=Error('offline');context.render();assert.match(app.innerHTML,/retry-shared/);assert.doesNotMatch(app.innerHTML,/aria-busy="true"/);
+});
+
+test('access denial shows an unlock instruction instead of a permanent spinner',()=>{
+ const app={innerHTML:'',querySelector:()=>null},context={app,shared:{state:{ready:false,accessDenied:true},setDuplicateBusy(){}},billUpdating:false,saveState:'saved',sharedError:null,state:{view:'duplicates'},esc:String,backButtonHtml:()=>'<button>Go back to programs</button>',icon:()=>''};
+ vm.runInNewContext(source.slice(source.indexOf('function render()'),source.indexOf('function guidePanel()')),context);context.render();
+ assert.match(app.innerHTML,/session.*locked/i);assert.match(app.innerHTML,/unlock/i);assert.doesNotMatch(app.innerHTML,/aria-busy="true"|retry-shared/);
 });
 
 async function pendingFixture(){

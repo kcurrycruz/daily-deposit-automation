@@ -94,18 +94,21 @@ function sharedStatus(status,error){
   document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
 }
 function renderDuplicateUpdate(){
+  const focused=document.activeElement;
   const nav=document.querySelector('#duplicate-nav-slot');
   const navHTML=duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'});
   if(nav&&nav.innerHTML!==navHTML)nav.innerHTML=navHTML;
+  if(focused?.dataset?.action==='duplicate-view')nav?.querySelector?.('[data-action="duplicate-view"]')?.focus({preventScroll:true});
   if(state.view!=='duplicates')return;
   const slot=document.querySelector('#duplicate-view-slot');if(!slot)return;
   const html=duplicateViewHTML(duplicateStateForView());if(slot.innerHTML===html)return;
   const main=app.querySelector('.main'),top=main?.scrollTop;
-  const focused=document.activeElement;
-  const focus=focused?.id?.startsWith('duplicate-')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  const focus=focused?.id?.startsWith('duplicate-')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:focused?.dataset?.action?.startsWith('duplicate-')?{action:focused.dataset.action}:focused?.tagName==='SUMMARY'&&focused.closest?.('.duplicate-diagnostics')?{summary:true}:null;
+  const diagnosticsOpen=slot.querySelector?.('.duplicate-diagnostics')?.open;
   slot.innerHTML=html;
+  if(diagnosticsOpen){const details=slot.querySelector?.('.duplicate-diagnostics');if(details)details.open=true;}
   if(main)main.scrollTop=top;
-  if(focus){const input=document.querySelector('#'+focus.id);input?.focus({preventScroll:true});if(typeof focus.start==='number')input?.setSelectionRange?.(focus.start,focus.end);}
+  if(focus){const input=focus.id?document.querySelector('#'+focus.id):slot.querySelector?.(focus.summary?'.duplicate-diagnostics summary':`[data-action="${focus.action}"]`);input?.focus({preventScroll:true});if(typeof focus.start==='number')input?.setSelectionRange?.(focus.start,focus.end);}
 }
 function receiveShared(snapshot,change={}){
   if(snapshot.accessDenied){historyPreview?.hide(true);files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
@@ -257,6 +260,7 @@ function docSummary(doc) {
 function render() {
   shared?.setDuplicateBusy(state.busy||billUpdating||saveState==='saving');
   if(!shared?.state.ready){
+    if(shared?.state.accessDenied){app.innerHTML=`<main class="workspace-startup"><section class="startup-card" role="alert"><h1>Your AP session is locked</h1><p>Return to programs and unlock AP Statements again. Your saved data has not changed.</p>${backButtonHtml()}</section></main>`;return;}
     const failed=!!sharedError;
     app.innerHTML=failed?`<main class="workspace-startup"><section class="startup-card"><div class="brand-icon">${icon('ledger')}</div><div class="eyebrow">Statement Desk</div><h1>Your workspace could not load</h1><p>Your saved data has not changed. Check your connection and try again.</p><button class="button primary" data-action="retry-shared">Retry loading</button>${backButtonHtml()}</section></main>`:'<main class="workspace-startup" aria-busy="true"><span class="startup-spinner" aria-hidden="true"></span><span class="sr-only" role="status">Loading your AP workspace</span></main>';
     return;
@@ -841,5 +845,6 @@ document.addEventListener('keydown', e => {
   }
 });
 render();
+window.hwfcStartupWatchdog?.markAppReady();
 startShared();
 window.addEventListener('pagehide',()=>{duplicateDrafts.clear();duplicateSaveAttempt=null;clearTimeout(duplicateSearchTimer);},{once:true});

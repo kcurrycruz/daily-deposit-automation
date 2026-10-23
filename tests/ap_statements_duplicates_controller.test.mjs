@@ -7,11 +7,11 @@ const source={importId:crypto.randomUUID(),importVersion:1,capability:1};
 const key='a'.repeat(64),scanId=crypto.randomUUID(),generation=crypto.randomUUID();
 const progress=(changes={})=>({scanId,importId:source.importId,importVersion:1,generation,checkpoint:0,state:'running',phase:'reading',projectionReady:false,counts:null,canStep:true,...changes});
 function setup(handler,options={}){
- const calls=[],timers=new Map();let n=0,disposed=0;
+ const calls=[],timers=new Map(),delays=[];let n=0,disposed=0;
  const client={dispose(){disposed++;},async request(action,payload,options){calls.push({action,payload,options});return handler?handler(action,payload,options):action==='duplicate_ensure'?progress():action==='duplicate_step'?progress({state:'ready',checkpoint:1}):action==='duplicate_status'?progress({state:'ready',projectionReady:true,counts:{all:1,reviewed:0,unreviewed:1},reviewRevision:0}):action==='duplicate_findings_page'?{scanId,importId:source.importId,reviewRevision:0,total:1,counts:{all:1,reviewed:0,unreviewed:1},findings:[{key,review:null}],nextCursor:null}:{scanId,importId:source.importId,reviewRevision:0,members:[],finding:{key,review:null},nextCursor:null};}};
- const controller=createDuplicateBills(client,{schedule:fn=>{timers.set(++n,fn);return n;},cancelSchedule:id=>timers.delete(id),...options});
+ const controller=createDuplicateBills(client,{schedule:(fn,ms)=>{delays.push(ms);timers.set(++n,fn);return n;},cancelSchedule:id=>timers.delete(id),...options});
  async function flush(){const first=timers.entries().next().value;if(first){timers.delete(first[0]);await first[1]();}}
- return {controller,calls,timers,flush,client,get disposed(){return disposed;}};
+ return {controller,calls,timers,delays,flush,client,get disposed(){return disposed;}};
 }
 async function finish(h){for(let i=0;i<12&&!h.controller.state.page;i++)await h.flush();}
 
@@ -21,6 +21,13 @@ test('scan observations retain elapsed time until real advancement and reset on 
  time=110000;await h.flush();assert.equal(h.controller.state.observedAt,110000);assert.equal(h.controller.state.lastAdvanceAt,40000);
  checkpoint=1;time=120000;await h.flush();assert.equal(h.controller.state.lastAdvanceAt,120000);
  h.controller.adoptSource({...source,importVersion:2});assert.equal(h.controller.state.lastAdvanceAt,null);h.controller.dispose();
+});
+
+test('a stalled scan leaves an idle interval for manual refresh without automatically restarting',async()=>{
+ const h=setup(()=>progress({updatedAt:'2026-10-23T12:00:00Z',serverNow:'2026-10-23T12:02:00Z'}),{now:()=>200000});
+ h.controller.adoptSource(source);await h.flush();
+ assert.equal(h.delays.at(-1),1000);await h.flush();
+ assert.equal(h.calls.at(-1).payload.restart,false);h.controller.dispose();
 });
 
 test('a restored superseded source can explicitly restart instead of polling forever',async()=>{
@@ -170,4 +177,18 @@ test('shared workspace is ready while the duplicate service is still pending',as
  await new Promise(r=>setTimeout(r,25));assert.ok(calls.includes('duplicate_ensure'));
  release(progress({state:'failed',error:'duplicate_limit'}));await new Promise(r=>setTimeout(r,5));
  assert.equal(workspace.state.ready,true);assert.ok(!statuses.includes('not_saved'));workspace.dispose();
+});
+
+test('denied background scan locks the entire shared workspace instead of retaining statements',async()=>{
+ let disposed=0;const snapshots=[];
+ const workspace=createSharedWorkspace({dispose(){disposed++;},async request(action){
+  if(action==='bootstrap')return {activeImport:{id:source.importId,metadata:{sourceFormat:'bill-native'}},importVersion:1,capabilities:{duplicateBills:1},mappings:{},statements:[],nextCursor:null};
+  if(action==='records_page')return {importId:source.importId,recordCount:1,records:[{id:source.importId+':0',vendor:'Synthetic',invoiceNumber:'1',amount:100}],nextCursor:null};
+  throw Object.assign(Error('Access denied'),{code:'denied'});
+ }},{onState:s=>snapshots.push({ready:s.ready,denied:s.accessDenied})});
+ await workspace.load();assert.equal(workspace.state.ready,true);
+ await workspace.duplicates.retry();
+ assert.equal(workspace.state.accessDenied,true);assert.equal(workspace.state.ready,false);
+ assert.equal(workspace.state.provider.records.length,0);assert.equal(workspace.state.details.size,0);
+ assert.equal(disposed,1);assert.ok(snapshots.some(s=>s.denied&&!s.ready));
 });

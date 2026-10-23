@@ -63,7 +63,7 @@ let vendorHistorySelection=null,vendorDirectoryQuery='',vendorPicker=null,vendor
 let billUpdater=null,billUpdating=false,billUpdateProgress=null;
 let billWarnings=null;
 const duplicateDrafts=createDuplicateReviewDrafts();
-let duplicateReturn=null,duplicateSourceKey='',duplicateSearchTimer=null,duplicateSaveAttempt=null;
+let duplicateReturn=null,duplicateSourceKey='',duplicateSearchTimer=null,duplicateSearchQuery=null,duplicateSaveAttempt=null;
 function acknowledgeDuplicate(ack){
   if(!ack?.review||duplicateSaveAttempt?.key!==ack.review.key)return;
   const {key,submitted}=duplicateSaveAttempt,current=duplicateDrafts.get(key);
@@ -73,7 +73,7 @@ function acknowledgeDuplicate(ack){
 }
 function duplicateStateForView(){
   const value=shared?.duplicates?.state||{phase:'disabled',filters:{},source:null};
-  return {...value,draft:value.selection?duplicateDrafts.get(value.selection,value.detail?.finding.review):null};
+  return {...value,filters:{...value.filters,search:duplicateSearchQuery??value.filters?.search??''},draft:value.selection?duplicateDrafts.get(value.selection,value.detail?.finding.review):null};
 }
 function duplicateInput(target){
   const key=shared?.duplicates?.state.selection;
@@ -111,10 +111,10 @@ function renderDuplicateUpdate(){
   if(focus){const input=focus.id?document.querySelector('#'+focus.id):slot.querySelector?.(focus.summary?'.duplicate-diagnostics summary':`[data-action="${focus.action}"]`);input?.focus({preventScroll:true});if(typeof focus.start==='number')input?.setSelectionRange?.(focus.start,focus.end);}
 }
 function receiveShared(snapshot,change={}){
-  if(snapshot.accessDenied){historyPreview?.hide(true);files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
+  if(snapshot.accessDenied){clearTimeout(previewTimer);previewTimer=null;historyLoadToken++;historyPreview?.dispose();historyPreview=null;previewReturnFocus=null;document.querySelector('#history-preview-root')?.remove();files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
   const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
   const duplicateOnly=change.reason==='duplicates'&&!snapshot.accessDenied&&shared?.state?.ready&&sourceKey===duplicateSourceKey&&shared?.duplicates?.state.phase!=='locked';
-  if(sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;duplicateSourceKey=sourceKey;}
+  if(snapshot.accessDenied||sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;clearTimeout(duplicateSearchTimer);duplicateSearchTimer=null;duplicateSearchQuery=null;duplicateSourceKey=sourceKey;}
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;
   if(duplicateOnly){renderDuplicateUpdate();return;}
   render();
@@ -595,7 +595,7 @@ document.querySelector('#csv-input').addEventListener('change', async e => {
 document.addEventListener('input', e => {
   if(duplicateInput(e.target))return;
   if(['review-manual-check','review-manual-initials'].includes(e.target.id))markDirty();
-  if(e.target.id==='duplicate-search'){clearTimeout(duplicateSearchTimer);const search=e.target.value;duplicateSearchTimer=setTimeout(()=>shared.duplicates.load({filters:{...shared.duplicates.state.filters,search}}).catch(()=>{}),250);return;}
+  if(e.target.id==='duplicate-search'){clearTimeout(duplicateSearchTimer);const search=duplicateSearchQuery=e.target.value;duplicateSearchTimer=setTimeout(()=>shared.duplicates.load({filters:{...shared.duplicates.state.filters,search}}).catch(()=>{}),250);return;}
   if(e.target.id==='vendor-search'){vendorPicker?.input(e.target.value);return;}
   if(e.target.id==='vendor-directory-search'){vendorDirectoryQuery=e.target.value;document.querySelector('.vendor-directory-results').innerHTML=vendorDirectoryHTML(historyPage.items,vendorDirectoryQuery);return;}
   if (e.target.id === 'search') { const pos = e.target.selectionStart; state.query = e.target.value; render(); const input = document.querySelector('#search'); input?.focus(); input?.setSelectionRange(pos,pos); }

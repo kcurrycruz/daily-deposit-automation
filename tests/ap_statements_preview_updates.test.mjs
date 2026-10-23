@@ -9,7 +9,7 @@ function reviewUI(){
  const canvas={page:'visible original'},drawer={scrollTop:420,contains:()=>false};
  const ui={canvas,drawer,previewStarts:0,sidebarUpdates:0};
  const context={state:{selected:'statement',provider:{},statements:[],mappings:{},resolutions:{}},dirty:new Set(),
-  duplicateDrafts:{clear(){}},duplicateReturn:null,duplicateSaveAttempt:null,duplicateSourceKey:'',
+  duplicateDrafts:{clear(){}},duplicateReturn:null,duplicateSaveAttempt:null,duplicateSourceKey:'',duplicateSearchTimer:null,duplicateSearchQuery:null,clearTimeout(){},
   overlay:{querySelector:s=>s==='.drawer'?drawer:null},document:{activeElement:null},
   render(){ui.sidebarUpdates++;},renderDuplicateUpdate(){ui.sidebarUpdates++;},renderDrawer(){ui.previewStarts++;canvas.page='Loading private original…';}};
  vm.runInNewContext(app.slice(app.indexOf('function receiveShared('),app.indexOf('async function startShared(')),context);

@@ -24,7 +24,7 @@ test('clear reference matches preselect no action without creating a saved revie
 });
 
 test('automatic comparison updates redraw the open statement without overwriting unsaved input',()=>{
-  let renders=0;const context={shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{selected:'s'},dirty:new Set(),overlay:{querySelector:()=>({})},render(){},renderDrawer(){renders++;}};
+  let renders=0;const context={clearTimeout,duplicateSearchTimer:null,shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{selected:'s'},dirty:new Set(),overlay:{querySelector:()=>({})},render(){},renderDrawer(){renders++;}};
   vm.runInNewContext(source.slice(source.indexOf('function receiveShared('),source.indexOf('async function startShared(')),context);
   context.receiveShared({provider:{label:'Latest'},statements:[],mappings:{},resolutions:{}});assert.equal(renders,1);
   context.dirty.add('s');context.receiveShared({provider:{label:'Latest'},statements:[],mappings:{},resolutions:{}});assert.equal(renders,1);
@@ -34,7 +34,7 @@ test('automatic redraw preserves keyboard focus and the statement scroll positio
   const document={activeElement:null};let drawer={scrollTop:340,contains:()=>true};
   let close={id:'',dataset:{action:'close'},focus(){document.activeElement=this;}};document.activeElement=close;
   const overlay={querySelector(selector){return selector==='.drawer'?drawer:selector==='.close'?close:null;},querySelectorAll(){return [close];}};
-  const context={shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{selected:'s'},dirty:new Set(),document,overlay,render(){},renderDrawer(){drawer={scrollTop:0,contains:()=>true};close={id:'',dataset:{action:'close'},focus(){document.activeElement=this;}};}};
+  const context={clearTimeout,duplicateSearchTimer:null,shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state:{selected:'s'},dirty:new Set(),document,overlay,render(){},renderDrawer(){drawer={scrollTop:0,contains:()=>true};close={id:'',dataset:{action:'close'},focus(){document.activeElement=this;}};}};
   vm.runInNewContext(source.slice(source.indexOf('function receiveShared('),source.indexOf('async function startShared(')),context);
   context.receiveShared({provider:{},statements:[],mappings:{},resolutions:{}});
   assert.equal(drawer.scrollTop,340);assert.equal(document.activeElement,close);

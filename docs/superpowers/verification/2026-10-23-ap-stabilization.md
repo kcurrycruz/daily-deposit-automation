@@ -9,10 +9,10 @@ The earlier statement re-review migration `202610230001_ap_statement_rereview.sq
 ## Automated evidence
 
 - Baseline AP frontend: 393 passing.
-- Current complete AP frontend: 419 passing, zero failures; `artifacts/ap-stabilization-frontend.log`.
+- Final complete AP frontend: 421 passing, zero failures; `artifacts/ap-stabilization-frontend-final.log`.
 - Affected backend: `PYTHONPATH=tests`, Python `-X utf8 -m unittest test_ap_duplicates_operations -v`: 14 passing, including timing metadata, source replacement, expired/foreign lease ownership, and cross-thread packaging; `artifacts/ap-stabilization-task3-python-green.log`.
 - App build succeeds with `node app/ap_statements/build.mjs`. The bridge bundle is regenerated; guard is a static classic script loaded before modules.
-- Full backend suite is running in `artifacts/ap-stabilization-python.log`; final result and whole-branch review will be recorded before handoff.
+- Complete backend suite: 735 tests in 874.560s, zero failures, one optional live integration skip (authorized synthetic Supabase project not configured); `artifacts/ap-stabilization-python.log`. Both 223425- and 500000-record scale checks passed. Final review fixes affect frontend only; backend code is unchanged from this full run.
 - RED evidence retained locally for node replacement/focus, concurrent recovery, no-scan conflict, stage/age presentation, metadata, startup guard, diagnostics focus, stalled polling, and denial cleanup (`artifacts/ap-stabilization-*-red.log`).
 
 Python temp-file creation and esbuild subprocess launch need execution outside the sandbox. A diagnostic traceback located the sandbox hang in `tempfile.mkdtemp`; no test or product failure was hidden by changing assertions.
@@ -30,7 +30,26 @@ Local fixture `artifacts/ap-stabilization-server.mjs` serves the production fron
 - Stalled scan: old server-relative timestamp produced “No recent scan progress.” Expanded diagnostics remained readable through repeated updates (phase packaging, checkpoint 275); screenshot: `artifacts/ap-stabilization-stalled.png`. A regression then additionally pinned summary keyboard focus and a 1000ms idle interval for usable Refresh.
 - Duplicate draft: an unsaved synthetic note survived Refresh and remained editable afterward; no review save was submitted.
 - Missing module startup: after 20 seconds, displayed manual “Reload application,” without automatic reload. Screenshot: `artifacts/ap-stabilization-startup-failure.png`.
-- Denial cleanup: automated real-workspace/controller test proves shared source/details are cleared and client disposed. Fresh browser verification is being completed before handoff.
+- Denial cleanup: automated real-workspace/controller test proves shared source/details are cleared and client disposed. Fresh browser verification showed the locked-session instruction without workspace evidence; screenshot `artifacts/ap-stabilization-denied.png`.
+
+## Independent review and final fix pass
+
+One fresh senior reviewer examined the complete pending branch from c9705f3 to 0e2d34c. No critical issue or additional earlier re-review integration defect was found. Two findings were verified and fixed in one RED-to-GREEN pass:
+
+- Important: a delayed findings reply could reset a query typed during the 250ms debounce. A synchronous source-scoped query draft now supplies the displayed value even after focus moves; source replacement/denial cancel the debounce and clear the draft. Regression holds an earlier real-controller findings reply while new input arrives, then verifies the eventual request uses the complete new query.
+- Privacy cleanup: reviewer rated retained hidden thumbnail cache Minor. Regraded Important because the agreed lock behavior includes clearing private in-memory evidence, not merely hiding it. Denial now disposes the preview cache, cancels hover work, invalidates pending history loads, removes the preview root, and clears retained focus/query state. The regression uses the real preview controller and verifies it cannot reopen a cached thumbnail after disposal.
+
+All 421 frontend tests pass after the fix pass; no re-review was dispatched. Build and whitespace verification pass. No deferred minor remains.
+
+## Implementation rulings
+
+1. Use native PowerShell bookkeeping instead of unavailable Bash helpers, preserving task boundaries and test/commit evidence; risk is manual bookkeeping drift, checked against history.
+2. Use flat-module Python test invocation and escalated local tests/build where the sandbox blocks temp directories or subprocesses; risk is broader local test filesystem access, with synthetic data only and no production connection.
+3. Give interrupted requests a 1000ms idle interval instead of 10ms so the offered Refresh is usable; risk is up to 990ms additional delay per interrupted request, with no ownership or automatic-restart change.
+4. Production recovery/permissions/migration remain a deployment gate, not inferred from local results; risk is unverified live behavior until an authorized deployment check.
+5. Pre-HTML Streamlit hosting failures remain outside the component watchdog's reach; risk is that the outer page can still fail before the guard runs.
+6. The reviewer's pending-backend caveat was resolved with the completed 735-test run; one live integration skip still requires the separate deployment check above.
+7. Accept the recorded author-run synthetic browser walkthrough alongside fresh code review rather than duplicate it independently; risk is less independent visual coverage, offset by browser evidence and regressions.
 
 ## Chosen thresholds and preserved contracts
 

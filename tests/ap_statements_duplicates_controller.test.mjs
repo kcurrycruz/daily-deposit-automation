@@ -7,7 +7,7 @@ const key='a'.repeat(64),scanId=crypto.randomUUID(),generation=crypto.randomUUID
 const progress=(changes={})=>({scanId,importId:source.importId,importVersion:1,generation,checkpoint:0,state:'running',phase:'reading',projectionReady:false,counts:null,canStep:true,...changes});
 function setup(handler){
  const calls=[],timers=new Map();let n=0,disposed=0;
- const client={dispose(){disposed++;},async request(action,payload,options){calls.push({action,payload,options});return handler?handler(action,payload,options):action==='duplicate_ensure'?progress():action==='duplicate_step'?progress({state:'ready',checkpoint:1}):action==='duplicate_status'?progress({state:'ready',projectionReady:true,counts:{all:1,reviewed:0,unreviewed:1},reviewRevision:0}):action==='duplicate_findings_page'?{scanId,importId:source.importId,reviewRevision:0,total:1,counts:{all:1,reviewed:0,unreviewed:1},findings:[{key,review:null}],nextCursor:null}:{members:[],finding:{key,review:null},nextCursor:null};}};
+ const client={dispose(){disposed++;},async request(action,payload,options){calls.push({action,payload,options});return handler?handler(action,payload,options):action==='duplicate_ensure'?progress():action==='duplicate_step'?progress({state:'ready',checkpoint:1}):action==='duplicate_status'?progress({state:'ready',projectionReady:true,counts:{all:1,reviewed:0,unreviewed:1},reviewRevision:0}):action==='duplicate_findings_page'?{scanId,importId:source.importId,reviewRevision:0,total:1,counts:{all:1,reviewed:0,unreviewed:1},findings:[{key,review:null}],nextCursor:null}:{scanId,importId:source.importId,reviewRevision:0,members:[],finding:{key,review:null},nextCursor:null};}};
  const controller=createDuplicateBills(client,{schedule:fn=>{timers.set(++n,fn);return n;},cancelSchedule:id=>timers.delete(id)});
  async function flush(){const first=timers.entries().next().value;if(first){timers.delete(first[0]);await first[1]();}}
  return {controller,calls,timers,flush,client,get disposed(){return disposed;}};
@@ -57,6 +57,10 @@ test('review save waits for acknowledgement and keeps a failed retry draft outsi
 test('dispose clears sensitive evidence and timers without disposing shared client',async()=>{
  const h=setup();h.controller.adoptSource(source);await finish(h);h.controller.dispose();
  assert.equal(h.controller.state.page,null);assert.equal(h.controller.state.detail,null);assert.equal(h.timers.size,0);assert.equal(h.disposed,0);
+});
+test('opening another finding never displays the previous finding save acknowledgement',async()=>{
+ const h=setup();h.controller.adoptSource(source);await finish(h);h.controller.state.saveState='saved';
+ await h.controller.open('b'.repeat(64));assert.equal(h.controller.state.saveState,'idle');h.controller.dispose();
 });
 test('an expired access reply clears financial evidence rather than retaining a stale list',async()=>{
  let denied=false;const h=setup(action=>{if(denied)throw Object.assign(Error('locked'),{code:'denied'});

@@ -16,6 +16,7 @@ import {createVendorPicker,vendorOptionsHTML} from './vendor-picker.mjs';
 import {providerVendors} from './vendor-identity.mjs';
 import {bindStatementDropzone} from './statement-dropzone.mjs';
 import {referenceReviewHTML,confirmReferenceReview,confirmInvoiceCandidate,confirmedInvoiceCandidate,candidateConfirmationHTML,invoiceResult,adventureDiscrepancyHTML,adventureFollowUp,reviewDecisionOptions} from './reference-review.mjs';
+import {duplicateSidebarHTML,duplicateViewHTML,createDuplicateReviewDrafts} from './duplicate-bills-ui.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -59,6 +60,24 @@ let duplicatePrompt=null;
 let vendorHistorySelection=null,vendorDirectoryQuery='',vendorPicker=null,vendorPickerDoc=null,vendorPickerNames=[];
 let billUpdater=null,billUpdating=false,billUpdateProgress=null;
 let billWarnings=null;
+const duplicateDrafts=createDuplicateReviewDrafts();
+let duplicateReturn=null,duplicateSourceKey='',duplicateSearchTimer=null,duplicateSaveAttempt=null;
+function acknowledgeDuplicate(ack){
+  if(!ack?.review||duplicateSaveAttempt?.key!==ack.review.key)return;
+  const {key,submitted}=duplicateSaveAttempt,current=duplicateDrafts.get(key);
+  if(['decision','initials','note','expectedVersion'].every(field=>current[field]===submitted[field]))duplicateDrafts.acknowledge(key,ack.review);
+  else duplicateDrafts.update(key,{expectedVersion:ack.review.version});
+  duplicateSaveAttempt=null;render();
+}
+function duplicateStateForView(){
+  const value=shared?.duplicates?.state||{phase:'disabled',filters:{},source:null};
+  return {...value,draft:value.selection?duplicateDrafts.get(value.selection,value.detail?.finding.review):null};
+}
+function duplicateInput(target){
+  const key=shared?.duplicates?.state.selection;
+  const field={'duplicate-note':'note','duplicate-initials':'initials','duplicate-decision':'decision'}[target.id];
+  if(key&&field){duplicateDrafts.update(key,{[field]:target.value});return true;}return false;
+}
 function docDetail(id){return historicalDetail?.doc.id===id?historicalDetail:shared?.state.details.get(id);}
 const comparisonsFor=doc=>docDetail(doc.id)?.readOnly?docDetail(doc.id).results:statementComparisons(doc,state.provider,state.mappings);
 const dirty=new Set();
@@ -73,6 +92,8 @@ function sharedStatus(status,error){
   document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
 }
 function receiveShared(snapshot){
+  const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
+  if(sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;duplicateSourceKey=sourceKey;}
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();
   const drawer=overlay.querySelector('.drawer');
   if(state.selected&&!dirty.has(state.selected)&&drawer){
@@ -219,15 +240,18 @@ function render() {
     return;
   }
   const priorMain = app.querySelector('.main');
+  const focused=state.view==='duplicates'?document.activeElement:null;
+  const duplicateFocus=focused?.id?.startsWith('duplicate-')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const scrollTop = priorMain?.dataset.workspaceView === state.view ? priorMain.scrollTop : 0;
   const data = stats();
-  const title = { statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
-  const subtitle = { statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : ''}</div></main></div>`;
+  const title = { duplicates:'Duplicate bills', statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
+  const subtitle = { duplicates:'Review possible duplicate bills in your current saved export. Nothing is changed in BILL.', statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}${duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'})}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${state.view==='duplicates'?duplicateViewHTML(duplicateStateForView()):billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : ''}</div></main></div>`;
   bindDropzone();
   decorateSharedUi();
   const nextMain = app.querySelector('.main');
   if (nextMain) nextMain.scrollTop = scrollTop;
+  if(duplicateFocus){const input=document.querySelector('#'+duplicateFocus.id);input?.focus({preventScroll:true});if(typeof duplicateFocus.start==='number')input?.setSelectionRange?.(duplicateFocus.start,duplicateFocus.end);}
 }
 function guidePanel() { return uploadReviewHTML(state); }
 function workflowBody(data) {
@@ -507,11 +531,15 @@ document.querySelector('#csv-input').addEventListener('change', async e => {
   e.target.value = '';
 });
 document.addEventListener('input', e => {
+  if(duplicateInput(e.target))return;
+  if(e.target.id==='duplicate-search'){clearTimeout(duplicateSearchTimer);const search=e.target.value;duplicateSearchTimer=setTimeout(()=>shared.duplicates.load({filters:{...shared.duplicates.state.filters,search}}).catch(()=>{}),250);return;}
   if(e.target.id==='vendor-search'){vendorPicker?.input(e.target.value);return;}
   if(e.target.id==='vendor-directory-search'){vendorDirectoryQuery=e.target.value;document.querySelector('.vendor-directory-results').innerHTML=vendorDirectoryHTML(historyPage.items,vendorDirectoryQuery);return;}
   if (e.target.id === 'search') { const pos = e.target.selectionStart; state.query = e.target.value; render(); const input = document.querySelector('#search'); input?.focus(); input?.setSelectionRange(pos,pos); }
 });
 document.addEventListener('change', e => {
+  if(duplicateInput(e.target))return;
+  if(e.target.id==='duplicate-classification'){shared.duplicates.load({filters:{...shared.duplicates.state.filters,classification:e.target.value||null}}).catch(()=>{});return;}
   if(e.target.id==='review-decision'||e.target.name==='type')markDirty();
   if (e.target.id === 'page-select') { state.page = Number(e.target.value); previewPDF(getDoc()); }
   if (e.target.id === 'row-select') { if(saveState==='saving'){e.target.value=state.selectedRow;toast('Wait for the save to finish before selecting another invoice.',true);return;}if(dirty.has(state.selected)){e.target.value=state.selectedRow;toast('Save your edits before selecting another invoice.',true);return;}state.selectedRow = e.target.value; const row = comparisonsFor(getDoc()).find(r => r.id === state.selectedRow); state.page = row?.page || 1; renderDrawer(); }
@@ -531,6 +559,32 @@ document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const action = target.dataset.action;
   try {
+    if(action==='duplicate-view'){state.view='duplicates';render();return;}
+    if(action==='duplicate-open'){
+      duplicateReturn={scroll:app.querySelector('.main')?.scrollTop||0,key:target.dataset.key};state.view='duplicates';
+      const pending=shared.duplicates.open(target.dataset.key);render();const main=app.querySelector('.main');if(main)main.scrollTop=0;
+      await pending;render();return;
+    }
+    if(action==='duplicate-back'){
+      shared.duplicates.state.selection=null;shared.duplicates.state.detail=null;render();const main=app.querySelector('.main');if(main)main.scrollTop=duplicateReturn?.scroll||0;
+      document.querySelector(`[data-action="duplicate-open"][data-key="${duplicateReturn?.key}"]`)?.focus({preventScroll:true});return;
+    }
+    if(action==='duplicate-filter'){await shared.duplicates.load({filters:{...shared.duplicates.state.filters,review:target.dataset.filter}});return;}
+    if(action==='duplicate-more'){await shared.duplicates.load({more:true});return;}
+    if(action==='duplicate-members-more'){await shared.duplicates.loadMembers({more:true});return;}
+    if(action==='duplicate-retry'||action==='duplicate-refresh'){const ack=await shared.duplicates.retry();acknowledgeDuplicate(ack);return;}
+    if(action==='duplicate-accept-latest'){
+      const value=shared.duplicates.state;duplicateDrafts.update(value.selection,{expectedVersion:value.detail.finding.review?.version||0});render();return;
+    }
+    if(action==='duplicate-reopen'){duplicateDrafts.update(shared.duplicates.state.selection,{decision:'unreviewed'});render();return;}
+    if(action==='duplicate-save'){
+      const key=shared.duplicates.state.selection,draft=duplicateDrafts.get(key);
+      if(!draft.decision)throw Error('Choose a review decision.');
+      if(!/^[A-Z]{1,10}$/.test(String(draft.initials).trim().toUpperCase()))throw Error('Enter one to ten letters for reviewer initials.');
+      duplicateSaveAttempt={key,submitted:{...draft}};
+      const ack=await shared.duplicates.save({decision:draft.decision,initials:draft.initials,note:draft.note,expectedVersion:draft.expectedVersion});
+      acknowledgeDuplicate(ack);return;
+    }
     if(billUpdating&&!['back-to-programs','confirm-back-to-programs','close'].includes(action))throw Error('Please wait for the BILL update to finish.');
     if(saveState==='saving'&&!['close','confirm-back-to-programs'].includes(action))throw Error('Please wait for the current save to finish.');
     if(action==='statement-date-sort'){
@@ -668,9 +722,10 @@ document.addEventListener('click', async e => {
       const rows = reportRows.map(r => { const detail=docDetail(r.statementId);const doc = detail?.readOnly?detail.doc:(state.statements.find(d => d.id === r.statementId)||detail.doc); const resolution = reviewDecision(r.id);const sourceLabel=detail?.readOnly?(detail.importLabel||'Frozen saved comparison'):(detail?.importInfo?.metadata?.label||detail?.importLabel||state.provider.label||'No BILL data'); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),invoiceResult(r,resolution).label,r.reason,sourceLabel,r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',(historicalDetail?historicalDetail.resolutions[r.id]:state.resolutions[r.id])?.note || '',doc.assignee || '',detail?.importId||'',detail?.readOnly?detail.ruleVersion:MATCH_RULE_VERSION,detail?.readOnly?historySelection?.initials||'':'',detail?.readOnly?historySelection?.completedAt||'':'',doc.notes||'',statuses[r.status].label,invoiceResult(r,resolution).manual?'Manually confirmed':'']; });
       download('statement-reconciliation.csv', toCSV([header,...rows])); toast('Report exported with source and review notes.');
     }
-  } catch(error) {if(error.retry||error.code){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
+  } catch(error) {if(!action.startsWith('duplicate-')&&(error.retry||error.code)){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
 });
 document.addEventListener('keydown', e => {
+  const duplicate=e.target.closest?.('tr[data-action="duplicate-open"]');if(duplicate&&['Enter',' '].includes(e.key)){e.preventDefault();duplicate.click();return;}
   if(e.target.id==='vendor-search'&&vendorPicker?.key(e.key)){e.preventDefault();return;}
   const invoice=e.target.closest?.('tr[data-action="select-invoice"]');if(invoice&&['Enter',' '].includes(e.key)){e.preventDefault();invoice.click();return;}
   if(e.key==='Escape'&&historyPreview?.state.item){closeQuickPreview();e.preventDefault();return;}
@@ -684,3 +739,4 @@ document.addEventListener('keydown', e => {
 });
 render();
 startShared();
+window.addEventListener('pagehide',()=>{duplicateDrafts.clear();duplicateSaveAttempt=null;clearTimeout(duplicateSearchTimer);},{once:true});

@@ -18,6 +18,7 @@ import * as duplicates from '../app/ap_statements/frontend/statement-duplicates.
 import * as dropzone from '../app/ap_statements/frontend/statement-dropzone.mjs';
 import * as referenceReview from '../app/ap_statements/frontend/reference-review.mjs';
 import * as statementList from '../app/ap_statements/frontend/statement-list.mjs';
+import * as duplicateBillUI from '../app/ap_statements/frontend/duplicate-bills-ui.mjs';
 
 const KEY = 'hwfc-ap-statements-session-v1';
 const source = fs.readFileSync(new URL('../app/ap_statements/frontend/app.mjs', import.meta.url), 'utf8');
@@ -81,7 +82,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,
+  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,...duplicateBillUI,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };
@@ -103,6 +104,52 @@ function scrollableApp(data) {
   app.nodes['#app'].querySelector=selector=>selector==='.main'?main:null;
   return {...app,main:()=>main};
 }
+
+test('duplicate whole-row click opens a dedicated detail and Back restores the list position',async()=>{
+ const app=scrollableApp(realSession()),key='a'.repeat(64);
+ app.context.cloud.duplicates={state:{source:{capability:1},phase:'ready',filters:{review:'unreviewed',search:'',classification:null},
+  progress:{projectionReady:true,counts:{all:1,unreviewed:1}},page:{total:1,findings:[],nextCursor:null}},
+  async open(value){this.state.selection=value;this.state.detail={finding:{key:value,classification:'possible_duplicate',reasons:[],previews:[],review:null},members:[],total:2};}};
+ vm.runInNewContext("state.view='duplicates';render()",app.context);app.main().scrollTop=420;
+ const target={dataset:{action:'duplicate-open',key},disabled:false,classList:{contains:()=>false},closest(){return this;}};
+ await app.events.click({target});
+ assert.equal(app.context.cloud.duplicates.state.selection,key);assert.match(app.nodes['#app'].innerHTML,/Back to invoice list/);assert.equal(app.main().scrollTop,0);
+ target.dataset={action:'duplicate-back'};await app.events.click({target});
+ assert.equal(app.context.cloud.duplicates.state.selection,null);assert.equal(app.main().scrollTop,420);
+});
+
+test('duplicate rows activate with Enter or Space and retain review notes when leaving detail',async()=>{
+ const app=browserApp(realSession()),key='a'.repeat(64);let opened=0,clicked=0;
+ app.context.cloud.duplicates={state:{source:{capability:1},phase:'ready',filters:{review:'unreviewed',search:'',classification:null},
+  progress:{projectionReady:true,counts:{all:1,unreviewed:1}},page:{total:1,findings:[],nextCursor:null}},
+  async open(value){opened++;this.state.selection=value;}};
+ const target={dataset:{action:'duplicate-open',key},disabled:false,classList:{contains:()=>false},closest(selector){return selector.includes('select-invoice')?null:this;},click(){clicked++;return app.events.click({target:this});}};
+ await app.events.keydown({key:'Enter',target,preventDefault(){}});await app.events.keydown({key:' ',target,preventDefault(){}});
+ assert.equal(clicked,2);assert.equal(opened,2);
+ app.events.input({target:{id:'duplicate-note',value:'Keep this draft'}});
+ target.dataset={action:'duplicate-back'};await app.events.click({target});
+ app.context.fixtureKey=key;assert.equal(vm.runInNewContext('duplicateDrafts.get(fixtureKey).note',app.context),'Keep this draft');
+});
+
+test('duplicate review failures do not become a global unsaved BILL banner',async()=>{
+ const app=browserApp(realSession());app.context.cloud.duplicates={async retry(){throw Object.assign(Error('Review unavailable'),{code:'duplicate_unavailable',retry(){}});}};
+ const target={dataset:{action:'duplicate-retry'},disabled:false,classList:{contains:()=>false},closest(){return this;}};
+ await app.events.click({target});assert.equal(vm.runInNewContext('sharedError',app.context),null);
+});
+
+test('duplicate retry acknowledgement clears only the submitted draft, preserving any newer edits',async()=>{
+ const app=browserApp(realSession()),key='a'.repeat(64);app.context.fixtureKey=key;
+ vm.runInNewContext("duplicateDrafts.update(fixtureKey,{note:'Submitted',decision:'not_duplicate',initials:'KC'});duplicateSaveAttempt={key:fixtureKey,submitted:{...duplicateDrafts.get(fixtureKey)}}",app.context);
+ const review={key,decision:'not_duplicate',initials:'KC',note:'Submitted',version:1};
+ app.context.cloud.duplicates={state:{source:{capability:1},phase:'ready',filters:{review:'all',search:'',classification:null},progress:{projectionReady:true,counts:{all:0}},page:{total:0,findings:[]}},async retry(){return {review};}};
+ const target={dataset:{action:'duplicate-retry'},disabled:false,classList:{contains:()=>false},closest(){return this;}};
+ await app.events.click({target});assert.equal(vm.runInNewContext('duplicateDrafts.hasUnsaved(fixtureKey)',app.context),false);
+ vm.runInNewContext("duplicateDrafts.update(fixtureKey,{note:'Submitted again'});duplicateSaveAttempt={key:fixtureKey,submitted:{...duplicateDrafts.get(fixtureKey)}};duplicateDrafts.update(fixtureKey,{note:'Newer local edit'})",app.context);
+ review.note='Submitted again';review.version=2;await app.events.click({target});
+ assert.equal(vm.runInNewContext('duplicateDrafts.get(fixtureKey).note',app.context),'Newer local edit');
+ assert.equal(vm.runInNewContext('duplicateDrafts.get(fixtureKey).expectedVersion',app.context),2);
+ assert.equal(vm.runInNewContext('duplicateDrafts.hasUnsaved(fixtureKey)',app.context),true);
+});
 
 test('confirmed amount suggestions appear in the Invoices found filter and queue with manual attribution',()=>{
   const data=realSession();data.provider.records[0].invoiceNumber='000123X';data.resolutions={};

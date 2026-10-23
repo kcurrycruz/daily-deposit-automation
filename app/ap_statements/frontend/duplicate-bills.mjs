@@ -78,7 +78,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   });
  }
  function open(key){
-  state.selection=key;state.detail=null;selectionToken++;emit();return loadMembers();
+  state.selection=key;state.detail=null;state.saveState='idle';state.error=null;failed=null;selectionToken++;emit();return loadMembers();
  }
  function loadMembers({more=false}={}){
   if(!state.selection||!state.progress?.projectionReady)return Promise.resolve(null);
@@ -96,7 +96,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
    finding_key:selected,expected_review_version:expectedVersion,decision,initials,note};
   state.saveState='saving';emit();
   return operation('duplicate_review_save',payload,ack=>{
-   state.saveState='saved';state.reviewRevision=ack.reviewRevision;state.page=null;
+   state.saveState=state.selection===selected?'saved':'idle';state.reviewRevision=ack.reviewRevision;state.page=null;
    if(state.selection===selected&&state.detail)state.detail.finding.review=ack.review;
    state.progress={...state.progress,projectionReady:false,reviewRevision:ack.reviewRevision,counts:null};
   }).catch(error=>{if(!disposed){state.saveState='not_saved';emit();}throw error;});

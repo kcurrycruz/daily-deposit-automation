@@ -1,7 +1,7 @@
 import {comparisonInputKey,groupInvoices,invoiceKey,vendorKey} from './core.mjs';
 import {resolveStatementVendor} from './vendor-identity.mjs';
 import {adventureReferenceKeys} from './adventure-reference.mjs';
-const fail=()=>Error('The BILL comparison source is incomplete or unavailable. Retry before reviewing.');
+const fail=()=>Object.assign(Error('The BILL comparison source is incomplete or unavailable. Retry before reviewing.'),{code:'bill_incomplete'});
 const hash=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const validHash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 export function createComparisonSource(client,{onChange=()=>{}}={}){

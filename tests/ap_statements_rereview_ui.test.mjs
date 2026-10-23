@@ -5,14 +5,14 @@ import {readFileSync} from 'node:fs';
 import * as manual from '../app/ap_statements/frontend/manual-review.mjs';
 import {historyView} from '../app/ap_statements/frontend/history.mjs';
 import {historyBrowserHTML} from '../app/ap_statements/frontend/history-browser.mjs';
-import {statementOverviewHTML} from '../app/ap_statements/frontend/simple-flow-view.mjs';
+import {statementOverviewHTML,billDataHTML} from '../app/ap_statements/frontend/simple-flow-view.mjs';
 import {toCSV,statuses} from '../app/ap_statements/frontend/core.mjs';
 import {invoiceResult} from '../app/ap_statements/frontend/reference-review.mjs';
 const app=readFileSync(new URL('../app/ap_statements/frontend/app.mjs',import.meta.url),'utf8');
 const item={id:'event',statementId:'s',revisionId:'old',vendor:'Alpha',filename:'old.pdf',statementDate:'2026-10-01',initials:'KC',status:'reviewed',completedAt:'2026-10-01T12:00:00Z'};
 const doc={id:'s',vendor:'Alpha',reviewMode:'manual',confirmed:true,pageCount:1,rows:[{id:'r',invoiceNumber:'00042',type:'invoice',amount:13800,page:1,confidence:99}]};
 const row={id:'r',vendor:'Alpha',invoiceNumber:'00042',kind:'invoice',originalAmount:13800,status:'missing',candidates:[],activity:[]};
-const saved=()=>({...manual.createManualCheck(doc,row,{initials:'KC',decision:'Reviewed — no action needed',note:'Verified in BILL'}),at:'2026-10-23T15:00:00Z'});
+const saved=()=>{const resolution=manual.createManualCheck(doc,row,{initials:'KC',decision:'Reviewed — no action needed',note:'Verified in BILL'});resolution.at='2026-10-23T15:00:00Z';resolution.manualCheck.checkedAt=resolution.at;return resolution;};
 
 test('all-history and vendor history offer capability-gated re-review without replacing View revision',()=>{
  for(const html of [historyView({items:[item]},'desc',{canRereview:true}),historyBrowserHTML([item],{vendor:'Alpha'},50,{canRereview:true})]){
@@ -69,6 +69,24 @@ test('re-review entry reuses a dirty local draft rather than fetching or reopeni
   ready(){},closeQuickPreview(){},openDoc:id=>{assert.equal(id,'s');opened++;},toast(){},historicalDetail:{doc:{id:'s'}},historySelection:item,pendingRereview:null};
  vm.runInNewContext(app.slice(app.indexOf('async function beginRereview('),app.indexOf('function closeOverlay(')),context);
  await context.beginRereview('s');assert.equal(opened,1);assert.equal(local.notes,'Unsaved draft note');
+});
+
+test('global save carries unchanged manual provenance instead of asserting another fresh check',async()=>{
+ const start=app.indexOf("if (action === 'save-session')"),end=app.indexOf("if (action === 'disconnect')",start),writes=[],prior=saved();
+ const fields={'#review-decision':{value:prior.decision},'#review-note':{value:'Only notes changed'},'#review-manual-check':{checked:true},'#review-manual-initials':{value:'KC'}};
+ const context={...manual,action:'save-session',state:{selected:'s',selectedRow:'r',drawerTab:'review',statements:[doc],resolutions:{r:prior}},getDoc:()=>doc,comparisonsFor:()=>[row],ready(){},
+  document:{querySelector:s=>fields[s]||null},persistDoc:async()=>writes.push(structuredClone(context.state.resolutions.r)),render(){},renderDrawer(){},toast(){}};
+ await vm.runInNewContext('(async()=>{'+app.slice(start,end)+'})()',context);
+ assert.equal(writes[0].manualCheck.checkedAt,prior.manualCheck.checkedAt);assert.equal(writes[0].note,'Only notes changed');
+});
+
+test('unavailable current source offers a working retry that cannot discard dirty manual drafts',async()=>{
+ const html=billDataHTML({loaded:false,label:'Current.csv',error:'offline'});
+ assert.match(html,/temporarily unavailable/);assert.doesNotMatch(html,/Add your BILL data once/);assert.match(html,/data-action="retry-bill-source"/);
+ const start=app.indexOf("if(action==='retry-bill-source')"),end=app.indexOf("if(action==='refresh-comparisons')",start);assert.ok(start>=0);
+ const calls=[],context={action:'retry-bill-source',dirty:new Set(['s']),shared:{load:async options=>calls.push(options)},state:{selected:null},render(){},renderDrawer(){},toast(){}};
+ const run=()=>vm.runInNewContext('(async()=>{'+app.slice(start,end)+'})()',context);
+ await assert.rejects(run(),/save your edits/i);assert.equal(calls.length,0);context.dirty.clear();await run();assert.equal(calls[0].replace,true);
 });
 
 test('read-only historical manual revisions cannot trigger a latest-data recheck',()=>{

@@ -15,16 +15,17 @@ export function legacyMigrationPreview(session,mappings={}){
 export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
   const state={ready:false,provider:unloaded(),importId:null,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map(),preparations=new Map();let disposed=false,loaded=false;
-  let comparison=null,adoption=0;
+  let comparison=null,adoption=0,sourceUnavailableError=null;
   let foreground=0,externalBusy=false;
   const duplicates=createDuplicateBills(client,{onChange:()=>{if(loaded&&!disposed)onState(state);}});
   const updateDuplicateBusy=()=>duplicates.setBusy(foreground>0||externalBusy);
   async function inForeground(work){foreground++;updateDuplicateBusy();try{return await work();}finally{foreground--;updateDuplicateBusy();}}
   function check(){if(disposed)throw Error('AP is locked.');}
   const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills});onState(state);};
-  function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=provider;if(loaded)emit();}}});return source;}
+  function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=sourceUnavailableError?{...provider,error:sourceUnavailableError}:provider;if(loaded)emit();}}});return source;}
   async function ensureComparisons(doc){
     check();if(doc.reviewMode==='manual')return state.details.get(doc.id)?.results||null;
+    if(state.provider.error)throw Error('Current BILL data is unavailable. Retry the comparison before saving or completing.');
     if(!comparison||!state.provider.loaded)return null;
     const detail=state.details.get(doc.id);
     if(detail?.completed||detail?.readOnly)return null;
@@ -44,12 +45,12 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     check();const detail=state.details.get(doc.id);
     if(doc.reviewMode==='manual'||detail?.completed||detail?.readOnly)return null;
     if(!comparison)return ensureComparisons(doc);
-    const token=Symbol();preparations.set(doc.id,token);let source=comparison;
+    const token=Symbol();preparations.set(doc.id,token);let source=comparison;const sourceUnavailable=!!state.provider.error;
     comparison.invalidate(doc.id);
     try{
       const current=await client.request('bill_current',{});check();
       if(preparations.get(doc.id)!==token)return null;
-      if(current.importId!==state.importId||current.importVersion!==state.importVersion)await adoptImport(current);
+      if(sourceUnavailable||state.provider.error||current.importId!==state.importId||current.importVersion!==state.importVersion)await adoptImport(current);
       if(preparations.get(doc.id)!==token)return null;
       source=comparison;
       return await ensureComparisons(doc);
@@ -96,7 +97,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       if(token!==adoption||verified.importVersion!==current.importVersion||verified.importId!==current.importId)throw Error('The BILL data changed in a newer update. Retry loading current data.');
       // Do not display previous source scopes while new comparisons are loading.
       provider.scopes={};
-      comparison?.dispose();comparison=pending;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;
+      comparison?.dispose();comparison=pending;sourceUnavailableError=null;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;
       for(const doc of state.statements)ensureComparisons(doc).catch(()=>{});
       emit();return provider;
     }catch(error){pending.dispose();throw error;}
@@ -147,21 +148,29 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       }while(cursor);
       const snapshotCapable=home.capabilities?.billSnapshots===2;
       pendingComparison=snapshotCapable?makeComparison():null;
-      const provider=snapshotCapable?await pendingComparison.loadDirectory(home.activeImport):(home.activeImport?await loadProvider(home.activeImport.id,home.activeImport.metadata):{...unloaded(),label:'No BILL records imported'});
       const details=[];for(const summary of summaries)details.push(await client.request('statement',{statement_id:summary.id}));check();
+      let provider,sourceError;
+      try{provider=snapshotCapable?await pendingComparison.loadDirectory(home.activeImport):(home.activeImport?await loadProvider(home.activeImport.id,home.activeImport.metadata):{...unloaded(),label:'No BILL records imported'});}
+      catch(error){
+        check();
+        if(!['unavailable','timeout','bill_incomplete'].includes(error.code)||!details.some(detail=>detail.doc.reviewMode==='manual'))throw error;
+        sourceError=error;
+        provider={...home.activeImport?.metadata,...unloaded(),label:home.activeImport?.metadata?.label||'Saved BILL data',error:'Current BILL data is unavailable. Pinned manual reviews remain available.'};
+      }
       state.statements=[];state.details.clear();state.resolutions={};state.mappings=home.mappings;state.mappingVersions=home.mappingVersions||{};
-      state.provider=provider;state.importId=home.activeImport?.id||null;state.importVersion=home.importVersion||0;
+      sourceUnavailableError=sourceError?provider.error:null;state.provider=provider;state.importId=home.activeImport?.id||null;state.importVersion=home.importVersion||0;
       comparison?.dispose();comparison=pendingComparison;state.activeImport=home.activeImport;state.capabilities=home.capabilities||{};
       for(const detail of details){if(detail.doc.reviewMode!=='manual'&&(!snapshotCapable&&detail.importId!==state.importId||JSON.stringify(detail.mappingSnapshot||{})!==JSON.stringify(state.mappings)))detail.resolutions=reviewNotesOnly(detail.resolutions||{});adopt(detail);}
       // Initial dashboard counts must not race the scoped invoice lookups.
-      if(comparison){
+      if(comparison&&!sourceError){
         const checks=await Promise.allSettled(state.statements.map(doc=>ensureComparisons(doc)));check();
         const failed=checks.find(result=>result.status==='rejected');if(failed)throw failed.reason;
       }
       state.ready=true;loaded=true;emit();
       return state;
-    }catch(error){if(pendingComparison&&pendingComparison!==comparison)pendingComparison.dispose();if(!loaded){state.ready=false;state.provider=unloaded();emit();}throw error;}
+    }catch(error){if(pendingComparison&&pendingComparison!==comparison)pendingComparison.dispose();if(error.code==='denied'){dispose();state.accessDenied=true;onState(state);}else if(!loaded&&!disposed){state.ready=false;state.provider=unloaded();emit();}throw error;}
   }
+  function dispose(){disposed=true;duplicates.dispose();comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.capabilities={};state.activeImport=null;sourceUnavailableError=null;state.provider=unloaded();state.importId=null;state.ready=false;}
   async function upload(file,kind,request,attachment={}){
     if(!file||!Number.isInteger(file.size)||file.size<1||file.size>LIMITS.file)throw Error('Each PDF or CSV must be at most 20 MiB.');
     const bytes=new Uint8Array(await file.arrayBuffer());check();
@@ -259,5 +268,5 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     archiveStatement(id,expectedVersion){return write(async request=>{const reply=await request('archive_statement',{statement_id:id,expected_version:expectedVersion});state.statements=state.statements.filter(doc=>doc.id!==id);emit();return reply;});},
     async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return {...detail,readOnly:!!revisionId||detail.completed};},
     write,adopt,
-    dispose(){disposed=true;duplicates.dispose();comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.provider=unloaded();state.importId=null;state.ready=false;}};
+    dispose};
 }

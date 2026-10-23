@@ -145,12 +145,13 @@ def validate_resolution(value: object) -> JsonObject:
         proof['candidate']=validate_record(proof['candidate'])
         out['confirmedMatch']=proof
     if 'manualCheck' in out:
-        proof=allowed(out['manualCheck'],'vendor reference amount kind initials','vendor reference amount kind initials')
+        proof=allowed(out['manualCheck'],'vendor reference amount kind initials checkedAt','vendor reference amount kind initials')
         text(proof['vendor'],maximum=1024,blank=False)
         text(proof['reference'],maximum=256)
         integer(proof['amount'])
         if proof['kind'] not in ('invoice','credit','payment','opening'):raise ApValidationError('Invalid manual-check kind.')
         proof['initials']=normalize_initials(proof['initials'])
+        if 'checkedAt' in proof:text(proof['checkedAt'],maximum=40,blank=False)
         out['manualCheck']=proof
     return out
 

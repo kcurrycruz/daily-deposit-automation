@@ -87,6 +87,8 @@ class ApService:
                       'amount':row.get('originalAmount'),'kind':row.get('kind','invoice')}
             if any(proof[key]!=value for key,value in expected.items()):
                 raise ApValidationError('The manual check no longer agrees with the statement item.')
+            if 'checkedAt' in proof and proof!=prior['resolutions'].get(row_id,{}).get('manualCheck'):
+                raise ApValidationError('Manual-check times must come from the saved server proof. Record a fresh check instead.')
         return True
 
     def handle(self,action:str,payload:JsonObject,request_id:str,authorization:Authorization) -> JsonObject:

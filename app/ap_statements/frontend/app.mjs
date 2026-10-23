@@ -94,6 +94,7 @@ function sharedStatus(status,error){
   document.querySelectorAll('[data-action="upload"],[data-action="import"],[data-action="mapping"],[data-action="save-session"]').forEach(el=>{el.disabled=status==='saving'||!shared?.state.ready;});
 }
 function receiveShared(snapshot){
+  if(snapshot.accessDenied){historyPreview?.hide(true);files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
   const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
   if(sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;duplicateSourceKey=sourceKey;}
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;render();
@@ -222,7 +223,7 @@ function stats() {
 const badge = (status, label) => `<span class="badge ${statuses[status]?.tone || 'gray'}"><span class="dot"></span>${esc(label || statuses[status]?.label || status)}</span>`;
 const initials = name => name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 function vendorCell(doc) { return `<div class="vendor-cell"><div class="vendor-avatar">${esc(initials(doc.vendor))}</div><div><strong>${esc(doc.vendor)}</strong><small>${esc(doc.filename)}</small></div></div>`; }
-function sourcePill() { return state.provider.loaded ? 'Saved BILL data' : 'No BILL data yet'; }
+function sourcePill() { return state.provider.error?'Saved BILL data unavailable':state.provider.loaded ? 'Saved BILL data' : 'No BILL data yet'; }
 function docSummary(doc) {
   const rows = comparisonsFor(doc);
   const check = totals(doc);
@@ -687,6 +688,7 @@ document.addEventListener('click', async e => {
       showInvoicePage(true,true);
     }
     if(action==='back-invoices')showInvoicePage(false,true);
+    if(action==='retry-bill-source'){if(dirty.size)throw Error('Save your edits before retrying BILL data.');await shared.load({replace:true});render();if(state.selected)renderDrawer();toast('Shared workspace reloaded. Pinned manual reviews retained.');}
     if(action==='refresh-comparisons'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before comparing with current BILL data.');await shared.prepareStatement(doc);render();renderDrawer();toast('Compared with current BILL data. Notes and corrections retained; review the updated results.');}
     if(action==='manual-recheck'){
       const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before rechecking with latest BILL data.');
@@ -780,7 +782,7 @@ document.addEventListener('click', async e => {
         const doc=getDoc(),prior=state.resolutions[state.selectedRow]||{},decision=document.querySelector('#review-decision')?.value||'',note=document.querySelector('#review-note').value;
         const current=comparisonsFor(doc).find(row=>row.id===state.selectedRow),checked=doc.reviewMode==='manual'&&!!document.querySelector('#review-manual-check')?.checked;
         if(decision==='Reviewed — no action needed'&&current?.status==='vendor'&&!checked)throw Error('Confirm the vendor above, check it manually in BILL, or record a follow-up decision.');
-        const resolution=checked?createManualCheck(doc,current,{initials:document.querySelector('#review-manual-initials')?.value,decision,note},prior):{...prior,note,...(decision?{decision}:{})};
+        const resolution=checked?createManualCheck(doc,current,{initials:document.querySelector('#review-manual-initials')?.value,decision,note,fresh:false},prior):{...prior,note,...(decision?{decision}:{})};
         if(!checked)delete resolution.manualCheck;
         state.resolutions[state.selectedRow]=resolution;
       }

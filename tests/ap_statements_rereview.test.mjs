@@ -10,16 +10,16 @@ function fixture(){
  const result={id:row,invoiceNumber:'00042',kind:'invoice',originalAmount:13800,outstanding:13800,vendor:'Alpha',statementId:id,status:'missing',reason:'Not in old export',candidates:[]};
  return {id,row,old,current,doc,result,detail:{doc,resolutions:{[row]:{decision:'Follow up with vendor',note:'Keep invoice note',at:'2026-10-01T12:00:00Z'}},version:1,revisionVersion:1,revisionId:crypto.randomUUID(),importId:old,importLabel:'Old.csv',mappingSnapshot:{Alpha:'Old Alpha'},ruleVersion:'ap-match-v3',results:[result],originalAvailable:true,completed:true,archived:false}};
 }
-async function harness({draft=false,capability=true,source=true}={}){
+async function harness({draft=false,capability=true,source=true,directoryError=null,onWorkspace=()=>{}}={}){
  const f=fixture(),calls=[],cache=new Map(),revisions=new Map(),vendors=[{vendor:'Alpha'}];
  const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(vendors))))].map(v=>v.toString(16).padStart(2,'0')).join('');
- const h={...f,calls,failCandidates:false,loseReopen:false,failRead:false,current:f.current,version:1};
+ const h={...f,calls,failCandidates:false,loseReopen:false,failRead:false,current:f.current,version:1,directoryError};
  let head=clone(f.detail);if(draft){head.completed=false;head.doc.reviewMode='manual';}
  const client={dispose(){},async request(action,payload={},options={}){
   calls.push({action,payload:clone(payload),requestId:options.requestId});
   if(action==='bootstrap')return {activeImport:source?{id:h.current,metadata:{label:'Latest.csv',sourceFormat:'bill-native'},record_count:1,storage_format:'snapshot-v2',vendorDigest:digest}:null,importVersion:h.version,capabilities:{billSnapshots:2,...(capability?{statementRereview:1}:{})},mappings:{Alpha:'Alpha'},mappingVersions:{},statements:draft?[{id:f.id}]:[],nextCursor:null};
   if(action==='bill_current')return {importId:h.current,importVersion:h.version,recordCount:1,storageFormat:'snapshot-v2',metadata:{label:'Latest.csv',sourceFormat:'bill-native'}};
-  if(action==='bill_vendors_page')return {importId:payload.import_id,vendors,total:1,vendorDigest:digest,nextCursor:null};
+  if(action==='bill_vendors_page'){if(h.directoryError)throw h.directoryError;return {importId:payload.import_id,vendors,total:1,vendorDigest:digest,nextCursor:null};}
   if(action==='bill_candidates_page'){
    if(h.beforeCandidates)await h.beforeCandidates();
    if(h.failCandidates)throw Error('Candidate lookup offline');
@@ -43,21 +43,45 @@ async function harness({draft=false,capability=true,source=true}={}){
   if(action==='save_revision'){
    assert.equal(payload.expected_version,head.version);
    head={...head,doc:clone(payload.doc),resolutions:clone(payload.resolutions),results:clone(payload.results),importId:payload.import_id,mappingSnapshot:clone(payload.mapping_snapshot),ruleVersion:payload.rule_version,version:head.version+1,revisionVersion:head.version+1,revisionId:crypto.randomUUID()};
-   for(const r of Object.values(head.resolutions))if(r.decision)r.at='2026-10-23T15:00:00Z';
+   for(const r of Object.values(head.resolutions))if(r.decision){r.at='2026-10-23T15:00:00Z';if(r.manualCheck&&!r.manualCheck.checkedAt)r.manualCheck.checkedAt=r.at;}
    revisions.set(head.revisionId,clone(head));
    const reply={statement_id:f.id,version:head.version,revision_id:head.revisionId};cache.set(options.requestId,reply);return clone(reply);
   }
   if(action==='complete_revision'){head.completed=true;head.version++;return {statement_id:f.id,version:head.version};}
   throw Error('Unexpected action '+action);
  }};
- h.workspace=createSharedWorkspace(client);h.head=()=>head;await h.workspace.load();return h;
+ h.workspace=createSharedWorkspace(client);onWorkspace(h.workspace);h.head=()=>head;await h.workspace.load();return h;
 }
+
+test('manual drafts restore despite a failing current index, while latest writes stay blocked',async()=>{
+ const h=await harness({draft:true,directoryError:Object.assign(Error('Index offline'),{code:'unavailable'})}),w=h.workspace,doc=w.state.statements[0];
+ assert.equal(w.state.ready,true);assert.equal(doc.reviewMode,'manual');assert.equal(w.state.provider.loaded,false);assert.match(w.state.provider.error,/unavailable|offline/i);
+ assert.equal(w.state.details.get(h.id).importId,h.old);await w.saveStatement(doc,1);
+ const latest={...clone(doc),id:crypto.randomUUID(),reviewMode:'latest'};w.adopt({...clone(h.detail),doc:latest,completed:false});
+ await assert.rejects(w.saveStatement(latest,1),/unavailable/i);
+ await assert.rejects(w.completeStatement({statement_id:latest.id,expected_version:1,initials:'KC'}),/unavailable/i);
+ await assert.rejects(w.refreshComparisons(doc.id),/offline/i);
+ assert.match(w.state.provider.error,/unavailable/i);await assert.rejects(w.saveStatement(latest,1),/unavailable/i);
+ h.directoryError=null;await w.refreshComparisons(doc.id);assert.equal(w.state.statements.find(item=>item.id===doc.id).reviewMode,'latest');assert.equal(w.state.provider.loaded,true);
+ w.dispose();
+});
+test('current index access denial is fatal and clears private data instead of degrading',async()=>{
+ let workspace;await assert.rejects(harness({draft:true,directoryError:Object.assign(Error('Access expired'),{code:'denied'}),onWorkspace:w=>workspace=w}),/expired/i);
+ assert.equal(workspace.state.ready,false);assert.equal(workspace.state.statements.length,0);assert.equal(workspace.state.details.size,0);assert.deepEqual(workspace.state.resolutions,{});
+});
+test('manual check provenance uses its own server time, not an unrelated decision save time',()=>{
+ const f=fixture(),resolution=manual.createManualCheck(f.doc,f.result,{initials:'KC',decision:'Reviewed — no action needed'});
+ resolution.at='2026-10-23T15:00:00Z';resolution.manualCheck.checkedAt='2026-10-01T12:00:00Z';
+ assert.equal(manual.manualReviewReport(f.result,resolution)[2],'2026-10-01T12:00:00Z');
+ const fresh=manual.createManualCheck(f.doc,f.result,{initials:'KC',decision:resolution.decision},resolution);
+ assert.equal(fresh.manualCheck.checkedAt,undefined);assert.equal(manual.manualCheckFor(f.result,fresh),null);
+});
 
 test('an explicit acknowledged manual check labels the review method without claiming an imported match',()=>{
  assert.ok(manual,'Manual check helpers must exist');const f=fixture(),before=clone(f.result);
  const resolution=manual.createManualCheck(f.doc,f.result,{initials:' kc ',decision:'Reviewed — no action needed',note:'Checked in BILL'});
  assert.equal(resolution.manualCheck.initials,'KC');assert.equal(manual.manualCheckFor(f.result,resolution),null);
- resolution.at='2026-10-23T15:00:00Z';assert.equal(manual.manualCheckFor(f.result,resolution).initials,'KC');
+ resolution.at='2026-10-23T15:00:00Z';resolution.manualCheck.checkedAt=resolution.at;assert.equal(manual.manualCheckFor(f.result,resolution).initials,'KC');
  const result=invoiceResult(f.result,resolution);assert.equal(result.checkedManually,true);assert.equal(result.found,false);assert.equal(result.label,'Checked manually in BILL');assert.deepEqual(f.result,before);
  for(const changes of [{invoiceNumber:'42'},{originalAmount:13801},{vendor:'Beta'},{kind:'credit'}])assert.equal(manual.manualCheckFor({...f.result,...changes},resolution),null);
  for(const initials of ['','123','A'.repeat(11)])assert.throws(()=>manual.createManualCheck(f.doc,f.result,{initials,decision:'Reviewed — no action needed'}),/initials/i);

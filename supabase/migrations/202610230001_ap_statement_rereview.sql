@@ -55,4 +55,45 @@ revoke all on function public.ap_rereview_statement(uuid,uuid,text,jsonb) from p
 revoke all on function public.ap_reopen_statement(uuid,uuid,text,jsonb) from public,anon,authenticated;
 grant execute on function public.ap_rereview_statement(uuid,uuid,text,jsonb) to service_role;
 grant execute on function public.ap_reopen_statement(uuid,uuid,text,jsonb) to service_role;
+
+-- A manual check has its own server-owned time. Saving another item's decision,
+-- statement notes or completion must not make an old check appear newly made.
+create or replace function public.ap_save_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare
+  cached ap_requests%rowtype; previous ap_statement_revisions%rowtype;
+  entry record; proof jsonb; old_proof jsonb; decisions jsonb='{}'; value jsonb;
+begin
+  if p_data->'doc'->>'reviewMode' is distinct from 'manual' then
+    return public.ap_mutate('save_revision',p_workspace,p_request_id,p_payload_hash,p_data);
+  end if;
+  if p_payload_hash is null or p_payload_hash !~ '^[0-9a-f]{64}$' then raise exception 'validation'; end if;
+  perform 1 from ap_workspaces where id=p_workspace and rereview_schema_version=1 for update;
+  if not found then raise exception 'conflict'; end if;
+  select * into cached from ap_requests where workspace_id=p_workspace and request_id=p_request_id;
+  if found then
+    if cached.payload_hash<>p_payload_hash then raise exception 'request_conflict'; end if;
+    return cached.response;
+  end if;
+  select * into previous from ap_statement_revisions where workspace_id=p_workspace
+    and statement_id=(p_data->>'statement_id')::uuid and version=(p_data->>'expected_version')::integer;
+  if not found or previous.doc->>'reviewMode' is distinct from 'manual' then raise exception 'conflict'; end if;
+  for entry in select * from jsonb_each(coalesce(p_data->'resolutions','{}')) loop
+    value=entry.value;proof=value->'manualCheck';
+    if proof is not null then
+      old_proof=previous.resolutions->entry.key->'manualCheck';
+      if proof ? 'checkedAt' then
+        if proof is distinct from old_proof then raise exception 'validation'; end if;
+      else
+        proof=proof||jsonb_build_object('checkedAt',now());
+      end if;
+      value=jsonb_set(value,'{manualCheck}',proof);
+    end if;
+    decisions=decisions||jsonb_build_object(entry.key,value);
+  end loop;
+  return public.ap_mutate('save_revision',p_workspace,p_request_id,p_payload_hash,jsonb_set(p_data,'{resolutions}',decisions));
+end;
+$$;
+revoke all on function public.ap_save_revision(uuid,uuid,text,jsonb) from public,anon,authenticated;
+grant execute on function public.ap_save_revision(uuid,uuid,text,jsonb) to service_role;
 commit;

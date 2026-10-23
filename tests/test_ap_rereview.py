@@ -51,6 +51,17 @@ class RereviewTests(unittest.TestCase):
         self.assertEqual(service.handle('save_revision',payload,request,auth),first)
         self.assertEqual(first['version'],3)
 
+    def test_manual_check_time_must_be_carried_from_exact_prior_server_proof(self):
+        payload=self.payload();row=payload['results'][0]
+        proof={'vendor':row['vendor'],'reference':row['invoiceNumber'],'amount':row['originalAmount'],'kind':row['kind'],'initials':'KC','checkedAt':'2026-10-01T12:00:00Z'}
+        payload['resolutions']={row['id']:{'decision':'Reviewed — no action needed','manualCheck':proof}}
+        service,repo,auth=self.service(payload)
+        prior=repo.revision_for_save(CONFIG.workspace_id,payload['statement_id'],2);prior['resolutions']=copy.deepcopy(payload['resolutions'])
+        repo.revision_for_save=lambda *args:copy.deepcopy(prior)
+        service.handle('save_revision',payload,str(uuid4()),auth)
+        payload['resolutions'][row['id']]['manualCheck']['checkedAt']='2026-01-01T00:00:00Z'
+        with self.assertRaises(ApValidationError):service.handle('save_revision',payload,str(uuid4()),auth)
+
     def test_manual_mode_cannot_be_invented_without_an_authoritative_manual_revision(self):
         payload=self.payload();service,repo,auth=self.service(payload)
         prior=repo.revision_for_save(CONFIG.workspace_id,payload['statement_id'],2)

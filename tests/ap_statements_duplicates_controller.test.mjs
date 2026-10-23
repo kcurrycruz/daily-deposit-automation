@@ -21,6 +21,47 @@ test('a restored superseded source can explicitly restart instead of polling for
  assert.equal(h.calls.at(-1).action,'duplicate_step');assert.equal(h.calls.at(-1).payload.restart,true);h.controller.dispose();
 });
 
+test('rapid restart clicks join one recovery request at the current generation and checkpoint',async()=>{
+ let release,started;const held=new Promise(r=>started=r);
+ const h=setup(action=>action==='duplicate_ensure'?progress({state:'restart_required',checkpoint:8}):new Promise(r=>{release=r;started();}));
+ h.controller.adoptSource(source);await h.flush();
+ const first=h.controller.retry(),second=h.controller.retry();
+ assert.strictEqual(first,second);await held;
+ assert.equal(h.calls.filter(c=>c.action==='duplicate_step').length,1);
+ assert.deepEqual(h.calls.at(-1).payload,{scan_id:scanId,generation,expected_checkpoint:8,restart:true});
+ release(progress({generation:'new-generation',checkpoint:0}));await first;h.controller.dispose();
+});
+
+test('initial ensure conflict recovers with a fresh ensure rather than a null scan status',async()=>{
+ let attempt=0;const h=setup(()=>{if(++attempt===1)throw Object.assign(Error('Conflict'),{code:'duplicate_conflict'});return progress();});
+ h.controller.adoptSource(source);await h.flush();assert.equal(h.controller.state.progress,null);
+ await h.controller.retry();
+ assert.deepEqual(h.calls.map(c=>c.action),['duplicate_ensure','duplicate_ensure']);
+ assert.notEqual(h.calls[0].options.requestId,h.calls[1].options.requestId);
+ assert.equal(h.controller.state.error,null);h.controller.dispose();
+});
+
+test('recovery from a live foreign-owned scan reads status without restarting',async()=>{
+ const h=setup(()=>progress({canStep:false}));h.controller.adoptSource(source);await h.flush();await h.controller.retry();
+ assert.equal(h.calls.at(-1).action,'duplicate_status');assert.equal(h.calls.filter(c=>c.action==='duplicate_step').length,0);h.controller.dispose();
+});
+
+test('recovery replies from a former source generation cannot restore A-to-B-to-A evidence',async()=>{
+ let release,started;const held=new Promise(r=>started=r);
+ const h=setup(action=>action==='duplicate_ensure'?progress({state:'restart_required'}):new Promise(r=>{release=r;started();}));
+ h.controller.adoptSource(source);await h.flush();const recovery=h.controller.retry();await held;
+ h.controller.adoptSource({...source,importId:'source-b',importVersion:2});h.controller.adoptSource({...source,importVersion:3});
+ release(progress({state:'ready',projectionReady:true}));await recovery;
+ assert.equal(h.controller.state.progress,null);assert.equal(h.controller.state.source.importVersion,3);h.controller.dispose();
+});
+
+test('denied recovery clears evidence and cannot retain a retry handle',async()=>{
+ const h=setup(action=>{if(action==='duplicate_ensure')return progress();throw Object.assign(Error('locked'),{code:'denied'});});
+ h.controller.adoptSource(source);await h.flush();await assert.rejects(h.controller.retry(),/locked/);
+ assert.equal(h.controller.state.source,null);assert.equal(h.controller.state.progress,null);
+ const n=h.calls.length;await h.controller.retry();assert.equal(h.calls.length,n);
+});
+
 test('no capability or no source never starts a scan',async()=>{
  const h=setup();h.controller.adoptSource({...source,capability:0});await h.flush();assert.equal(h.calls.length,0);
  h.controller.adoptSource({...source,importId:null});await h.flush();assert.equal(h.calls.length,0);assert.equal(h.controller.state.phase,'no_source');h.controller.dispose();
@@ -49,18 +90,18 @@ test('detector failure is local and retry keeps its mutation request identity',a
 });
 
 test('packaging errors pause activity and an explicit retry resumes the same checkpoint',async()=>{
- let fail=true,release;
+ let fail=true,release,started;const held=new Promise(r=>started=r);
  const h=setup(action=>{
   if(action==='duplicate_ensure')return progress({phase:'packaging',recordsRead:223425,totalRecords:223425});
   if(fail)throw Object.assign(Error('Storage unavailable'),{code:'unavailable'});
-  return new Promise(resolve=>{release=()=>resolve(progress({state:'ready',phase:'complete',recordsRead:223425,totalRecords:223425}));});
+  return new Promise(resolve=>{release=()=>resolve(progress({state:'ready',phase:'complete',recordsRead:223425,totalRecords:223425}));started();});
  });
  h.controller.adoptSource(source);await h.flush();await h.flush();
  assert.equal(h.timers.size,0);
  assert.match(duplicateViewHTML(h.controller.state),/paused/i);
  assert.doesNotMatch(duplicateViewHTML(h.controller.state),/aria-busy="true"/);
  const failed=h.calls.at(-1);fail=false;
- const retry=h.controller.retry();await Promise.resolve();await Promise.resolve();
+ const retry=h.controller.retry();await held;
  assert.match(duplicateViewHTML(h.controller.state),/aria-busy="true"/);
  release();await retry;
  assert.equal(h.calls.at(-1).options.requestId,failed.options.requestId);

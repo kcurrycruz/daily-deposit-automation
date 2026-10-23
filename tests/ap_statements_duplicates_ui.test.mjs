@@ -43,6 +43,17 @@ test('paused shared conflicts point to the offered refresh action rather than a 
  assert.match(html,/Use “Refresh shared review”/);
  assert.doesNotMatch(html,/Retry same operation/);
 });
+
+test('loading disables every refresh and recovery action without removing draft controls',()=>{
+ for(const state of [
+  {...base(),phase:'restart_required',progress:{state:'restart_required',projectionReady:false}},
+  {...base(),error:{code:'duplicate_conflict',message:'Refresh needed'}}
+ ]){
+  state.loading=true;const html=duplicateViewHTML(state);
+  const buttons=html.match(/<button[^>]*data-action="duplicate-(?:retry|refresh)"[^>]*>/g)||[];
+  assert.ok(buttons.length>=1);for(const button of buttons)assert.match(button,/disabled/);
+ }
+});
 test('list uses accessible whole-row actions, literal escaped values, and explains cautious evidence',()=>{
  const html=duplicateViewHTML(base());
  assert.match(html,/data-action="duplicate-open"/);assert.match(html,/tabindex="0"/);assert.match(html,/role="button"/);

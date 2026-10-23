@@ -3,7 +3,7 @@ const defaultFilters=()=>({review:'unreviewed',classification:null,search:''});
 export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancelSchedule=clearTimeout}={}){
  const state={source:null,phase:'disabled',progress:null,page:null,selection:null,detail:null,error:null,
   filters:defaultFilters(),saveState:'idle',reviewRevision:null,loading:false};
- let disposed=false,busy=false,timer=null,token=0,listToken=0,selectionToken=0,pending=0,chain=Promise.resolve(),failed=null;
+ let disposed=false,busy=false,timer=null,token=0,listToken=0,selectionToken=0,pending=0,chain=Promise.resolve(),failed=null,recovery=null;
  const emit=()=>{if(!disposed)onChange(state);};
  const active=t=>!disposed&&t===token;
  function cancel(){if(timer!==null)cancelSchedule(timer);timer=null;}
@@ -62,7 +62,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   if(disposed)return;
   const next={importId:source.importId||null,importVersion:source.importVersion??0,capability:source.capability};
   if(JSON.stringify(next)===JSON.stringify(state.source))return;
-  token++;listToken++;selectionToken++;cancel();failed=null;clearEvidence();state.source=next;
+  token++;listToken++;selectionToken++;cancel();failed=null;recovery=null;clearEvidence();state.source=next;
   state.phase=next.capability!==1?'disabled':next.importId?'pending':'no_source';emit();plan();
  }
  function setBusy(value){busy=!!value;if(busy)cancel();else plan();}
@@ -101,11 +101,11 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
    state.progress={...state.progress,projectionReady:false,reviewRevision:ack.reviewRevision,counts:null};
   }).catch(error=>{if(!disposed){state.saveState='not_saved';emit();}throw error;});
  }
- function retry(){
-  if(disposed)return Promise.resolve(null);
+ function recover(){
   if(state.error?.code==='duplicate_conflict'){
    failed=null;state.error=null;state.page=null;state.detail=null;state.saveState='idle';
-   return operation('duplicate_status',{scan_id:state.progress.scanId},adoptProgress);
+   return state.progress?.scanId?operation('duplicate_status',{scan_id:state.progress.scanId},adoptProgress):
+    operation('duplicate_ensure',{import_id:state.source.importId,expected_import_version:state.source.importVersion},adoptProgress);
   }
   if(failed){state.error=null;return failed();}
   const p=state.progress;
@@ -115,8 +115,17 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   state.error=null;state.page=null;
   return p?operation('duplicate_status',{scan_id:p.scanId},adoptProgress):tick();
  }
+ function retry(){
+  if(disposed||!state.source?.importId||state.source.capability!==1)return Promise.resolve(null);
+  if(recovery)return recovery;
+  const t=token;cancel();
+  // Wait for prior work before choosing a generation/checkpoint to recover.
+  const work=chain.catch(()=>{}).then(()=>active(t)?recover():null);
+  const joined=work.finally(()=>{if(recovery===joined)recovery=null;});
+  recovery=joined;return joined;
+ }
  function dispose(){
-  token++;listToken++;selectionToken++;cancel();clearEvidence();state.source=null;state.phase='locked';failed=null;disposed=true;
+  token++;listToken++;selectionToken++;cancel();clearEvidence();state.source=null;state.phase='locked';failed=null;recovery=null;disposed=true;
  }
  return {state,adoptSource,setBusy,load,open,loadMembers,save,retry,dispose};
 }

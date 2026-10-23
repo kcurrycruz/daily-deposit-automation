@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createDuplicateBills} from '../app/ap_statements/frontend/duplicate-bills.mjs';
 import {createSharedWorkspace} from '../app/ap_statements/frontend/shared-workspace.mjs';
+import {duplicateViewHTML} from '../app/ap_statements/frontend/duplicate-bills-ui.mjs';
 const source={importId:crypto.randomUUID(),importVersion:1,capability:1};
 const key='a'.repeat(64),scanId=crypto.randomUUID(),generation=crypto.randomUUID();
 const progress=(changes={})=>({scanId,importId:source.importId,importVersion:1,generation,checkpoint:0,state:'running',phase:'reading',projectionReady:false,counts:null,canStep:true,...changes});
@@ -45,6 +46,26 @@ test('detector failure is local and retry keeps its mutation request identity',a
  let fail=true;const h=setup(()=>{if(fail)throw Object.assign(Error('scan unavailable'),{code:'duplicate_unavailable'});return progress();});
  h.controller.adoptSource(source);await h.flush();assert.equal(h.controller.state.error.message,'scan unavailable');
  const id=h.calls[0].options.requestId;fail=false;await h.controller.retry();assert.equal(h.calls[1].options.requestId,id);h.controller.dispose();
+});
+
+test('packaging errors pause activity and an explicit retry resumes the same checkpoint',async()=>{
+ let fail=true,release;
+ const h=setup(action=>{
+  if(action==='duplicate_ensure')return progress({phase:'packaging',recordsRead:223425,totalRecords:223425});
+  if(fail)throw Object.assign(Error('Storage unavailable'),{code:'unavailable'});
+  return new Promise(resolve=>{release=()=>resolve(progress({state:'ready',phase:'complete',recordsRead:223425,totalRecords:223425}));});
+ });
+ h.controller.adoptSource(source);await h.flush();await h.flush();
+ assert.equal(h.timers.size,0);
+ assert.match(duplicateViewHTML(h.controller.state),/paused/i);
+ assert.doesNotMatch(duplicateViewHTML(h.controller.state),/aria-busy="true"/);
+ const failed=h.calls.at(-1);fail=false;
+ const retry=h.controller.retry();await Promise.resolve();await Promise.resolve();
+ assert.match(duplicateViewHTML(h.controller.state),/aria-busy="true"/);
+ release();await retry;
+ assert.equal(h.calls.at(-1).options.requestId,failed.options.requestId);
+ assert.deepEqual(h.calls.at(-1).payload,failed.payload);
+ assert.equal(h.controller.state.error,null);h.controller.dispose();
 });
 test('review save waits for acknowledgement and keeps a failed retry draft outside statement state',async()=>{
  let fail=true;const h=setup((action,payload)=>{

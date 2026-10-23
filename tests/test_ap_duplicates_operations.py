@@ -2,6 +2,7 @@ import importlib
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dataclasses import replace
 from uuid import uuid4
@@ -54,6 +55,18 @@ class DuplicateOperationsTests(unittest.TestCase):
         self.assertEqual([m['bill']['invoiceNumber'] for m in detail['members']],['271712','271712X'])
         self.assertFalse(self.h.service.repository.completion_events)
         self.assertEqual(self.h.repo.active_id,p['importId'])
+    def test_packaging_publishes_when_later_requests_use_different_threads(self):
+        p=self.ensure()
+        for _ in range(30):
+            if p['phase']=='packaging': break
+            p=self.call('duplicate_step',dict(scan_id=p['scanId'],generation=p['generation'],expected_checkpoint=p['checkpoint'],restart=False))
+        self.assertEqual(p['phase'],'packaging')
+        with ThreadPoolExecutor(max_workers=1) as request:
+            p=request.submit(self.complete,p).result()
+        self.assertTrue(p['projectionReady'])
+        self.assertEqual(p['counts']['unreviewed'],1)
+        self.assertEqual(self.h.repo.active_id,p['importId'])
+
     def test_lost_step_reply_process_loss_and_second_session(self):
         p=self.ensure(); data=dict(scan_id=p['scanId'],generation=p['generation'],expected_checkpoint=0,restart=False)
         request=str(uuid4()); first=self.call('duplicate_step',data,request)

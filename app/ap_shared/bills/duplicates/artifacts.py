@@ -24,9 +24,11 @@ class DuplicateArtifactWriter:
     def __init__(self, source_path, target_path):
         self.source_path, self.target = Path(source_path), Path(target_path)
         self.final = self.target.with_suffix('.sqlite')
-        self.source = sqlite3.connect(self.source_path.resolve().as_uri() + '?mode=ro', uri=True)
+        # The registry lock serializes step/close, but Streamlit can run each
+        # cooperative request on a different script thread.
+        self.source = sqlite3.connect(self.source_path.resolve().as_uri() + '?mode=ro', uri=True, check_same_thread=False)
         self.source.execute('pragma query_only=ON')
-        self.db = sqlite3.connect(self.final)
+        self.db = sqlite3.connect(self.final, check_same_thread=False)
         self.db.execute('pragma cache_size=-8192')
         self.db.execute('pragma journal_mode=MEMORY');self.db.execute('pragma synchronous=OFF')
         for name, definition in SCHEMA.items():

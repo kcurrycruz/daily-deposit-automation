@@ -50,6 +50,12 @@ Before result writes, reserve up to 64 MiB under the configured BILL bucket budg
 - **Access expires during a read:** No financial result is returned. Unlock AP again; do not restore private evidence from browser storage.
 - **Result verification fails:** Display an unavailable/error state, not zero duplicates. Hashes, sizes, source pin, allowed SQLite schema, counts and member locators are verified independently.
 
+Reading every record is not scan completion: candidate checks, packaging, publication and verified review preparation follow. A failed request pauses automatic work; the page and sidebar must not continue showing an active checking spinner. Retry keeps the failed operation's request identity. After a deployment loses temporary scan state, use **Restart from saved BILL data** when offered rather than uploading the export again.
+
+Packaging retains two scratch SQLite connections across cooperative requests. Streamlit may execute those requests on different script threads, so these connections allow thread changes; the scan registry's existing lock still serializes all writer steps and cleanup. Regression tests cover cross-thread packaging through publication, unchanged saved BILL identity, and paused-error recovery with the same retry payload and request ID. No schema migration is needed for this fix.
+
+Packaging-fix verification on October 23, 2026: 724 Python tests ran in 857.415 seconds with no failures and one opt-in live-integration skip; all 358 frontend tests passed, the component build succeeded, and `git diff --check` passed. The 223,425- and 500,000-record synthetic checks completed in 201.609 and 484.812 seconds, with maximum measured steps of 1.266 and 1.687 seconds. These are local verification results, not confirmation that the live stalled scan has recovered. No live SQL, deployment or financial writes were performed for this fix.
+
 No automatic cleanup deletes original CSVs, PDFs, historical snapshots or review events. Temporary local directories belong only to the creating cache/scan handle. Ready private objects are retained under the team's normal retention policy.
 
 Scratch scan/copy SQLite databases use memory journals and no synchronous durability waits. They are not durable checkpoints: losing a process requires an explicit restart, and only a fully packed, hash-verified private artifact can become ready. Original exports and durable SQL reviews do not use this scratch setting.

@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from uuid import uuid4
 from fixtures.ap_shared.duplicate_cases import PIN, bill
@@ -15,6 +16,24 @@ from test_ap_shared_access import CONFIG
 
 
 class DuplicateArtifactTests(unittest.TestCase):
+    def test_packaging_resumes_on_a_different_request_thread(self):
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter
+        folder, source, _, _, _, _, _ = self.fixture()
+        writer = DuplicateArtifactWriter(source, folder / 'cross-thread.gz')
+        self.addCleanup(writer.close)
+        report = writer.step()
+        for _ in range(30):
+            if report['done']:
+                break
+            # Streamlit reruns do not retain the creating script thread.
+            with ThreadPoolExecutor(max_workers=1) as request:
+                report = request.submit(writer.step).result()
+        self.assertTrue(report['done'])
+        self.assertEqual(report['artifact']['findingCount'], 1)
+        self.assertEqual(report['artifact']['recordCount'], 3)
+        raw = gzip.decompress((folder / 'cross-thread.gz').read_bytes())
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), report['artifact']['expandedHash'])
+
     def test_warm_verified_cache_does_not_repeat_full_validation(self):
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
         _,_,packed,_,repo,scan,_=self.fixture()

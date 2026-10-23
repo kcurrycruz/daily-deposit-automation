@@ -17,6 +17,32 @@ test('sidebar badge requires complete review projection; pending and failed neve
  const clean=base();clean.page={findings:[],total:0};clean.progress.counts={all:0,reviewed:0,unreviewed:0};
  assert.match(duplicateViewHTML(clean),/No possible duplicates found by these rules/);
 });
+
+test('a failed request shows paused checks without an active main or sidebar spinner',()=>{
+ const state={...base(),phase:'running',page:null,error:{code:'unavailable',message:'Storage unavailable'},
+  progress:{state:'running',phase:'packaging',recordsRead:223425,totalRecords:223425,projectionReady:false}};
+ const html=duplicateViewHTML(state),sidebar=duplicateSidebarHTML(state);
+ assert.match(html,/paused/i);assert.match(html,/223,425/);
+ assert.match(html,/data-action="duplicate-retry"/);
+ assert.doesNotMatch(html,/startup-spinner|aria-busy="true"|Checking your saved bills/);
+ assert.doesNotMatch(sidebar,/duplicate-mini-spinner/);
+ assert.match(sidebar,/aria-label="Duplicate checks need attention"/);
+});
+
+test('an active packaging request still shows activity when no error has occurred',()=>{
+ const state={...base(),phase:'running',page:null,
+  progress:{state:'running',phase:'packaging',recordsRead:223425,totalRecords:223425,projectionReady:false}};
+ assert.match(duplicateViewHTML(state),/aria-busy="true"/);
+ assert.match(duplicateSidebarHTML(state),/duplicate-mini-spinner/);
+});
+
+test('paused shared conflicts point to the offered refresh action rather than a same-operation retry',()=>{
+ const state={...base(),phase:'running',page:null,error:{code:'duplicate_conflict',message:'Shared review changed'},
+  progress:{state:'running',projectionReady:false}};
+ const html=duplicateViewHTML(state);
+ assert.match(html,/Use “Refresh shared review”/);
+ assert.doesNotMatch(html,/Retry same operation/);
+});
 test('list uses accessible whole-row actions, literal escaped values, and explains cautious evidence',()=>{
  const html=duplicateViewHTML(base());
  assert.match(html,/data-action="duplicate-open"/);assert.match(html,/tabindex="0"/);assert.match(html,/role="button"/);

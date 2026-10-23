@@ -34,6 +34,18 @@ test('an active packaging request still shows activity when no error has occurre
   progress:{state:'running',phase:'packaging',recordsRead:223425,totalRecords:223425,projectionReady:false}};
  assert.match(duplicateViewHTML(state),/aria-busy="true"/);
  assert.match(duplicateSidebarHTML(state),/duplicate-mini-spinner/);
+ assert.match(duplicateViewHTML(state),/Packaging duplicate results/);
+});
+
+test('waiting or stale scan progress has an honest stage and no active spinner',()=>{
+ const state={...base(),phase:'running',page:null,lastAdvanceAt:Date.now()-120000,
+  progress:{state:'running',phase:'packaging',recordsRead:223425,totalRecords:223425,checkpoint:275,projectionReady:false,canStep:false}};
+ let html=duplicateViewHTML(state);assert.match(html,/Waiting for the active scan/);assert.doesNotMatch(html,/startup-spinner/);
+ assert.doesNotMatch(duplicateSidebarHTML(state),/duplicate-mini-spinner/);assert.doesNotMatch(html,/Restart from saved/);
+ state.progress.canStep=true;html=duplicateViewHTML(state);assert.match(html,/No recent scan progress/);assert.doesNotMatch(html,/startup-spinner/);
+ assert.match(html,/Scan diagnostics/);assert.match(html,/275/);
+ state.error={code:'duplicate_conflict',message:'The source or shared review changed'};
+ html=duplicateViewHTML(state);assert.doesNotMatch(html,/The source or shared review changed/);assert.match(html,/could not continue/i);
 });
 
 test('paused shared conflicts point to the offered refresh action rather than a same-operation retry',()=>{
@@ -74,7 +86,7 @@ test('detail shows actual source records side by side, review attribution and ex
  assert.match(duplicateViewHTML(state),/Review saved/);assert.match(duplicateViewHTML(state),/Reviewed — not a duplicate/);assert.match(duplicateViewHTML(state),/EDT/);
  state.detail.finding={...saved,priorReview:true};assert.match(duplicateViewHTML(state),/Prior review retained/);
  state.error={code:'duplicate_conflict',message:'Shared review changed'};state.saveState='not_saved';
- assert.match(duplicateViewHTML(state),/Keep &lt;this&gt;/);assert.match(duplicateViewHTML(state),/Shared review changed/);
+ assert.match(duplicateViewHTML(state),/Keep &lt;this&gt;/);assert.match(duplicateViewHTML(state),/could not continue/);
 });
 test('drafts survive progress and navigation; only acknowledged server reviews reset dirtiness',()=>{
  const drafts=createDuplicateReviewDrafts();drafts.update(key,{note:'My draft',initials:'KC',decision:'not_duplicate'});

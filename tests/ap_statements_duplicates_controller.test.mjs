@@ -6,14 +6,22 @@ import {duplicateViewHTML} from '../app/ap_statements/frontend/duplicate-bills-u
 const source={importId:crypto.randomUUID(),importVersion:1,capability:1};
 const key='a'.repeat(64),scanId=crypto.randomUUID(),generation=crypto.randomUUID();
 const progress=(changes={})=>({scanId,importId:source.importId,importVersion:1,generation,checkpoint:0,state:'running',phase:'reading',projectionReady:false,counts:null,canStep:true,...changes});
-function setup(handler){
+function setup(handler,options={}){
  const calls=[],timers=new Map();let n=0,disposed=0;
  const client={dispose(){disposed++;},async request(action,payload,options){calls.push({action,payload,options});return handler?handler(action,payload,options):action==='duplicate_ensure'?progress():action==='duplicate_step'?progress({state:'ready',checkpoint:1}):action==='duplicate_status'?progress({state:'ready',projectionReady:true,counts:{all:1,reviewed:0,unreviewed:1},reviewRevision:0}):action==='duplicate_findings_page'?{scanId,importId:source.importId,reviewRevision:0,total:1,counts:{all:1,reviewed:0,unreviewed:1},findings:[{key,review:null}],nextCursor:null}:{scanId,importId:source.importId,reviewRevision:0,members:[],finding:{key,review:null},nextCursor:null};}};
- const controller=createDuplicateBills(client,{schedule:fn=>{timers.set(++n,fn);return n;},cancelSchedule:id=>timers.delete(id)});
+ const controller=createDuplicateBills(client,{schedule:fn=>{timers.set(++n,fn);return n;},cancelSchedule:id=>timers.delete(id),...options});
  async function flush(){const first=timers.entries().next().value;if(first){timers.delete(first[0]);await first[1]();}}
  return {controller,calls,timers,flush,client,get disposed(){return disposed;}};
 }
 async function finish(h){for(let i=0;i<12&&!h.controller.state.page;i++)await h.flush();}
+
+test('scan observations retain elapsed time until real advancement and reset on generation or source change',async()=>{
+ let time=100000,checkpoint=0;const h=setup(()=>progress({checkpoint,canStep:false,updatedAt:'2026-10-23T12:00:00Z',serverNow:'2026-10-23T12:01:00Z'}),{now:()=>time});
+ h.controller.adoptSource(source);await h.flush();assert.equal(h.controller.state.observedAt,100000);assert.equal(h.controller.state.lastAdvanceAt,40000);
+ time=110000;await h.flush();assert.equal(h.controller.state.observedAt,110000);assert.equal(h.controller.state.lastAdvanceAt,40000);
+ checkpoint=1;time=120000;await h.flush();assert.equal(h.controller.state.lastAdvanceAt,120000);
+ h.controller.adoptSource({...source,importVersion:2});assert.equal(h.controller.state.lastAdvanceAt,null);h.controller.dispose();
+});
 
 test('a restored superseded source can explicitly restart instead of polling forever',async()=>{
  const h=setup(action=>progress({state:action==='duplicate_ensure'?'superseded':'running'}));

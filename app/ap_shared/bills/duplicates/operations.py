@@ -171,6 +171,7 @@ class DuplicateOperations:
             totalRecords=current['source_pin']['recordCount'],projectionReady=prepared['ready'],
             findingCount=current['manifest']['findingCount'] if current['state']=='ready' else None,
             counts=prepared['counts'],reviewRevision=prepared['reviewRevision'],completedAt=current.get('completed_at'),
+            updatedAt=current.get('updated_at'),leaseExpiresAt=current.get('lease_until'),serverNow=self.clock().isoformat(),
             canStep=current.get('session_nonce')==auth.session_nonce or expired,error='duplicate_restart' if restart else current.get('error_code'),
             errorCode='duplicate_restart' if restart else current.get('error_code'))
 

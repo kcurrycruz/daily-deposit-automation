@@ -55,6 +55,19 @@ class DuplicateOperationsTests(unittest.TestCase):
         self.assertEqual([m['bill']['invoiceNumber'] for m in detail['members']],['271712','271712X'])
         self.assertFalse(self.h.service.repository.completion_events)
         self.assertEqual(self.h.repo.active_id,p['importId'])
+    def test_progress_exposes_only_safe_optional_timing_metadata(self):
+        p=self.ensure(); stored=self.repo.scans[p['scanId']]
+        stored['updated_at']='2026-10-22T11:59:00+00:00'
+        stored['lease_until']='2099-01-01T00:00:00+00:00'
+        p=self.call('duplicate_status',dict(scan_id=p['scanId']))
+        self.assertEqual(p.get('updatedAt'),'2026-10-22T11:59:00+00:00')
+        self.assertEqual(p.get('leaseExpiresAt'),'2099-01-01T00:00:00+00:00')
+        self.assertEqual(p.get('serverNow'),NOW.isoformat())
+        for secret in ('session_nonce','source_digest','source_pin','source_reader','storage_path','exception'):
+            self.assertNotIn(secret,p)
+        stored.pop('updated_at'); stored.pop('lease_until')
+        p=self.call('duplicate_status',dict(scan_id=p['scanId']))
+        self.assertIsNone(p['updatedAt']);self.assertIsNone(p['leaseExpiresAt'])
     def test_packaging_publishes_when_later_requests_use_different_threads(self):
         p=self.ensure()
         for _ in range(30):

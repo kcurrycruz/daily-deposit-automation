@@ -1,13 +1,13 @@
 // Duplicate checking owns no source data, statement decisions, or bridge lifetime.
 const defaultFilters=()=>({review:'unreviewed',classification:null,search:''});
-export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancelSchedule=clearTimeout}={}){
+export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancelSchedule=clearTimeout,now=Date.now}={}){
  const state={source:null,phase:'disabled',progress:null,page:null,selection:null,detail:null,error:null,
-  filters:defaultFilters(),saveState:'idle',reviewRevision:null,loading:false};
+  filters:defaultFilters(),saveState:'idle',reviewRevision:null,loading:false,observedAt:null,lastAdvanceAt:null};
  let disposed=false,busy=false,timer=null,token=0,listToken=0,selectionToken=0,pending=0,chain=Promise.resolve(),failed=null,recovery=null;
  const emit=()=>{if(!disposed)onChange(state);};
  const active=t=>!disposed&&t===token;
  function cancel(){if(timer!==null)cancelSchedule(timer);timer=null;}
- function clearEvidence(){state.progress=null;state.page=null;state.selection=null;state.detail=null;state.reviewRevision=null;state.error=null;state.saveState='idle';}
+ function clearEvidence(){state.progress=null;state.page=null;state.selection=null;state.detail=null;state.reviewRevision=null;state.error=null;state.saveState='idle';state.observedAt=null;state.lastAdvanceAt=null;}
  function plan(){
   cancel();if(disposed||busy||pending||state.error||!state.source?.importId||state.source.capability!==1)return;
   const p=state.progress;
@@ -34,6 +34,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
     const reply=await client.request(action,payload,{requestId:id});
     if(active(t)){state.error=null;failed=null;apply(reply);emit();}return reply;
    }catch(error){
+    if(error.code==='duplicate_conflict')error=Object.assign(new Error('Duplicate checks could not continue. Refresh shared review to read the latest status.'),{code:'duplicate_conflict'});
     if(active(t)){
      if(error.code==='denied'){dispose();onChange(state);}
      else{state.error=error;failed=execute;emit();}
@@ -46,6 +47,13 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
  function adoptProgress(p){
   if(p.importId&&p.importId!==state.source.importId||p.importVersion!==undefined&&p.importVersion!==state.source.importVersion)throw Error('Duplicate source changed. Refresh the workspace.');
   if(state.reviewRevision!==null&&p.reviewRevision!==null&&p.reviewRevision!==undefined&&state.reviewRevision!==p.reviewRevision){state.page=null;state.detail=null;}
+  const signature=value=>JSON.stringify(value&&[value.generation,value.phase,value.checkpoint,value.recordsRead,value.probes,value.projectionReady]);
+  const previous=state.progress,stamp=now();
+  state.observedAt=stamp;
+  if(!previous){
+   const serverAge=Date.parse(p.serverNow)-Date.parse(p.updatedAt);
+   state.lastAdvanceAt=stamp-(Number.isFinite(serverAge)?Math.max(0,serverAge):0);
+  }else if(signature(previous)!==signature(p))state.lastAdvanceAt=stamp;
   state.progress=p;state.reviewRevision=p.reviewRevision??state.reviewRevision;state.phase=p.state;
  }
  async function tick(){

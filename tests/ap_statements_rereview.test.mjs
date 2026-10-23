@@ -173,3 +173,9 @@ test('explicit latest recheck with no saved BILL source retains the manual revie
  assert.equal(h.workspace.state.statements[0].reviewMode,'manual');
  assert.equal(h.workspace.state.resolutions[h.row].decision,'Follow up with vendor');h.workspace.dispose();
 });
+
+test('completing after an explicit recheck retains the newly saved comparison rule in local history',async()=>{
+ const h=await harness({draft:true});await h.workspace.refreshComparisons(h.id);
+ await h.workspace.completeStatement({statement_id:h.id,expected_version:1,initials:'KC',notes:''});
+ assert.equal(h.workspace.state.details.get(h.id).ruleVersion,'ap-match-v4');h.workspace.dispose();
+});

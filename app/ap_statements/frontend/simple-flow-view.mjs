@@ -13,7 +13,7 @@ export function uploadReviewHTML(state){
   return `<section class="upload-review-start"><button type="button" class="dropzone" id="dropzone" data-action="upload" aria-label="Add statements: drag PDFs here or click to browse files" ${state.busy?'disabled':''}><span class="dropzone-symbol" aria-hidden="true">↑</span><span class="dropzone-copy"><strong>Add statements</strong><small>Drag statement PDFs here or browse files. <span class="dropzone-limits">Up to 20 files · 20 MiB each</span></small></span><span class="button primary dropzone-action">Browse files</span></button>${state.busy?`<p class="guide-progress" role="status">Reading your PDFs… ${esc(state.progress||'')}</p>`:''}${(state.errors||[]).map(e=>`<div class="file-error">${esc(e)}</div>`).join('')}</section>`;
 }
 export function vendorQuestionHTML(doc,provider,mappings={},readOnly=false,pickerState){
-  if(readOnly||!provider.loaded)return '';
+  if(readOnly||doc.reviewMode==='manual'||!provider.loaded)return '';
   if(provider.scopes&&!provider.directoryComplete)return '<p role="status">Loading saved BILL vendors…</p>';
   const choice=resolveStatementVendor(doc.vendor,providerVendors(provider,doc.id),mappings);
   if(choice.vendor)return `<div class="vendor-recognized">BILL vendor: <strong>${esc(choice.vendor)}</strong> · ${choice.status==='remembered'?'your saved choice':'recognized automatically'}</div>`;

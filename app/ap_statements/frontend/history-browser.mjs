@@ -28,10 +28,10 @@ export function vendorDirectoryHTML(items,query=''){
   const vendors=historyVendors(items).filter(item=>item.vendor.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return `<div class="vendor-directory">${vendors.map(({vendor,count})=>`<button class="panel vendor-directory-card" data-action="vendor-history-open" data-vendor="${esc(vendor)}"><strong>${esc(vendor)}</strong><span>${count} saved review${count===1?'':'s'}</span><small>View previous statements →</small></button>`).join('')}${!vendors.length?'<p class="empty">No saved vendors match this search.</p>':''}</div>`;
 }
-export function historyBrowserHTML(items,filters={},limit=50,{showVendors=true,direction='desc'}={}){
+export function historyBrowserHTML(items,filters={},limit=50,{showVendors=true,direction='desc',canRereview=false}={}){
   const rows=filterHistory(items,filters,direction),vendors=historyVendors(items);
-  if(!showVendors)return historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction);
-  return `<div class="history-browser"><aside class="history-vendors panel"><h2>Vendors</h2><nav aria-label="Statement vendors"><button data-action="history-vendor" data-vendor="" ${!filters.vendor?'aria-current="true"':''}>All vendors <span>${items.length}</span></button>${vendors.map(({vendor,count})=>`<button data-action="history-vendor" data-vendor="${esc(vendor)}" ${filters.vendor===vendor?'aria-current="true"':''}><span>${esc(vendor)}</span><small>${count}</small></button>`).join('')}</nav></aside><div class="history-results">${historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction)}</div></div>`;
+  if(!showVendors)return historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction,{canRereview});
+  return `<div class="history-browser"><aside class="history-vendors panel"><h2>Vendors</h2><nav aria-label="Statement vendors"><button data-action="history-vendor" data-vendor="" ${!filters.vendor?'aria-current="true"':''}>All vendors <span>${items.length}</span></button>${vendors.map(({vendor,count})=>`<button data-action="history-vendor" data-vendor="${esc(vendor)}" ${filters.vendor===vendor?'aria-current="true"':''}><span>${esc(vendor)}</span><small>${count}</small></button>`).join('')}</nav></aside><div class="history-results">${historyView({items:rows.slice(0,limit),nextCursor:rows.length>limit?'local':null},direction,{canRereview})}</div></div>`;
 }
 
 // A small in-memory thumbnail cache, cleared when AP closes. Never localStorage.

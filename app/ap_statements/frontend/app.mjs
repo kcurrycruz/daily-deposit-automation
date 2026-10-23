@@ -17,6 +17,7 @@ import {providerVendors} from './vendor-identity.mjs';
 import {bindStatementDropzone} from './statement-dropzone.mjs';
 import {referenceReviewHTML,confirmReferenceReview,confirmInvoiceCandidate,confirmedInvoiceCandidate,candidateConfirmationHTML,invoiceResult,adventureDiscrepancyHTML,adventureFollowUp,reviewDecisionOptions} from './reference-review.mjs';
 import {duplicateSidebarHTML,duplicateViewHTML,createDuplicateReviewDrafts} from './duplicate-bills-ui.mjs';
+import {createManualCheck,manualCheckFor,rereviewChoiceHTML,manualReviewBannerHTML,manualCheckHTML,manualExtractionHTML,manualReviewReport,assertManualFinancialAction} from './manual-review.mjs';
 
 const icons = {
   ledger: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
@@ -56,6 +57,7 @@ let statementDateSort='desc',historyDateSort='desc';
 let historyLoading=false,historyError=null,historyLimit=50,historyLoadToken=0,historyPreview=null,previewTimer=null,previewReturnFocus=null;
 let historicalDetail=null;
 let migrationPreview=null,pendingAttachment=null;
+let pendingRereview=null,rereviewBusy=false;
 let duplicatePrompt=null;
 let vendorHistorySelection=null,vendorDirectoryQuery='',vendorPicker=null,vendorPickerDoc=null,vendorPickerNames=[];
 let billUpdater=null,billUpdating=false,billUpdateProgress=null;
@@ -79,7 +81,7 @@ function duplicateInput(target){
   if(key&&field){duplicateDrafts.update(key,{[field]:target.value});return true;}return false;
 }
 function docDetail(id){return historicalDetail?.doc.id===id?historicalDetail:shared?.state.details.get(id);}
-const comparisonsFor=doc=>docDetail(doc.id)?.readOnly?docDetail(doc.id).results:statementComparisons(doc,state.provider,state.mappings);
+const comparisonsFor=doc=>doc.reviewMode==='manual'||docDetail(doc.id)?.readOnly?docDetail(doc.id).results:statementComparisons(doc,state.provider,state.mappings);
 const dirty=new Set();
 function ready(){if(!shared?.state.ready)throw Error('Shared workspace is not ready. Finish setup or retry loading.');}
 function sharedStatus(status,error){
@@ -160,7 +162,7 @@ function historyPanel(){
   const filters=`<details class="panel wide-panel history-filters"><summary>Filter previous work</summary><div class="form-grid">${[['statementDate','Statement date','date'],['initials','Reviewer initials','text'],['completedFrom','Completed from (New York)','date'],['completedTo','Completed to (New York)','date']].map(([key,label,type])=>`<label class="field">${label}<input id="history-${key}" type="${type}" value="${esc(activeHistoryFilters[key]||'')}"></label>`).join('')}<label class="field">Status<select id="history-status">${[['','All'],['reconciled','Reconciled'],['reviewed','Reviewed'],['follow_up','Follow-up']].map(([key,label])=>`<option value="${key}" ${activeHistoryFilters.status===key?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="action-row"><button class="button primary" data-action="history-search">Apply filters</button><button class="button" data-action="history-reset">Clear filters</button></div></details>`;
   if(historyLoading)return '<section class="panel history-loading" role="status" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Loading saved statements and vendors…</section>';
   if(historyError)return '<section class="panel wide-panel" role="alert"><h2>Previous statements could not load</h2><p>Your saved work has not changed.</p><button class="button" data-action="history-refresh">Retry loading</button></section>';
-  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit,{showVendors:false,direction:historyDateSort});
+  return filters+historyBrowserHTML(historyPage.items,historyFilters(activeHistoryFilters),historyLimit,{showVendors:false,direction:historyDateSort,canRereview:shared?.state.capabilities.statementRereview===1});
 }
 function vendorDirectoryPanel(){
   if(historyLoading||historyError)return historyPanel();
@@ -205,7 +207,7 @@ function closeQuickPreview(){clearTimeout(previewTimer);historyPreview?.hide(tru
 const results = () => state.statements.flatMap(statement => comparisonsFor(statement));
 const reviewDecision = id => historicalDetail?(historicalDetail.resolutions[id]?.decision?historicalDetail.resolutions[id]:null):(state.resolutions[id]?.decision ? state.resolutions[id] : null);
 const foundInvoice = row => invoiceFound(row,reviewDecision(row.id));
-const resultBadge = row => {const info=invoiceResult(row,reviewDecision(row.id));return badge(info.manual?'matched':row.status,info.label)+(info.manual?'<small class="resolved-label">Manually confirmed</small>':'');};
+const resultBadge = row => {const info=invoiceResult(row,reviewDecision(row.id));return (info.checkedManually?`<span class="badge ${info.tone}"><span class="dot"></span>${esc(info.label)}</span>`:badge(info.manual?'matched':row.status,info.label))+(info.manual?'<small class="resolved-label">Manually confirmed</small>':'');};
 const isAttention = row => !['matched','presence'].includes(row.status) && !reviewDecision(row.id);
 function invalidateReviewDecisions(rows) {
   for (const row of rows) {
@@ -356,7 +358,27 @@ function showBillExportGuide(step=0) {
   overlay.innerHTML=billExportGuideHTML(step);
   overlay.querySelector('[data-guide-title]')?.focus();
 }
-function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}if(duplicatePrompt){duplicatePrompt('cancel');duplicatePrompt=null;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
+async function beginRereview(id){
+  ready();if(shared.state.capabilities.statementRereview!==1)throw Error('Statement re-review setup is unavailable.');
+  if(state.selected&&state.selected!==id&&dirty.has(state.selected))throw Error('Save the open statement before re-reviewing another statement.');
+  closeQuickPreview();
+  const existing=shared.state.details.get(id);
+  if(existing&&!existing.completed&&!existing.readOnly&&state.statements.some(doc=>doc.id===id)){
+    historicalDetail=null;historySelection=null;openDoc(id);toast('Opened your current draft. Existing edits are retained.');return;
+  }
+  const latest=await shared.statement(id);
+  if(state.selected&&state.selected!==id&&dirty.has(state.selected))throw Error('Save the open statement before re-reviewing another statement.');
+  const current=shared.state.details.get(id);
+  if(current&&!current.completed&&!current.readOnly&&state.statements.some(doc=>doc.id===id)){
+    historicalDetail=null;historySelection=null;openDoc(id);toast('Opened your current draft. Existing edits are retained.');return;
+  }
+  if(!latest.completed){
+    shared.adopt(latest);historicalDetail=null;historySelection=null;receiveShared(shared.state);openDoc(id);toast('Opened the current draft.');return;
+  }
+  pendingRereview={id,version:latest.version};
+  modal('Re-review statement',rereviewChoiceHTML(latest.doc.vendor),'start-rereview','Open re-review');
+}
+function closeOverlay() { if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}pendingRereview=null;if(duplicatePrompt){duplicatePrompt('cancel');duplicatePrompt=null;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
 function getDoc() { return historicalDetail?.doc.id===state.selected?historicalDetail.doc:(state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc); }
 function openDoc(id,row=null,{historical=false,tab=null}={}) {
   if(!historical)historicalDetail=null;priorFocus=document.activeElement;state.selected=id;state.selectedRow=row;
@@ -396,13 +418,20 @@ function renderDrawer() {
   const noteLabel=overlay.querySelector('#review-note')?.parentElement;if(noteLabel)noteLabel.firstChild.textContent='Review note (optional)';
   const reviewNote=overlay.querySelector('#review-note');if(reviewNote&&historicalDetail)reviewNote.value=historicalDetail.resolutions[state.selectedRow]?.note||'';
   const detail=docDetail(doc.id),body=overlay.querySelector('.drawer-body');
+  if(row&&doc.reviewMode==='manual')overlay.querySelector('#review-decision')?.closest('label')?.insertAdjacentHTML('beforebegin',manualCheckHTML(row,reviewDecision(row.id),!!detail?.readOnly));
+  if(doc.reviewMode==='manual'&&!detail?.readOnly&&body){body.insertAdjacentHTML('afterbegin',manualReviewBannerHTML(detail));overlay.querySelector('[data-action="manual-recheck"]')?.setAttribute('aria-label','Recheck this statement with latest BILL data');}
   if(state.drawerTab==='review'&&row&&!confirmedInvoiceCandidate(row,reviewDecision(row.id)))overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend',referenceReviewHTML(doc,row,!!detail?.readOnly));
   if(detail?.readOnly){body.insertAdjacentHTML('afterbegin',`<div class="notice blue"><div><strong>Saved revision · read-only</strong><p>${esc(historySelection?.initials||'')} · ${esc(nyTimestamp(historySelection?.completedAt))} · ${esc(detail.ruleVersion)} · Import ${esc(detail.importId||'none')}</p><p>These are the original saved comparisons, not results recalculated against the latest import.</p><button class="button" data-action="reopen-statement">Reopen current statement as a draft</button> <button class="button" data-action="export">Export saved evidence</button></div></div>`);overlay.querySelectorAll('input,textarea,select,[data-action="save-extraction"],[data-action="confirm-extraction"],[data-action="save-notes"],[data-action="resolve"],[data-action="adventure-follow-up"],[data-action="reopen"],[data-action="add-row"],[data-action="delete-row"],[data-action="remove-doc"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=true;});}
-  else if(body){body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row statement-completion"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
+  else if(body){if(doc.reviewMode!=='manual')body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row statement-completion"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
+  if(rereviewBusy)overlay.querySelectorAll('input,textarea,select,button:not(.close)').forEach(el=>{el.disabled=true;});
+  if(detail?.readOnly&&shared?.state.capabilities.statementRereview===1){const reopen=overlay.querySelector('[data-action="reopen-statement"]');if(reopen)reopen.textContent='Re-review latest statement';}
+  if(detail?.readOnly)overlay.querySelectorAll('[data-action="manual-recheck"]').forEach(el=>{el.disabled=true;});
+  if(saveState==='saving')sharedStatus('saving',sharedError);
   showInvoicePage(state.drawerTab==='review'&&state.invoiceDetailsOpen);
   if(detail&&!detail.originalAvailable&&body)body.insertAdjacentHTML('afterbegin','<div class="notice amber"><div><strong>Original PDF not attached</strong><p>Select the original PDF to finish this migrated draft. Your previous notes and corrections are retained.</p><button class="button" data-action="attach-original">Attach original PDF</button></div></div>');
 }
 function extractionView(doc, check, warnings) {
+  if(doc.reviewMode==='manual')return manualExtractionHTML(doc)+pdfPanel(doc);
   return `${warnings.length ? `<div class="notice amber">${icon('info')}<div>${warnings.map(w => `<div>${esc(w)}</div>`).join('')}</div></div>` : `<div class="notice">${icon('check')}<div>Extracted activity agrees with the statement total. Verify invoice numbers before confirming.</div></div>`}<div class="form-grid"><label class="field">Statement vendor<input id="doc-vendor" value="${esc(doc.vendor)}"></label><label class="field">Statement date<input type="date" id="doc-date" value="${esc(doc.statementDate)}"></label><label class="field">Printed statement total (USD)<input id="doc-total" value="${doc.declaredTotal == null ? '' : (doc.declaredTotal / 100).toFixed(2)}" inputmode="decimal"></label><label class="field">Extracted activity total<input readonly value="${money(check.sum)}"></label></div><div class="source-layout"><div><div class="page-control"><strong>Extracted transactions · ${doc.rows.length}</strong><button class="button small" data-action="add-row">${icon('plus')}Add row</button></div><div class="table-wrap"><table class="edit-table"><thead><tr><th>Reference</th><th>Type</th><th>Amount</th><th>Invoice balance</th><th>Page</th><th></th></tr></thead><tbody>${doc.rows.map(row => `<tr data-row="${row.id}"><td><input class="ref" name="reference" value="${esc(row.invoiceNumber)}" aria-label="Invoice reference"></td><td><select name="type" aria-label="Transaction type">${['invoice','credit','payment','opening'].map(type => `<option ${row.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td><td><input name="amount" value="${(row.amount / 100).toFixed(2)}" inputmode="decimal" aria-label="Original amount"></td><td><input name="balance" value="${row.balance == null ? '' : (row.balance / 100).toFixed(2)}" inputmode="decimal" aria-label="Invoice outstanding balance"></td><td><input class="small-col" name="page" type="number" min="1" max="${doc.pageCount}" value="${row.page}" aria-label="Source page"></td><td><button data-action="delete-row" data-id="${row.id}" aria-label="Remove row">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div><p style="font-size:10px;line-height:1.7;color:#849277">Amounts are signed: invoices positive, credits and payments negative. Leave invoice balance blank when only a running account balance is supplied. Reference numbers remain text.</p><div class="action-row"><button class="button" data-action="save-extraction">Save corrections</button><button class="button primary" data-action="confirm-extraction">${icon('check')}Confirm extracted rows</button></div><details style="margin-top:20px;font-size:11px;color:#748967"><summary>Extracted source text</summary><pre class="raw-text">${esc(doc.rawText || doc.rows.map(r => r.source).join('\n'))}</pre></details></div>${pdfPanel(doc)}</div>`;
 }
 function pdfPanel(doc) { const available=files.has(doc.id)||docDetail(doc.id)?.originalAvailable;return `<div><div class="page-control"><strong>Original statement</strong><label>Page <select id="page-select" aria-label="Preview page">${Array.from({length:doc.pageCount},(_,i) => `<option value="${i+1}" ${state.page === i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}</select></label></div>${available?'<div class="pdf-view"><canvas id="pdf-canvas" aria-label="Original PDF page"></canvas><div id="pdf-loading">Loading private original…</div></div>':`<div class="no-source">${icon('ledger')}<br>Original PDF not attached. This migrated draft is incomplete.</div>`}</div>`; }
@@ -413,7 +442,7 @@ function reviewView(doc, row, rows, showPDF=true) {
   const suggestions = !bill && row.candidates.length > 0;
   const emptyComparison=row.status==='extraction'
     ? '<strong>Matching pending PDF verification</strong><p>Check the invoice number and amount against the original PDF, then confirm the extracted rows. This invoice has not been checked against BILL yet.</p><button class="button small" data-action="drawer-tab" data-tab="extraction">Check PDF</button>'
-    : row.status==='unverified'||!state.provider.loaded
+    : row.status==='unverified'||!state.provider.loaded&&doc.reviewMode!=='manual'&&!docDetail(doc.id)?.readOnly
       ? 'The BILL comparison is not ready or is unavailable. Wait for it to finish loading, or retry the comparison. This does not mean the invoice is missing.'
       : row.status==='vendor'
         ? 'Confirm the statement vendor in the invoice list before matching this invoice.'
@@ -537,6 +566,7 @@ document.querySelector('#csv-input').addEventListener('change', async e => {
 });
 document.addEventListener('input', e => {
   if(duplicateInput(e.target))return;
+  if(['review-manual-check','review-manual-initials'].includes(e.target.id))markDirty();
   if(e.target.id==='duplicate-search'){clearTimeout(duplicateSearchTimer);const search=e.target.value;duplicateSearchTimer=setTimeout(()=>shared.duplicates.load({filters:{...shared.duplicates.state.filters,search}}).catch(()=>{}),250);return;}
   if(e.target.id==='vendor-search'){vendorPicker?.input(e.target.value);return;}
   if(e.target.id==='vendor-directory-search'){vendorDirectoryQuery=e.target.value;document.querySelector('.vendor-directory-results').innerHTML=vendorDirectoryHTML(historyPage.items,vendorDirectoryQuery);return;}
@@ -564,6 +594,7 @@ document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const action = target.dataset.action;
   try {
+    if(rereviewBusy&&!['close','back-to-programs','confirm-back-to-programs'].includes(action))throw Error('Please wait for the statement recheck to finish.');
     if(action==='duplicate-view'){state.view='duplicates';render();return;}
     if(action==='duplicate-open'){
       duplicateReturn={scroll:app.querySelector('.main')?.scrollTop||0,key:target.dataset.key};state.view='duplicates';
@@ -600,7 +631,8 @@ document.addEventListener('click', async e => {
     if(action==='attach-original'){const detail=shared.state.details.get(state.selected);pendingAttachment={id:state.selected,version:detail.version};document.querySelector('#pdf-input').click();}
     if(action==='migration-preview'){ready();const legacy=loadSession(browserStorage()),mappings=loadVendorMappings(browserStorage());if(legacy.error||mappings.error)throw Error(legacy.error||mappings.error);migrationPreview=legacyMigrationPreview(legacy.session,mappings.mappings);modal('Import old browser work?',`<p>${migrationPreview.statements.length} real statements found. None of their original PDFs are saved in browser storage.</p><p>This creates unconfirmed shared drafts and retains notes. No completion history or reviewer initials will be invented. Existing browser data is not deleted.</p>${migrationPreview.importMetadata?`<p>Older BILL source: ${esc(migrationPreview.importMetadata.label)}. Select its original CSV once through Import BILL CSV to store the full shared comparison source.</p>`:''}<p>Imported drafts require the original PDFs and a fresh extraction check.</p>`,'confirm-migration','Import previous work');}
     if(action==='confirm-migration'){await shared.migrateLegacy(migrationPreview,true);migrationPreview=null;closeOverlay();render();toast('Previous notes imported as unconfirmed drafts. Attach their original PDFs to continue.');}
-    if(state.selected&&docDetail(state.selected)?.readOnly&&['save-extraction','confirm-extraction','add-row','delete-row','save-notes','resolve','adventure-follow-up','reopen','remove-doc','save-session','attach-original','vendor-confirm','vendor-choose','confirm-reading','complete-dialog','complete-statement'].includes(action))throw Error('This saved revision is read-only. Explicitly reopen the current statement to continue work.');
+    if(state.selected&&docDetail(state.selected)?.readOnly&&['save-extraction','confirm-extraction','add-row','delete-row','save-notes','resolve','adventure-follow-up','reopen','remove-doc','save-session','attach-original','vendor-confirm','vendor-choose','confirm-reading','complete-dialog','complete-statement','manual-recheck'].includes(action))throw Error('This saved revision is read-only. Explicitly reopen the current statement to continue work.');
+    if(state.selected&&getDoc()?.reviewMode==='manual')assertManualFinancialAction(getDoc(),action);
     if(action==='history-view'){closeQuickPreview();state.view='history';historySelection=null;activeHistoryFilters={};await refreshHistory();}
     if(action==='vendor-history-view'){closeQuickPreview();state.view='vendor-history';vendorHistorySelection=null;vendorDirectoryQuery='';activeHistoryFilters={};await refreshHistory();}
     if(action==='vendor-history-open'){vendorHistorySelection=target.dataset.vendor;activeHistoryFilters={vendor:vendorHistorySelection};historyLimit=50;render();}
@@ -616,6 +648,18 @@ document.addEventListener('click', async e => {
     if(action==='duplicate-existing'||action==='duplicate-continue'){const resolve=duplicatePrompt;duplicatePrompt=null;closeOverlay();resolve?.(action==='duplicate-existing'?'existing':'continue');}
     if(action==='history-more')await refreshHistory(true);
     if(action==='history-open'){closeQuickPreview();historySelection=historyPage.items.find(item=>item.id===target.dataset.event);historicalDetail=await shared.statement(historySelection.statementId,historySelection.revisionId);openDoc(historicalDetail.doc.id,null,{historical:true});}
+    if(action==='history-rereview'){
+      const item=historyPage.items.find(item=>item.id===target.dataset.event);if(!item)throw Error('Refresh previous statements before re-reviewing.');
+      await beginRereview(item.statementId);return;
+    }
+    if(action==='start-rereview'){
+      const attempt=pendingRereview;if(!attempt)throw Error('Choose a statement to re-review first.');
+      const mode=document.querySelector('input[name="rereview-mode"]:checked')?.value;
+      if(!['manual','latest'].includes(mode))throw Error('Choose how to re-review this statement.');
+      await shared.reopenStatement(attempt.id,attempt.version,{mode});
+      if(pendingRereview!==attempt){toast('Re-review draft saved. Open it from Statements when ready.');return;}
+      pendingRereview=null;historicalDetail=null;historySelection=null;state.view='statements';openDoc(attempt.id);return;
+    }
     if(action==='vendor-confirm'||action==='vendor-choose'){
       const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before confirming the vendor.');
       ready();const name=action==='vendor-confirm'?target.dataset.vendor:document.querySelector('#statement-bill-vendor').value;
@@ -644,11 +688,17 @@ document.addEventListener('click', async e => {
     }
     if(action==='back-invoices')showInvoicePage(false,true);
     if(action==='refresh-comparisons'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before comparing with current BILL data.');await shared.prepareStatement(doc);render();renderDrawer();toast('Compared with current BILL data. Notes and corrections retained; review the updated results.');}
+    if(action==='manual-recheck'){
+      const doc=getDoc();if(dirty.has(doc.id))throw Error('Save your edits before rechecking with latest BILL data.');
+      rereviewBusy=true;renderDrawer();
+      try{await shared.refreshComparisons(doc.id);await persistDoc(doc);toast('Rechecked with latest BILL data. Notes retained; review the new results.');}
+      finally{rereviewBusy=false;render();renderDrawer();}
+    }
     if(action==='bill-warnings'||action==='bill-warnings-more')await loadBillWarnings(action==='bill-warnings-more');
     if(action==='bill-cancel-update'){if(sharedError?.cancel)await sharedError.cancel();sharedError=null;retryOperation=null;render();toast('Update cancelled. You can select another BILL export.');}
     if(action==='complete-dialog'){const doc=getDoc();if(dirty.has(doc.id))throw Error('Save corrections or notes before marking reviewed.');await shared.ensureComparisons?.(doc);completionPayload({doc,results:comparisonsFor(doc),resolutions:completionReviews(comparisonsFor(doc),state.resolutions),initials:'AP',expectedVersion:shared.state.details.get(doc.id).version});modal('Mark statement reviewed',`<p>Finish your review of the PDF and the invoices found in BILL. Found invoices are acknowledged together; differences require a decision. This does not verify payment settlement or QuickBooks sync.</p><label class="field">Reviewer initials<input id="completion-initials" maxlength="10" placeholder="e.g. KC" required></label><label class="field">Completion note (optional)<textarea id="completion-note"></textarea></label>`,'complete-statement','Mark reviewed');state.selected=doc.id;}
     if(action==='complete-statement'){const doc=getDoc();const proposed=completionReviews(comparisonsFor(doc),state.resolutions);const payload=completionPayload({doc,results:comparisonsFor(doc),resolutions:proposed,initials:document.querySelector('#completion-initials').value,notes:document.querySelector('#completion-note').value,expectedVersion:shared.state.details.get(doc.id).version});state.resolutions=proposed;shared.state.resolutions=proposed;await shared.completeStatement(payload);closeOverlay();state.view='history';await refreshHistory();toast('Review completed and saved.');}
-    if(action==='reopen-statement'){const id=state.selected;if(dirty.has(id)&&state.statements.some(doc=>doc.id===id)){historicalDetail=null;historySelection=null;openDoc(id);toast('Returned to your unsaved draft. Edits retained.');}else{const latest=await shared.statement(id);historicalDetail=null;if(!latest.completed){shared.adopt(latest);receiveShared(shared.state);openDoc(id);toast('A colleague already reopened this statement. Loaded the current draft.');}else{await shared.reopenStatement(id,latest.version);state.view='statements';historySelection=null;openDoc(id);}}}
+    if(action==='reopen-statement'){const id=state.selected;if(shared.state.capabilities.statementRereview===1){await beginRereview(id);return;}if(dirty.has(id)&&state.statements.some(doc=>doc.id===id)){historicalDetail=null;historySelection=null;openDoc(id);toast('Returned to your unsaved draft. Edits retained.');}else{const latest=await shared.statement(id);historicalDetail=null;if(!latest.completed){shared.adopt(latest);receiveShared(shared.state);openDoc(id);toast('A colleague already reopened this statement. Loaded the current draft.');}else{await shared.reopenStatement(id,latest.version);state.view='statements';historySelection=null;openDoc(id);}}}
     if (action === 'back-to-programs') modal('Go back to programs?', '<p>Save changes or export your report before leaving.</p><p>Unsaved edits will be lost. Acknowledged revisions and original PDFs remain in your private shared workspace.</p>', 'confirm-back-to-programs', 'Go back to programs');
     if (action === 'retry-shared') {if(retryOperation)await retryOperation();render();if(state.selected)renderDrawer();}
     if (action === 'reload-latest') modal('Reload latest shared work?','<p>This discards unsaved edits in this tab. Shared records are retained.</p>','confirm-reload','Reload latest');
@@ -699,14 +749,24 @@ document.addEventListener('click', async e => {
       state.resolutions[row.id]={...prior,...followUp,at:undefined};
       await persistDoc(doc);render();renderDrawer();toast('Follow-up saved. No bill or credit was created.');
     }
-    if (action === 'resolve') { if(!document.querySelector('#review-decision').value)throw Error('Choose a review decision before saving.');if(!getDoc().confirmed)throw Error('Check and confirm the PDF reading before saving a decision.');const current=comparisonsFor(getDoc()).find(row=>row.id===state.selectedRow);if(current?.status==='vendor'&&document.querySelector('#review-decision').value==='Reviewed — no action needed')throw Error('Confirm the vendor above, or record a follow-up decision.');const note = document.querySelector('#review-note').value.trim(); state.resolutions[state.selectedRow] = { ...state.resolutions[state.selectedRow],at:undefined,note, decision: document.querySelector('#review-decision').value };await persistDoc(getDoc()); render(); renderDrawer(); toast('Review saved. The matching evidence is preserved.'); }
+    if (action === 'resolve') {
+      const decision=document.querySelector('#review-decision').value,doc=getDoc();
+      if(!decision)throw Error('Choose a review decision before saving.');if(!doc.confirmed)throw Error('Check and confirm the PDF reading before saving a decision.');
+      const current=comparisonsFor(doc).find(row=>row.id===state.selectedRow),checked=doc.reviewMode==='manual'&&!!document.querySelector('#review-manual-check')?.checked;
+      if(current?.status==='vendor'&&decision==='Reviewed — no action needed'&&!checked)throw Error('Confirm the vendor above, check it manually in BILL, or record a follow-up decision.');
+      const note=document.querySelector('#review-note').value.trim(),prior=state.resolutions[state.selectedRow]||{};
+      const resolution=checked?createManualCheck(doc,current,{initials:document.querySelector('#review-manual-initials')?.value,decision,note},prior):{...prior,at:undefined,note,decision};
+      if(!checked)delete resolution.manualCheck;
+      state.resolutions[state.selectedRow]=resolution;
+      await persistDoc(doc);render();renderDrawer();toast('Review saved. The matching evidence is preserved.');
+    }
     if (action === 'reopen') { delete state.resolutions[state.selectedRow];await persistDoc(getDoc()); render(); renderDrawer(); }
     if (action === 'mapping') {
       const value = document.getElementById(target.dataset.input).value.trim();
       if (!value) throw new Error('Enter the BILL vendor name.');
       const vendor = target.dataset.vendor;
       if (vendorKey(state.mappings[vendor] || vendor) !== vendorKey(value)) {
-        for (const doc of state.statements.filter(doc => doc.vendor === vendor)) {
+        for (const doc of state.statements.filter(doc => doc.vendor === vendor&&doc.reviewMode!=='manual')) {
           invalidateReviewDecisions(groupInvoices(doc));
         }
       }
@@ -714,7 +774,20 @@ document.addEventListener('click', async e => {
       render();
       toast('Vendor mapping saved. Changed comparisons need review; previous notes are retained.');
     }
-    if (action === 'save-session') { ready();if(state.selected&&state.drawerTab==='review'&&document.querySelector('#review-note')){const prior=state.resolutions[state.selectedRow]||{};const decision=document.querySelector('#review-decision')?.value||'';const current=comparisonsFor(getDoc()).find(row=>row.id===state.selectedRow);if(decision==='Reviewed — no action needed'&&current?.status==='vendor')throw Error('Confirm the vendor above, or record a follow-up decision.');state.resolutions[state.selectedRow]={...prior,note:document.querySelector('#review-note').value,...(decision?{decision}:{})};}if(state.selected&&state.drawerTab==='extraction'){const doc=getDoc(),priorRows=groupInvoices(doc);collectDoc(doc);invalidateReviewDecisions(priorRows);}if(state.selected&&state.drawerTab==='notes'){getDoc().notes=document.querySelector('#doc-notes').value;getDoc().assignee=document.querySelector('#assignee').value;}for(const doc of [...state.statements])await persistDoc(doc);render();if(state.selected)renderDrawer();toast('Changes saved to the shared workspace.'); }
+    if (action === 'save-session') {
+      ready();
+      if(state.selected&&state.drawerTab==='review'&&document.querySelector('#review-note')){
+        const doc=getDoc(),prior=state.resolutions[state.selectedRow]||{},decision=document.querySelector('#review-decision')?.value||'',note=document.querySelector('#review-note').value;
+        const current=comparisonsFor(doc).find(row=>row.id===state.selectedRow),checked=doc.reviewMode==='manual'&&!!document.querySelector('#review-manual-check')?.checked;
+        if(decision==='Reviewed — no action needed'&&current?.status==='vendor'&&!checked)throw Error('Confirm the vendor above, check it manually in BILL, or record a follow-up decision.');
+        const resolution=checked?createManualCheck(doc,current,{initials:document.querySelector('#review-manual-initials')?.value,decision,note},prior):{...prior,note,...(decision?{decision}:{})};
+        if(!checked)delete resolution.manualCheck;
+        state.resolutions[state.selectedRow]=resolution;
+      }
+      if(state.selected&&state.drawerTab==='extraction'&&getDoc().reviewMode!=='manual'){const doc=getDoc(),priorRows=groupInvoices(doc);collectDoc(doc);invalidateReviewDecisions(priorRows);}
+      if(state.selected&&state.drawerTab==='notes'){getDoc().notes=document.querySelector('#doc-notes').value;getDoc().assignee=document.querySelector('#assignee').value;}
+      for(const doc of [...state.statements])await persistDoc(doc);render();if(state.selected)renderDrawer();toast('Changes saved to the shared workspace.');
+    }
     if (action === 'disconnect') {shared.extractionOnly();render(); toast('Extraction-only view. The stored BILL source is retained and returns when you reload.'); }
     if (action === 'clear') modal('Reset local view?', '<p>Reload shared records and discard unsaved edits in this tab. This does not delete shared statements, BILL records, or previous work.</p>', 'confirm-clear', 'Reset local view');
     if (action === 'confirm-clear') {await shared.load({replace:true});dirty.clear();state.errors=[];files.clear();closeOverlay();render();toast('Local view reset. Shared history retained.');}
@@ -722,9 +795,9 @@ document.addEventListener('click', async e => {
     if (action === 'confirm-remove') { const doc = getDoc();await shared.archiveStatement(doc.id,shared.state.details.get(doc.id).version);files.delete(doc.id);closeOverlay();render(); }
     if (action === 'template') download('bill-record-template.csv', toCSV([['vendor','invoiceNumber','amount','kind','currency','clearedPaymentAmount','scheduledAmount','creditAmount','paymentDate','id']]));
     if (action === 'export') {
-      const header = ['vendor','statement','statementDate','invoiceNumber','activityType','originalAmount','statementOutstanding','result','reason','source','simulated','reviewDecision','reviewNote','assignedReviewer','importId','ruleVersion','reviewerInitials','completedAtUTC','statementNotes','originalComparisonResult','confirmationType'];
+      const header = ['vendor','statement','statementDate','invoiceNumber','activityType','originalAmount','statementOutstanding','result','reason','source','simulated','reviewDecision','reviewNote','assignedReviewer','importId','ruleVersion','reviewerInitials','completedAtUTC','statementNotes','originalComparisonResult','confirmationType','reviewMethod','manualReviewerInitials','manualCheckedAtUTC'];
       const reportRows=state.selected&&docDetail(state.selected)?.readOnly?comparisonsFor(getDoc()):results();
-      const rows = reportRows.map(r => { const detail=docDetail(r.statementId);const doc = detail?.readOnly?detail.doc:(state.statements.find(d => d.id === r.statementId)||detail.doc); const resolution = reviewDecision(r.id);const sourceLabel=detail?.readOnly?(detail.importLabel||'Frozen saved comparison'):(detail?.importInfo?.metadata?.label||detail?.importLabel||state.provider.label||'No BILL data'); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),invoiceResult(r,resolution).label,r.reason,sourceLabel,r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',(historicalDetail?historicalDetail.resolutions[r.id]:state.resolutions[r.id])?.note || '',doc.assignee || '',detail?.importId||'',detail?.readOnly?detail.ruleVersion:MATCH_RULE_VERSION,detail?.readOnly?historySelection?.initials||'':'',detail?.readOnly?historySelection?.completedAt||'':'',doc.notes||'',statuses[r.status].label,invoiceResult(r,resolution).manual?'Manually confirmed':'']; });
+      const rows = reportRows.map(r => { const detail=docDetail(r.statementId);const doc = detail?.readOnly?detail.doc:(state.statements.find(d => d.id === r.statementId)||detail.doc); const resolution = reviewDecision(r.id),pinned=detail?.readOnly||doc.reviewMode==='manual';const sourceLabel=pinned?(detail.importLabel||'Frozen saved comparison'):(detail?.importInfo?.metadata?.label||detail?.importLabel||state.provider.label||'No BILL data'); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),invoiceResult(r,resolution).label,r.reason,sourceLabel,r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',(historicalDetail?historicalDetail.resolutions[r.id]:state.resolutions[r.id])?.note || '',doc.assignee || '',detail?.importId||'',pinned?detail.ruleVersion:MATCH_RULE_VERSION,detail?.readOnly?historySelection?.initials||'':'',detail?.readOnly?historySelection?.completedAt||'':'',doc.notes||'',statuses[r.status].label,invoiceResult(r,resolution).manual?'Manually confirmed':'',...(resolution?.manualCheck?manualReviewReport(r,resolution):['','',''])]; });
       download('statement-reconciliation.csv', toCSV([header,...rows])); toast('Report exported with source and review notes.');
     }
   } catch(error) {if(!action.startsWith('duplicate-')&&(error.retry||error.code)){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }

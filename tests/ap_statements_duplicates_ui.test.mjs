@@ -35,6 +35,7 @@ test('detail shows actual source records side by side, review attribution and ex
  const saved={...finding,review:{decision:'not_duplicate',initials:'KC',note:'',version:1,at:'2026-10-22T12:00:00Z'}};
  state.detail.finding=saved;state.saveState='saved';state.draft.dirty=false;
  assert.match(duplicateViewHTML(state),/Review saved/);assert.match(duplicateViewHTML(state),/Reviewed — not a duplicate/);assert.match(duplicateViewHTML(state),/EDT/);
+ state.detail.finding={...saved,priorReview:true};assert.match(duplicateViewHTML(state),/Prior review retained/);
  state.error={code:'duplicate_conflict',message:'Shared review changed'};state.saveState='not_saved';
  assert.match(duplicateViewHTML(state),/Keep &lt;this&gt;/);assert.match(duplicateViewHTML(state),/Shared review changed/);
 });

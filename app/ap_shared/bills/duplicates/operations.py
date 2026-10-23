@@ -14,7 +14,7 @@ from .contracts import DuplicateError, RULE_VERSION, canonical_hash, validate_re
 from .projection import ReviewProjection
 from .repository import DuplicateRepository
 from .scan import DuplicateScan
-from .source import DuplicateSource
+from .source import DuplicateSource,SourcePreparationCache
 
 
 class DuplicateScanRegistry:
@@ -51,7 +51,14 @@ class DuplicateScanRegistry:
                 nonce=authorization.session_nonce,generation=scan['generation'],checkpoint=0,last=self.clock(),
                 previous=None,reply=None,phase='reading',writer=None,artifact=None)
 
-    def step(self, scan, authorization, authorize):
+    def release_obsolete(self, workspace_id, pin):
+        # The caller has verified the current shared pin. Never evict a handle
+        # for that same source/version merely because another session requests it.
+        with self.lock:
+            for key,h in list(self.handles.items()):
+                if h['workspace']==workspace_id and h['pin']!=pin:self.release(key)
+
+    def step(self, scan, authorization, authorize,deadline=float('inf')):
         with self.lock:
             authorize(authorization); self._expire()
             self.claim(scan,authorization); h=self.handles[scan['id']]
@@ -60,11 +67,18 @@ class DuplicateScanRegistry:
                 return h['reply']
             if expected!=h['checkpoint']:
                 raise DuplicateError('duplicate_restart')
-            deadline=self.clock()+5; engine=h['engine']
+            deadline=min(self.clock()+5,deadline); engine=h['engine']
             if h['phase']=='reading':
-                page=scan['source_reader'].read_page(h['pin'],engine.read-1,5000,authorization)
-                engine.ingest(page['records'])
-                if page['nextOrdinal'] is None:
+                if 'input' not in h and self.clock()<deadline:
+                    if not scan['source_reader'].prepare(h['pin'],authorization,deadline=deadline):
+                        page=None
+                    else:page=scan['source_reader'].read_page(h['pin'],engine.read-1,5000,authorization)
+                    if page is not None:h['input']=page['records']
+                if 'input' in h:
+                    consumed=engine.ingest(h['input'],deadline=deadline)
+                    h['input']=h['input'][consumed:]
+                    if not h['input']:del h['input']
+                if engine.read==h['pin']['recordCount']:
                     engine.finish_input(); h['phase']='candidates'
             elif h['phase']=='candidates':
                 result=engine.step(deadline)
@@ -110,8 +124,10 @@ def create_duplicate_operations(base_repository, bill_operations, config, clock,
             cache=DuplicateArtifactCache(repository)
             projection=ReviewProjection(repository,cache,source,time.monotonic)
             atexit.register(cache.close); atexit.register(projection.close)
-            _runtimes[key]=cache,projection
-        cache,projection=_runtimes[key]
+            source_cache=SourcePreparationCache(bill_operations.repository);atexit.register(source_cache.close)
+            _runtimes[key]=cache,projection,source_cache
+        cache,projection,source_cache=_runtimes[key]
+        source.prepared=source_cache
     return DuplicateOperations(repository,source,_registry,cache,projection,config,clock,revalidate)
 
 
@@ -119,6 +135,7 @@ class DuplicateOperations:
     def __init__(self, repository, source, registry, cache, projection, config, clock, revalidate):
         self.repository,self.source,self.registry,self.cache,self.projection=repository,source,registry,cache,projection
         self.config,self.clock,self.revalidate=config,clock,revalidate
+        self.deadline=float('inf')
 
     def _check(self, auth):
         current=self.revalidate()
@@ -139,18 +156,23 @@ class DuplicateOperations:
 
     def _progress(self, scan, auth):
         self._check(auth); current=self._scan(scan['id'],auth); prepared=dict(ready=False,reviewRevision=None,counts=None)
-        if current['state']=='ready':
-            prepared=self.projection.prepare(current,auth,time.monotonic()+5)
+        if current['state']=='ready' and time.monotonic()<self.deadline:
+            deadline=min(self.deadline,time.monotonic()+5)
+            if self.source.prepare(current['source_pin'],auth,deadline) and self.cache.prepare(
+                self.config.workspace_id,current['id'],current['manifest'],auth,self._check,deadline):
+                prepared=self.projection.prepare(current,auth,deadline)
         self._check(auth)
         expired=self._lease_expired(current)
-        restart=current['state']=='running' and (current['expected_import_version']!=current['source_pin']['importVersion'] or
-            expired and current.get('session_nonce')!=auth.session_nonce)
+        restart=current['state']=='superseded' or current['state']=='running' and (
+            current['expected_import_version']!=current['source_pin']['importVersion'] or expired)
         return dict(scanId=current['id'],importId=current['import_id'],importVersion=current['source_pin']['importVersion'],
             ruleVersion=RULE_VERSION,state='restart_required' if restart else current['state'],phase=current['phase'],generation=current['generation'],
             checkpoint=current['checkpoint'],recordsRead=current['progress']['recordsRead'],probes=current['progress']['probes'],
             totalRecords=current['source_pin']['recordCount'],projectionReady=prepared['ready'],
+            findingCount=current['manifest']['findingCount'] if current['state']=='ready' else None,
             counts=prepared['counts'],reviewRevision=prepared['reviewRevision'],completedAt=current.get('completed_at'),
-            canStep=current.get('session_nonce')==auth.session_nonce or expired,error='duplicate_restart' if restart else current.get('error_code'))
+            canStep=current.get('session_nonce')==auth.session_nonce or expired,error='duplicate_restart' if restart else current.get('error_code'),
+            errorCode='duplicate_restart' if restart else current.get('error_code'))
 
     def _lease_expired(self, scan):
         try:
@@ -184,7 +206,7 @@ class DuplicateOperations:
         if scan['checkpoint']!=expected:
             raise DuplicateError('duplicate_conflict')
         try:
-            result=self.registry.step(scan,auth,self._check)
+            result=self.registry.step(scan,auth,self._check,self.deadline)
             self.source._check(scan['source_pin'],auth)
             row=self._rpc('checkpoint',dict(scan_id=scan['id'],session_nonce=auth.session_nonce,generation=scan['generation'],
                 expected_checkpoint=expected,next_checkpoint=result['checkpoint'],phase=result['phase'],progress=result['progress']),
@@ -211,8 +233,12 @@ class DuplicateOperations:
         # A shared projection is rebound only while holding its lock. A fresh
         # request's session validator must govern every source/cache read.
         with self.projection.lock:
+            self.deadline=time.monotonic()+5;self.projection.deadline=self.deadline
             self.projection.source=self.source
-            result=self._handle(action,payload,request_id,authorization)
+            try:result=self._handle(action,payload,request_id,authorization)
+            except sqlite3.OperationalError as error:
+                if 'interrupted' in str(error):raise DuplicateError('duplicate_unavailable') from None
+                raise
             self._check(authorization)
             return result
 
@@ -224,6 +250,7 @@ class DuplicateOperations:
             if pin is None: return dict(state='no_source',counts=None,projectionReady=False)
             if pin['importId']!=data['import_id'] or pin['importVersion']!=data['expected_import_version']:
                 raise DuplicateError('duplicate_conflict')
+            self.registry.release_obsolete(self.config.workspace_id,pin)
             sid=str(uuid5(UUID(self.config.workspace_id),pin['importId']+':'+RULE_VERSION))
             scan=self._rpc('ensure',dict(scan_id=sid,**data,source_digest=pin['sourceDigest'],rule_version=RULE_VERSION),request_id,auth,'ensure')
             if scan['state']=='pending':
@@ -237,7 +264,7 @@ class DuplicateOperations:
             data=validate_review_payload(payload); scan=self._scan(data['scan_id'],auth)
             if data['import_id']!=scan['import_id'] or data['expected_import_version']!=scan['source_pin']['importVersion'] or scan['state']!='ready':
                 raise DuplicateError('duplicate_conflict')
-            with self.cache.acquire(self.config.workspace_id,scan['id'],scan['manifest'],auth,self._check) as artifact:
+            with self.cache.acquire(self.config.workspace_id,scan['id'],scan['manifest'],auth,self._check,prepared_only=True) as artifact:
                 found=artifact.execute('select key from findings where key=?',(data['finding_key'],)).fetchone()
             if found is None: raise DuplicateError('duplicate_conflict')
             self.source._check(scan['source_pin'],auth)

@@ -15,6 +15,39 @@ from test_ap_shared_access import CONFIG
 
 
 class DuplicateArtifactTests(unittest.TestCase):
+    def test_warm_verified_cache_does_not_repeat_full_validation(self):
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
+        _,_,packed,_,repo,scan,_=self.fixture()
+        manifest=repo.put_result(scan,packed,str(uuid4()))
+        cache=DuplicateArtifactCache(repo);self.addCleanup(cache.close)
+        with patch.object(cache,'_open',wraps=cache._open) as opening:
+            for _ in range(2):
+                with cache.acquire(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None) as db:
+                    self.assertEqual(db.execute('select count(*) from findings').fetchone()[0],1)
+            self.assertEqual(opening.call_count,1)
+
+    def test_preparation_yields_before_decompression_and_resumes(self):
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
+        _,_,packed,_,repo,scan,_=self.fixture()
+        manifest=repo.put_result(scan,packed,str(uuid4()))
+        cache=DuplicateArtifactCache(repo);self.addCleanup(cache.close)
+        self.assertFalse(cache.prepare(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None,deadline=0))
+        for _ in range(30):
+            if cache.prepare(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None,deadline=time.monotonic()+5):break
+        else:self.fail('preparation never completed')
+        with cache.acquire(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None,prepared_only=True) as db:
+            self.assertEqual(db.execute('select count(*) from findings').fetchone()[0],1)
+
+    def test_new_current_scan_releases_obsolete_partial_preparation(self):
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
+        _,_,packed,_,repo,scan,_=self.fixture()
+        manifest=repo.put_result(scan,packed,str(uuid4()))
+        cache=DuplicateArtifactCache(repo);self.addCleanup(cache.close)
+        self.assertFalse(cache.prepare(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None,time.monotonic()+5))
+        old=next(iter(cache.pending.values()))['unpack'].path.parent
+        cache.prepare(CONFIG.workspace_id,str(uuid4()),manifest,None,lambda _:None,time.monotonic()+5)
+        self.assertEqual(len(cache.pending),1)
+        self.assertFalse(old.exists())
     def fixture(self):
         from app.ap_shared.bills.duplicates.scan import DuplicateScan
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter

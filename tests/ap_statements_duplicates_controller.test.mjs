@@ -14,6 +14,12 @@ function setup(handler){
 }
 async function finish(h){for(let i=0;i<12&&!h.controller.state.page;i++)await h.flush();}
 
+test('a restored superseded source can explicitly restart instead of polling forever',async()=>{
+ const h=setup(action=>progress({state:action==='duplicate_ensure'?'superseded':'running'}));
+ h.controller.adoptSource(source);await h.flush();await h.controller.retry();
+ assert.equal(h.calls.at(-1).action,'duplicate_step');assert.equal(h.calls.at(-1).payload.restart,true);h.controller.dispose();
+});
+
 test('no capability or no source never starts a scan',async()=>{
  const h=setup();h.controller.adoptSource({...source,capability:0});await h.flush();assert.equal(h.calls.length,0);
  h.controller.adoptSource({...source,importId:null});await h.flush();assert.equal(h.calls.length,0);assert.equal(h.controller.state.phase,'no_source');h.controller.dispose();

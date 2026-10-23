@@ -9,6 +9,7 @@ from ...models import allowed, integer, text
 from .artifacts import SCHEMA
 from .contracts import (DuplicateError, RULE_VERSION, RESPONSE_BYTES, MAX_BYTES, encoded,
                         digest, encode_cursor, decode_cursor)
+from .preparation import bounded
 
 
 class ReviewProjection:
@@ -41,9 +42,11 @@ class ReviewProjection:
         with closing(sqlite3.connect(path)) as db:
             db.execute('pragma cache_size=-8192')
             db.execute('create table findings(' + SCHEMA['findings'] + ')')
+            db.execute('create index finding_order on findings(strength desc,latest_date desc,key)')
             db.execute('create table reviews(key text primary key,decision text,review text)')
             db.commit()
-        entry = dict(path=path, phase='findings', after=-1, cursor=None, ready=False, counts=None)
+        entry = dict(path=path, phase='findings', after=-1, cursor=None, ready=False, counts=None,
+                     count_after=-1,all_count=0,reviewed=0)
         self.entries[self._identity(scan, revision)] = entry
         return entry
 
@@ -55,30 +58,41 @@ class ReviewProjection:
             if not entry['ready'] and self.clock() < deadline:
                 with closing(sqlite3.connect(entry['path'])) as db:
                     db.execute('pragma cache_size=-8192')
+                    bounded(db,deadline)
                     if entry['phase'] == 'findings':
                         with self.cache.acquire(scan['workspace_id'], scan['id'], scan['manifest'], authorization,
-                                                self.source.ops._check) as artifact:
-                            rows = artifact.execute('select * from findings where id>? order by id limit 5000', (entry['after'],)).fetchall()
+                                                self.source.ops._check,prepared_only=True) as artifact:
+                            bounded(artifact,deadline)
+                            rows = artifact.execute('select * from findings where id>? order by id limit 250', (entry['after'],)).fetchall()
                         if rows:
-                            db.executemany('insert into findings values(?,?,?,?,?,?,?,?,?)', rows)
-                            entry['after'] = rows[-1][0]
+                            inserted=[]
+                            for row in rows:
+                                if self.clock()>=deadline:break
+                                db.execute('insert into findings values(?,?,?,?,?,?,?,?,?)',row);inserted.append(row[0])
+                            db.commit()
+                            if inserted:entry['after']=inserted[-1]
                         else:
-                            db.execute('create index finding_order on findings(strength desc,latest_date desc,key)')
                             entry['phase'] = 'reviews'
                     elif entry['phase'] == 'reviews':
-                        page = self.repo.reviews_page(entry['cursor'], 500)
+                        page = self.repo.reviews_page(entry['cursor'], 100)
+                        last=entry['cursor'];processed=0
                         for review in page['reviews']:
+                            if self.clock()>=deadline:break
                             if review['decision'] not in ('confirmed_duplicate', 'not_duplicate', 'unreviewed'):
                                 raise DuplicateError('duplicate_invalid_source')
                             db.execute('insert into reviews values(?,?,?)', (digest(review['key']), review['decision'], encoded(review)))
-                        entry['cursor'] = page['nextCursor']
-                        if page['nextCursor'] is None:
+                            last=review['key'];processed+=1
+                        db.commit();entry['cursor']=last
+                        if processed==len(page['reviews']) and page['nextCursor'] is None:
                             entry['phase'] = 'counts'
                     else:
-                        all_count, reviewed = db.execute('''select count(*),coalesce(sum(r.decision is not null and r.decision<>'unreviewed'),0)
-                            from findings f left join reviews r on f.key=r.key''').fetchone()
-                        entry['counts'] = dict(all=all_count, reviewed=reviewed, unreviewed=all_count-reviewed)
-                        entry['ready'] = True
+                        rows=db.execute('''select f.id,r.decision from findings f left join reviews r on f.key=r.key
+                            where f.id>? order by f.id limit 5000''',(entry['count_after'],)).fetchall()
+                        entry['all_count']+=len(rows);entry['reviewed']+=sum(d is not None and d!='unreviewed' for _,d in rows)
+                        if rows:entry['count_after']=rows[-1][0]
+                        else:
+                            entry['counts']=dict(all=entry['all_count'],reviewed=entry['reviewed'],unreviewed=entry['all_count']-entry['reviewed'])
+                            entry['ready']=True
                     db.commit()
                 if entry['path'].stat().st_size > MAX_BYTES:
                     self.invalidate(scan['workspace_id']); raise DuplicateError('duplicate_limit')
@@ -115,9 +129,12 @@ class ReviewProjection:
     def _base(self, scan, revision):
         return dict(scanId=scan['id'], importId=scan['import_id'], ruleVersion=RULE_VERSION, reviewRevision=revision)
 
-    def _finding(self, row):
+    def _finding(self, row, import_id):
+        review=json.loads(row[9]) if row[9] else None
+        previews=json.loads(row[7])
         return dict(key=row[1], classification=row[2], strength=row[3], reasons=json.loads(row[4]), latestDate=row[5],
-                    memberCount=row[6], previews=json.loads(row[7]), review=json.loads(row[9]) if row[9] else None)
+                    latestInvoiceDate=row[5],memberCount=row[6],previews=previews,preview=previews,review=review,
+                    priorReview=bool(review and review['reviewedImportId']!=import_id))
 
     def findings_page(self, scan, filters, cursor, limit, authorization):
         integer(limit, minimum=1, maximum=100); filters = self._filters(filters)
@@ -133,6 +150,7 @@ class ReviewProjection:
                 where.append('instr(f.search,?)>0'); params.append(filters['search'].casefold())
             join = ' from findings f left join reviews r on f.key=r.key where ' + ' and '.join(where)
             with closing(sqlite3.connect(entry['path'])) as db:
+                bounded(db,min(self.clock()+5,getattr(self,'deadline',float('inf'))))
                 all_count, reviewed = db.execute("select count(*),coalesce(sum(r.decision is not null and r.decision<>'unreviewed'),0)" + join, params).fetchone()
                 if filters['review'] == 'reviewed': join += " and r.decision<>'unreviewed'"
                 elif filters['review'] == 'unreviewed': join += " and (r.decision is null or r.decision='unreviewed')"
@@ -141,14 +159,14 @@ class ReviewProjection:
                                   [*params,limit,offset]).fetchall()
             output=[]; used=0
             for row in rows:
-                finding=self._finding(row); size=len(encoded(finding).encode())
+                finding=self._finding(row,scan['import_id']); size=len(encoded(finding).encode())
                 if used+size>RESPONSE_BYTES:
                     if not output: raise DuplicateError('duplicate_limit')
                     break
                 output.append(finding); used+=size
             after=offset+len(output)
             result=dict(**self._base(scan,revision),findings=output,total=total,
-                        counts=dict(all=all_count,reviewed=reviewed,unreviewed=all_count-reviewed),
+                        counts=entry['counts'],
                         nextCursor=encode_cursor(binding,dict(offset=after)) if after<total else None)
             self._finish(scan,authorization,revision)
             return result
@@ -161,9 +179,11 @@ class ReviewProjection:
             position=decode_cursor(cursor,binding) or dict(after=-1)
             after=integer(position.get('after'),minimum=-1,maximum=pin['recordCount']-1)
             with closing(sqlite3.connect(entry['path'])) as db:
+                bounded(db,min(self.clock()+5,getattr(self,'deadline',float('inf'))))
                 row=db.execute('select f.*,r.review from findings f left join reviews r on f.key=r.key where f.key=?',(finding_key,)).fetchone()
             if row is None: raise DuplicateError('duplicate_conflict')
-            with self.cache.acquire(scan['workspace_id'],scan['id'],scan['manifest'],authorization,self.source.ops._check) as artifact:
+            with self.cache.acquire(scan['workspace_id'],scan['id'],scan['manifest'],authorization,self.source.ops._check,prepared_only=True) as artifact:
+                bounded(artifact,min(self.clock()+5,getattr(self,'deadline',float('inf'))))
                 ordinals=[r[0] for r in artifact.execute('select ordinal from members where finding_id=? and ordinal>? order by ordinal limit ?',
                                                        (row[0],after,limit+1))]
             values=self.source.members(pin,ordinals[:limit],authorization) if ordinals else []
@@ -175,7 +195,7 @@ class ReviewProjection:
                     break
                 used+=size; output.append(value)
             has_more=len(output)<len(ordinals)
-            result=dict(**self._base(scan,revision),finding=self._finding(row),members=output,total=row[6],
+            result=dict(**self._base(scan,revision),finding=self._finding(row,scan['import_id']),members=output,total=row[6],
                         nextCursor=encode_cursor(binding,dict(after=output[-1]['ordinal'])) if has_more else None)
             self._finish(scan,authorization,revision)
             return result

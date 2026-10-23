@@ -19,6 +19,7 @@ class DuplicateScan:
         self.current = self.pending = None
         self.db.executescript('''
           pragma cache_size=-8192; pragma temp_store=FILE;
+          pragma journal_mode=MEMORY; pragma synchronous=OFF;
           create table scan_records(ordinal integer primary key,ident text,fp text,warn text,raw_ref text);
           create index scan_identity on scan_records(ident,ordinal);
           create table nodes(ident text primary key,ordinal integer unique,n integer,
@@ -39,13 +40,15 @@ class DuplicateScan:
         if self.db.execute('pragma page_count').fetchone()[0] * self.db.execute('pragma page_size').fetchone()[0] > MAX_BYTES:
             raise DuplicateError('duplicate_limit')
 
-    def ingest(self, records):
+    def ingest(self, records, deadline=float('inf')):
         if self.input_done or len(records) > 5000:
             raise DuplicateError('duplicate_invalid_source')
+        consumed=0
         for item in records:
+            if self.clock()>=deadline:break
             if type(item['ordinal']) is not int or item['ordinal'] != self.read or self.read >= self.pin['recordCount']:
                 raise DuplicateError('duplicate_invalid_source')
-            value = validate_record(item['bill']); ordinal = self.read; self.read += 1
+            value = validate_record(item['bill']); ordinal = self.read; self.read += 1;consumed+=1
             if not eligible(value):
                 continue
             self.eligible += 1
@@ -64,6 +67,7 @@ class DuplicateScan:
             if warn:
                 self.db.execute('insert or ignore into warning_keys values(?,?)', (ident, warn))
         self._size(); self.db.commit()
+        return consumed
 
     def finish_input(self):
         if self.read != self.pin['recordCount']:

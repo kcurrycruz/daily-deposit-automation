@@ -109,7 +109,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   }
   if(failed){state.error=null;return failed();}
   const p=state.progress;
-  if(p&&['failed','restart_required'].includes(p.state)){
+  if(p&&['failed','restart_required','superseded'].includes(p.state)){
    state.error=null;return operation('duplicate_step',{scan_id:p.scanId,generation:p.generation,expected_checkpoint:p.checkpoint,restart:true},adoptProgress);
   }
   state.error=null;state.page=null;

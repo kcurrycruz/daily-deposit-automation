@@ -100,3 +100,19 @@ class DuplicateScanTests(unittest.TestCase):
         while not engine.step(20)['done']:
             pass
         self.assertEqual(engine.finish()['findingCount'], 1)
+
+    def test_ingestion_yields_at_deadline_and_resumes_every_record(self):
+        from app.ap_shared.bills.duplicates.scan import DuplicateScan
+        now=[0]
+        def clock():
+            now[0]+=1
+            return now[0]
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close)
+        engine=DuplicateScan(db,{**PIN,'recordCount':5},clock)
+        rows=[dict(ordinal=n,bill=bill('REF'+str(n))) for n in range(5)]
+        consumed=engine.ingest(rows,deadline=3)
+        self.assertGreater(consumed,0);self.assertLess(consumed,5)
+        self.assertEqual(engine.read,consumed)
+        engine.ingest(rows[consumed:],deadline=100)
+        engine.finish_input()
+        self.assertEqual(engine.read,5)

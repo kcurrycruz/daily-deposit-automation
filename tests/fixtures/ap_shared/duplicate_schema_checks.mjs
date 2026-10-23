@@ -88,6 +88,22 @@ try{
    expected_checkpoint:0,next_checkpoint:1,state:'reading',counts:{}});
  assert.equal(oldProgress.checkpoint,1);
  await oldCall('job_abandon',{job_id:newBillJob,session_nonce:nonce,generation:oldJob.generation});
+ // Actual SQL restoration keeps unfinished A superseded until the application
+ // explicitly requests a new generation; it must remain restartable.
+ const a=crypto.randomUUID(),b=crypto.randomUUID(),sa=crypto.randomUUID(),sb=crypto.randomUUID();
+ for(const id of [a,b])await q('insert into ap_bill_imports(id,workspace_id,file_hash,original_object_key,metadata,record_count,state) values($1,$2,$3,$4,$5,2,$6)',
+   [id,other,(id===a?'a':'b').repeat(64),other+'/csv/'+(id===a?'a':'b').repeat(64)+'.csv','{}','ready']);
+ const restoredCall=(op,data)=>call(op,data,undefined,undefined,other);
+ await q('update ap_workspaces set active_import_id=$1 where id=$2',[a,other]);
+ const sourceA={scan_id:sa,import_id:a,expected_import_version:1,source_digest:'a'.repeat(64),rule_version:'bill-duplicates-v1'};
+ await restoredCall('ensure',sourceA);
+ const runningA=await restoredCall('claim',{scan_id:sa,session_nonce:nonce});
+ await q('update ap_workspaces set active_import_id=$1 where id=$2',[b,other]);
+ await restoredCall('ensure',{...sourceA,scan_id:sb,import_id:b,source_digest:'b'.repeat(64),expected_import_version:2});
+ await q('update ap_workspaces set active_import_id=$1 where id=$2',[a,other]);
+ assert.equal((await restoredCall('ensure',{...sourceA,expected_import_version:3})).state,'superseded');
+ const restartedA=await restoredCall('restart',{scan_id:sa,session_nonce:nonce,expected_generation:runningA.generation});
+ assert.equal(restartedA.state,'running');assert.notEqual(restartedA.generation,runningA.generation);assert.equal(restartedA.expected_import_version,3);
  for(const role of ['anon','authenticated']){
    await db.exec('set role '+role);
    await assert.rejects(q('select * from ap_duplicate_reviews'),/permission denied/);

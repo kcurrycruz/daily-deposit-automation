@@ -35,7 +35,7 @@ class ProjectionSource:
 class ProjectionCache:
     def __init__(self, path): self.path=path
     @contextmanager
-    def acquire(self, *args):
+    def acquire(self, *args, **kwargs):
         db=sqlite3.connect(self.path)
         try: yield db
         finally: db.close()
@@ -61,7 +61,7 @@ class DuplicateProjectionTests(unittest.TestCase):
         projection=ReviewProjection(repo,cache,source,time.monotonic); self.addCleanup(projection.close)
         return projection,repo,scan
     def ready(self,p,scan):
-        for _ in range(10):
+        for _ in range(30):
             result=p.prepare(scan,None,time.monotonic()+5)
             if result['ready']: return result
         self.fail('projection never completed')
@@ -75,6 +75,9 @@ class DuplicateProjectionTests(unittest.TestCase):
         self.assertEqual(len(page['findings']),70)
         self.assertEqual(page['total'],70)
         self.assertTrue(all(f['review'] is None for f in page['findings']))
+        self.assertEqual(page['findings'][0]['latestInvoiceDate'],'2026-10-01')
+        self.assertEqual(page['findings'][0]['preview'],[])
+        self.assertFalse(page['findings'][0]['priorReview'])
     def test_order_cursor_binding_literal_search_and_revision_changes(self):
         p,repo,scan=self.fixture(); self.ready(p,scan)
         filters=dict(review='all',classification=None,search='')
@@ -85,6 +88,7 @@ class DuplicateProjectionTests(unittest.TestCase):
         for search in ['%', '_', 'é', '"quote"']:
             result=p.findings_page(scan,{**filters,'search':search},None,100,None)
             self.assertEqual(result['total'],1)
+            self.assertEqual(result['counts'],dict(all=620,reviewed=550,unreviewed=70))
         for change in [dict(review='reviewed'),dict(search='different')]:
             with self.assertRaises(ValueError): p.findings_page(scan,{**filters,**change},page['nextCursor'],100,None)
         with self.assertRaises(ValueError): p.findings_page(scan,filters,'forged',100,None)

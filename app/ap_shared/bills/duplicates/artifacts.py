@@ -11,6 +11,7 @@ import threading
 import time
 from .contracts import (DuplicateError, RULE_VERSION, MAX_BYTES, MAX_ARCHIVE_BYTES,
                         canonical_hash, validate_manifest, validate_pin)
+from .preparation import Unpack,connect,bounded,stamp
 
 SCHEMA = {
     'findings': 'id integer primary key,key text unique,classification text,strength text,reasons text,latest_date text,member_count integer,preview text,search text',
@@ -27,8 +28,10 @@ class DuplicateArtifactWriter:
         self.source.execute('pragma query_only=ON')
         self.db = sqlite3.connect(self.final)
         self.db.execute('pragma cache_size=-8192')
+        self.db.execute('pragma journal_mode=MEMORY');self.db.execute('pragma synchronous=OFF')
         for name, definition in SCHEMA.items():
             self.db.execute('create table ' + name + '(' + definition + ')')
+        self.db.execute('create index finding_order on findings(strength desc,latest_date desc,key)')
         self.tables, self.table, self.after = list(SCHEMA), 0, -1
         self.phase, self.done, self.info = 'copy', False, None
         self.input = self.output = self.compressor = None
@@ -44,16 +47,17 @@ class DuplicateArtifactWriter:
         deadline = deadline if deadline is not None else time.monotonic() + 5
         if self.phase == 'copy' and time.monotonic() < deadline:
             name = self.tables[self.table]
-            rows = self.source.execute('select rowid,* from ' + name + ' where rowid>? order by rowid limit 5000', (self.after,)).fetchall()
+            rows = self.source.execute('select rowid,* from ' + name + ' where rowid>? order by rowid limit 250', (self.after,)).fetchall()
             if rows:
                 marks = ','.join('?' for _ in rows[0][1:])
-                self.db.executemany('insert into ' + name + ' values(' + marks + ')', (r[1:] for r in rows))
-                self.after = rows[-1][0]
+                for row in rows:
+                    if time.monotonic()>=deadline:break
+                    self.db.execute('insert into '+name+' values('+marks+')',row[1:]);self.after=row[0]
             else:
                 self.table += 1; self.after = -1
             self.db.commit(); self._bounded()
             if self.table == len(self.tables):
-                self.db.executescript('create index finding_order on findings(strength desc,latest_date desc,key);pragma user_version=1;')
+                self.db.execute('pragma user_version=1')
                 self.db.commit(); self.db.close(); self.db = None; self.source.close(); self.source = None
                 self._bounded()
                 self.input = open(self.final, 'rb'); self.output = open(self.target, 'wb')
@@ -95,6 +99,7 @@ class DuplicateArtifactCache:
         self.repository, self.clock = repository, clock
         self.root = tempfile.TemporaryDirectory(prefix='hwfc-duplicates-cache-', dir=root)
         self.entries = OrderedDict()
+        self.pending={}
         self.lock, self.closed = threading.RLock(), False
 
     def _remove(self, key):
@@ -113,13 +118,13 @@ class DuplicateArtifactCache:
         if sum(e['size'] for e in self.entries.values()) + extra > MAX_BYTES:
             raise DuplicateError('duplicate_limit')
 
-    def _open(self, path, manifest):
-        db = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
+    def _open(self, path, manifest, validate=True):
+        db = connect(path)
         try:
             db.execute('pragma query_only=ON'); db.execute('pragma trusted_schema=OFF'); db.execute('pragma cache_size=-8192')
             if hasattr(db, 'enable_load_extension'):
                 db.enable_load_extension(False)
-            if db.execute('pragma user_version').fetchone()[0] != 1 or db.execute('pragma quick_check').fetchone()[0] != 'ok':
+            if db.execute('pragma user_version').fetchone()[0] != 1 or validate and db.execute('pragma quick_check').fetchone()[0] != 'ok':
                 raise DuplicateError('duplicate_invalid_source')
             tables = {r[0] for r in db.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'")}
             if tables != set(SCHEMA):
@@ -135,6 +140,7 @@ class DuplicateArtifactCache:
             pin = validate_pin(meta['pin']); counts = meta['counts']
             if pin['importId'] != manifest['importId'] or pin['sourceDigest'] != manifest['sourceDigest'] or counts['recordCount'] != manifest['recordCount'] or counts['findingCount'] != manifest['findingCount']:
                 raise DuplicateError('duplicate_invalid_source')
+            if not validate:return db
             if db.execute('select count(*) from findings').fetchone()[0] != manifest['findingCount']:
                 raise DuplicateError('duplicate_invalid_source')
             if db.execute('select 1 from findings where key is null or member_count<2 limit 1').fetchone():
@@ -148,7 +154,7 @@ class DuplicateArtifactCache:
             db.close(); raise
 
     @contextmanager
-    def acquire(self, workspace_id, scan_id, manifest, authorization, authorize):
+    def acquire(self, workspace_id, scan_id, manifest, authorization, authorize,prepared_only=False):
         authorize(authorization)
         manifest = validate_manifest(manifest)
         if workspace_id != self.repository.config.workspace_id or not manifest['key'].startswith(workspace_id + '/'):
@@ -159,6 +165,7 @@ class DuplicateArtifactCache:
             if self.closed:
                 raise DuplicateError()
             if key not in self.entries:
+                if prepared_only:raise DuplicateError('duplicate_conflict')
                 self._evict(manifest['expandedBytes'])
                 directory = tempfile.TemporaryDirectory(prefix='result-', dir=self.root.name)
                 try:
@@ -177,14 +184,15 @@ class DuplicateArtifactCache:
                         raise DuplicateError('duplicate_invalid_source')
                     checked = self._open(target, manifest); checked.close()
                     authorize(authorization)
-                    self.entries[key] = dict(directory=directory, path=target, size=size, refs=0, last=self.clock())
+                    self.entries[key] = dict(directory=directory, path=target, size=size, refs=0, last=self.clock(),stamp=stamp(target))
                 except Exception:
                     directory.cleanup(); raise
             entry = self.entries[key]
             entry['refs'] += 1; self.entries.move_to_end(key)
         try:
             authorize(authorization)
-            db = self._open(entry['path'], manifest)
+            if stamp(entry['path'])!=entry['stamp']:raise DuplicateError('duplicate_invalid_source')
+            db = connect(entry['path'])
             yield db
             authorize(authorization)
         except (sqlite3.DatabaseError, OSError, KeyError, json.JSONDecodeError):
@@ -202,7 +210,64 @@ class DuplicateArtifactCache:
     def close(self):
         with self.lock:
             self.closed = True
+            for pending in self.pending.values():pending['unpack'].close()
+            self.pending.clear()
             for key in list(self.entries):
                 self._remove(key)
             if not self.entries:
                 self.root.cleanup()
+
+    def prepare(self,workspace_id,scan_id,manifest,authorization,authorize,deadline):
+        authorize(authorization);manifest=validate_manifest(manifest)
+        if workspace_id!=self.repository.config.workspace_id or not manifest['key'].startswith(workspace_id+'/'):
+            raise PermissionError('AP workspace access denied.')
+        key=(workspace_id,scan_id,canonical_hash(manifest))
+        with self.lock:
+            if self.closed:raise DuplicateError()
+            # Only current-source scans reach preparation through operations.
+            # Partial files have no readers and are never durable evidence.
+            for old,item in list(self.pending.items()):
+                if old[0]==workspace_id and old!=key:
+                    item['unpack'].close();del self.pending[old]
+            if key in self.entries:
+                if stamp(self.entries[key]['path'])!=self.entries[key]['stamp']:raise DuplicateError('duplicate_invalid_source')
+                authorize(authorization);return True
+            if time.monotonic()>=deadline:return False
+            if key not in self.pending:
+                self._evict(manifest['expandedBytes']+sum(p['size'] for p in self.pending.values()))
+                unpack=Unpack(self.root.name,lambda p:self.repository.read_result(manifest,p),manifest)
+                self.pending[key]=dict(unpack=unpack,size=manifest['expandedBytes'],phase='findings',after=-1,n=0,member_after=(-1,-1),group=None)
+            item=self.pending[key];unpack=item['unpack']
+            try:
+                if not unpack.step(deadline):authorize(authorization);return False
+                if time.monotonic()>=deadline:authorize(authorization);return False
+                with closing(self._open(unpack.path,manifest,validate=False)) as db:
+                    bounded(db,deadline)
+                    if item['phase']=='findings':
+                        if db.execute('select 1 from findings where id<0 limit 1').fetchone():raise DuplicateError('duplicate_invalid_source')
+                        rows=db.execute('''select f.id,f.key,f.member_count,(select count(*) from members m where m.finding_id=f.id)
+                            from findings f where f.id>? order by f.id limit 250''',(item['after'],)).fetchall()
+                        for ident,key_text,count,actual in rows:
+                            if key_text is None or count<2 or count!=actual:raise DuplicateError('duplicate_invalid_source')
+                        item['n']+=len(rows)
+                        if rows:item['after']=rows[-1][0]
+                        else:
+                            if item['n']!=manifest['findingCount']:raise DuplicateError('duplicate_invalid_source')
+                            item['phase']='members'
+                    else:
+                        if db.execute('select 1 from members where finding_id<0 limit 1').fetchone():raise DuplicateError('duplicate_invalid_source')
+                        rows=db.execute('''select m.finding_id,m.ordinal,f.id from members m left join findings f on f.id=m.finding_id
+                            where (m.finding_id,m.ordinal)>(?,?) order by m.finding_id,m.ordinal limit 5000''',item['member_after']).fetchall()
+                        if any(found is None or ordinal<0 or ordinal>=manifest['recordCount'] for _,ordinal,found in rows):
+                            raise DuplicateError('duplicate_invalid_source')
+                        if rows:item['member_after']=rows[-1][:2]
+                        else:
+                            authorize(authorization)
+                            self.entries[key]=dict(directory=unpack.directory,path=unpack.path,size=unpack.size,refs=0,last=self.clock(),stamp=stamp(unpack.path))
+                            del self.pending[key];return True
+                authorize(authorization);return False
+            except sqlite3.OperationalError as error:
+                if 'interrupted' in str(error):authorize(authorization);return False
+                unpack.close();del self.pending[key];raise DuplicateError('duplicate_invalid_source') from None
+            except Exception:
+                unpack.close();del self.pending[key];raise

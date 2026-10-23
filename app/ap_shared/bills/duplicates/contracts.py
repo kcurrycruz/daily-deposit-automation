@@ -39,6 +39,88 @@ class ScanRecord(TypedDict):
     bill: JsonObject
 
 
+class Finding(TypedDict):
+    key: str
+    classification: str
+    strength: str
+    reasons: list[str]
+    latestInvoiceDate: str
+    memberCount: int
+
+
+class Member(TypedDict):
+    ordinal: int
+    fingerprint: str
+
+
+class Review(TypedDict):
+    key: str
+    decision: str
+    initials: str
+    note: str
+    version: int
+    at: str
+    reviewedImportId: str
+
+
+class BillPreview(TypedDict):
+    ordinal: int
+    vendor: str
+    invoiceNumber: str
+    amount: int
+    invoiceDate: str
+    currency: str
+
+
+class FindingSummary(Finding):
+    preview: list[BillPreview]
+    review: Review | None
+    priorReview: bool
+
+
+class ResultManifest(TypedDict):
+    format: str
+    ruleVersion: str
+    sourceDigest: str
+    importId: str
+    key: str
+    hash: str
+    bytes: int
+    expandedHash: str
+    expandedBytes: int
+    findingCount: int
+    recordCount: int
+
+
+class ScanProgress(TypedDict):
+    scanId: str
+    importId: str
+    importVersion: int
+    ruleVersion: str
+    state: str
+    generation: str
+    checkpoint: int
+    phase: str
+    recordsRead: int
+    probes: int
+    findingCount: int | None
+    counts: JsonObject | None
+    projectionReady: bool
+    reviewRevision: int | None
+    errorCode: str | None
+
+
+class FindingPage(TypedDict):
+    scanId: str
+    importId: str
+    ruleVersion: str
+    reviewRevision: int
+    findings: list[FindingSummary]
+    total: int
+    counts: JsonObject
+    nextCursor: str | None
+
+
 class DuplicateError(ValueError):
     def __init__(self, code='duplicate_unavailable'):
         self.code = code if code in MESSAGES else 'duplicate_unavailable'

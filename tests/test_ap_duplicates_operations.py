@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from dataclasses import replace
 from uuid import uuid4
+from unittest.mock import patch
 from fixtures.ap_shared.bill_exports import export
 from fixtures.ap_shared.duplicate_store_double import DuplicateStoreDouble
 import test_ap_bill_operations as bill_harness
@@ -14,14 +15,15 @@ from test_ap_shared_access import CONFIG,NOW
 def setup_detector(test):
     from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
     from app.ap_shared.bills.duplicates.projection import ReviewProjection
-    from app.ap_shared.bills.duplicates.source import DuplicateSource
+    from app.ap_shared.bills.duplicates.source import DuplicateSource,SourcePreparationCache
     api=importlib.import_module('app.ap_shared.bills.duplicates.operations')
     harness=bill_harness.BillOperationsTests(); harness.setUp(); test.addCleanup(harness.doCleanups)
     job,p=harness.upload(export([{'Invoice #':'271712','Invoice Date':'10/01/2026'},
                                 {'Invoice #':'271712X','Invoice Date':'10/01/2026'}])); harness.finish(job,p)
     base=harness.service.repository; base.config=CONFIG
     repo=DuplicateStoreDouble(base,harness.repo)
-    source=DuplicateSource(base,harness.ops)
+    source_cache=SourcePreparationCache(harness.repo);test.addCleanup(source_cache.close)
+    source=DuplicateSource(base,harness.ops,source_cache)
     registry=api.DuplicateScanRegistry(); test.addCleanup(registry.close)
     cache=DuplicateArtifactCache(repo); test.addCleanup(cache.close)
     projection=ReviewProjection(repo,cache,source,time.monotonic); test.addCleanup(projection.close)
@@ -45,6 +47,7 @@ class DuplicateOperationsTests(unittest.TestCase):
         self.fail('scan not completed')
     def test_existing_import_scans_without_statements_and_returns_evidence(self):
         p=self.complete(self.ensure()); self.assertEqual(p['counts']['unreviewed'],1)
+        self.assertEqual(p['findingCount'],1);self.assertIsNone(p['errorCode'])
         page=self.call('duplicate_findings_page',dict(scan_id=p['scanId'],filters={},cursor=None,limit=100))
         self.assertEqual(page['total'],1)
         detail=self.call('duplicate_members_page',dict(scan_id=p['scanId'],finding_key=page['findings'][0]['key'],cursor=None,limit=100))
@@ -129,3 +132,64 @@ class DuplicateOperationsTests(unittest.TestCase):
         self.repo.scans[p['scanId']]['lease_until']='2026-10-01T12:00:00Z'
         restarted=ops.handle('duplicate_step',payload,str(uuid4()),other)
         self.assertNotEqual(restarted['generation'],p['generation'])
+
+    def test_legitimate_adventure_suffix_review_survives_weekly_payment_changes(self):
+        rows=[{'Vendor Name':'Adventure in Food Trading Company','Invoice #':ref} for ref in ('271712','271712X')]
+        job,step=self.h.upload(export(rows));self.h.finish(job,step)
+        first=self.complete(self.ensure())
+        page=self.call('duplicate_findings_page',dict(scan_id=first['scanId'],filters={},cursor=None,limit=100))
+        key=page['findings'][0]['key']
+        self.assertEqual(page['findings'][0]['classification'],'possible_duplicate')
+        self.call('duplicate_review_save',dict(scan_id=first['scanId'],import_id=first['importId'],expected_import_version=first['importVersion'],
+            finding_key=key,expected_review_version=0,decision='not_duplicate',initials='KC',note='Legitimate Adventure suffix bills.'))
+        updated=[{**row,'Paid Amount':'138.00','Status':'PaidInFull','Full Payment Date':'10/20/2026'} for row in rows]
+        job,step=self.h.upload(export(updated));self.h.finish(job,step)
+        second=self.complete(self.ensure());self.assertNotEqual(first['importId'],second['importId'])
+        self.assertEqual(second['counts'],dict(all=1,reviewed=1,unreviewed=0))
+        page=self.call('duplicate_findings_page',dict(scan_id=second['scanId'],filters={'review':'reviewed'},cursor=None,limit=100))
+        self.assertEqual(page['findings'][0]['key'],key);self.assertEqual(page['findings'][0]['review']['decision'],'not_duplicate')
+        self.assertEqual(len(self.repo.events),1)
+
+    def test_replacement_releases_only_obsolete_workspace_scan(self):
+        first=self.ensure()
+        job,step=self.h.upload(export([{'Invoice #':'NEW1234'}]));self.h.finish(job,step)
+        second=self.ensure()
+        self.assertEqual(second['state'],'running')
+        self.assertNotIn(first['scanId'],self.ops.registry.handles)
+        self.assertEqual(self.complete(second)['state'],'ready')
+
+    def test_publication_does_not_start_a_second_budget_of_preparation(self):
+        now=[0];self.ops.registry.clock=lambda:now[0]
+        original=self.repo.put_result
+        def slow_publication(*args):
+            result=original(*args);now[0]+=6;return result
+        with patch('time.monotonic',side_effect=lambda:now[0]),patch.object(self.repo,'put_result',side_effect=slow_publication):
+            p=self.ensure()
+            for _ in range(60):
+                if p['state']=='ready':break
+                p=self.call('duplicate_step',dict(scan_id=p['scanId'],generation=p['generation'],expected_checkpoint=p['checkpoint'],restart=False))
+            self.assertEqual(p['state'],'ready')
+            self.assertFalse(self.ops.cache.pending)
+            self.assertFalse(self.ops.cache.entries)
+
+    def test_original_session_can_restart_expired_lease_with_or_without_local_state(self):
+        for release in (False,True):
+            with self.subTest(release=release):
+                p=self.ensure()
+                self.repo.scans[p['scanId']]['lease_until']='2026-10-01T12:00:00Z'
+                if release:self.ops.registry.release(p['scanId'])
+                progress=self.call('duplicate_status',dict(scan_id=p['scanId']))
+                self.assertEqual(progress['state'],'restart_required')
+                restarted=self.call('duplicate_step',dict(scan_id=p['scanId'],generation=p['generation'],expected_checkpoint=p['checkpoint'],restart=True))
+                self.assertNotEqual(restarted['generation'],p['generation'])
+
+    def test_restored_unfinished_source_is_restartable_with_new_generation(self):
+        first=self.ensure()
+        job,step=self.h.upload(export([{'Invoice #':'NEW1234'}]));self.h.finish(job,step)
+        self.ensure()
+        self.h.repo.active_id=first['importId'];self.h.repo.version+=1
+        restored=self.ensure()
+        self.assertEqual(restored['state'],'restart_required')
+        restarted=self.call('duplicate_step',dict(scan_id=restored['scanId'],generation=restored['generation'],expected_checkpoint=restored['checkpoint'],restart=True))
+        self.assertNotEqual(restarted['generation'],first['generation'])
+        self.assertEqual(self.complete(restarted)['state'],'ready')

@@ -34,6 +34,9 @@ class DuplicateStoreDouble(DuplicateRepository):
         if operation=='ensure':
             if data['import_id']!=pin['importId'] or data['expected_import_version']!=pin['importVersion']:
                 raise DuplicateError('duplicate_conflict')
+            for old in self.scans.values():
+                if old['import_id']!=pin['importId'] and old['state'] in ('pending','running','failed','restart_required'):
+                    old.update(state='superseded',lease_until=NOW.isoformat())
             if sid not in self.scans:
                 self.scans[sid]=dict(id=sid,workspace_id=self.config.workspace_id,import_id=pin['importId'],
                     source_digest=pin['sourceDigest'],rule_version='bill-duplicates-v1',expected_import_version=pin['importVersion'],

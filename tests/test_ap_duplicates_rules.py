@@ -23,6 +23,38 @@ class DuplicateRuleTests(unittest.TestCase):
                 self.assertIsNone(self.rules.classify(bill(), bill(ref)))
         self.assertIsNone(self.rules.classify(bill('123'), bill('123X')))
 
+    def test_digit_swaps_require_same_valid_invoice_day(self):
+        for vendor in ['Synthetic Daily Doughnuts', 'Synthetic Daily Deliveries']:
+            for a, b in [('990000-R-1303', '990000-R-1330'),
+                         ('990000-R-1312', '990000-R-1321'),
+                         ('990000-R-1302', '990000-R-1320'),
+                         ('990000-R-1301', '990000-R-1310')]:
+                left = bill(a, vendor=vendor, amount=10000, currency='')
+                for day in ['2026-10-02', '2026-10-18', '', '2026-02-30']:
+                    right = bill(b, vendor=vendor, amount=10000, currency='', invoice_date=day)
+                    with self.subTest(vendor=vendor, references=(a, b), date=day):
+                        self.assertIsNone(self.rules.classify(left, right))
+                        self.assertIsNone(self.rules.classify(right, left))
+                right = bill(b, vendor=vendor, amount=10000, currency='')
+                for first, second in [(left, right), (right, left)]:
+                    result = self.rules.classify(first, second)
+                    self.assertEqual(result['classification'], 'possible_duplicate')
+                    self.assertIn('digit_transposition', result['reasons'])
+                for day in ['', '2026-02-30']:
+                    self.assertIsNone(self.rules.classify(changed(left, invoiceDate=day), changed(right, invoiceDate=day)))
+
+    def test_exact_reference_checks_survive_different_dates(self):
+        left = bill('990000-R-1303', amount=10000)
+        right = bill('990000 -r- 1303', amount=10000, invoice_date='2026-12-01')
+        result = self.rules.classify(left, right)
+        self.assertEqual(result['classification'], 'exact_pattern')
+        self.assertIn('different_invoice_dates', result['reasons'])
+        self.assertEqual(self.rules.classify(left, changed(right, amount=10001))['classification'], 'amount_difference')
+
+    def test_same_day_swaps_still_require_vendor_amount_and_currency_agreement(self):
+        for changes in [dict(vendor='Another Vendor'), dict(amount=129980), dict(currency='CAD')]:
+            self.assertIsNone(self.rules.classify(bill(), changed(bill('271721'), **changes)))
+
     def test_equal_amounts_and_other_vendors_are_not_duplicate_evidence(self):
         self.assertIsNone(self.rules.classify(bill(), bill('888888')))
         self.assertIsNone(self.rules.classify(bill(), bill('271712X', vendor='Other Foods')))
@@ -84,11 +116,20 @@ class DuplicateRuleTests(unittest.TestCase):
 
 
 class DuplicateContractTests(unittest.TestCase):
-    def test_manifest_and_cursor_bind_to_source_and_workspace(self):
-        from app.ap_shared.bills.duplicates.contracts import validate_manifest, encode_cursor, decode_cursor
+    def test_old_rule_manifest_cannot_reuse_completed_results(self):
+        from app.ap_shared.bills.duplicates.contracts import validate_manifest
         manifest = dict(format='bill-duplicates-v1', ruleVersion='bill-duplicates-v1', sourceDigest='a' * 64,
                         importId=PIN['importId'], key=PIN['importId'] + '/bill-duplicates/v1/' + PIN['importId'] +
                         '/bill-duplicates-v1/' + 'b' * 64 + '.sqlite.gz', hash='b' * 64, bytes=50,
+                        expandedHash='c' * 64, expandedBytes=4096, findingCount=1, recordCount=2)
+        with self.assertRaises(ValueError):
+            validate_manifest(manifest)
+
+    def test_manifest_and_cursor_bind_to_source_and_workspace(self):
+        from app.ap_shared.bills.duplicates.contracts import RULE_VERSION, validate_manifest, encode_cursor, decode_cursor
+        manifest = dict(format='bill-duplicates-v1', ruleVersion=RULE_VERSION, sourceDigest='a' * 64,
+                        importId=PIN['importId'], key=PIN['importId'] + '/bill-duplicates/v1/' + PIN['importId'] +
+                        '/' + RULE_VERSION + '/' + 'b' * 64 + '.sqlite.gz', hash='b' * 64, bytes=50,
                         expandedHash='c' * 64, expandedBytes=4096, findingCount=1, recordCount=2)
         self.assertEqual(validate_manifest(manifest), manifest)
         for changes in [dict(key='../bad'), dict(bytes=33554433), dict(expandedBytes=536870913),

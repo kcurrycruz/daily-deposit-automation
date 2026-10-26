@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,existsSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'../../..');
@@ -75,6 +75,41 @@ try{
  await assert.rejects(q('delete from ap_duplicate_review_events'),/immutable/);
  assert.equal((await q('select count(*)::int n from ap_bill_records')).rows[0].n,0);
  assert.equal((await q('select count(*)::int n from ap_completion_events')).rows[0].n,0);
+ // Upgrade a populated, immutable v1 result rather than only an empty schema.
+ const history=async()=>({scans:(await q('select * from ap_duplicate_scans where id=$1',[sid])).rows,
+   reviews:(await q('select * from ap_duplicate_reviews order by key')).rows,
+   events:(await q('select * from ap_duplicate_review_events order by id')).rows,
+   revision:(await q('select duplicate_review_revision from ap_workspaces where id=$1',[w])).rows});
+ const beforeUpgrade=await history();
+ const upgrade=resolve(root,'supabase/migrations/202610260001_ap_duplicate_rules_v2.sql');
+ assert.ok(existsSync(upgrade),'Add the forward duplicate-rules-v2 migration');
+ await db.exec(readFileSync(upgrade,'utf8'));
+ await db.exec(readFileSync(upgrade,'utf8'));
+ assert.deepEqual(await history(),beforeUpgrade);
+ const v2sid=crypto.randomUUID(),v2ensure={...ensure,scan_id:v2sid,expected_import_version:3,rule_version:'bill-duplicates-v2'};
+ let v2scan=await call('ensure',v2ensure);
+ assert.equal(v2scan.id,v2sid);assert.equal(v2scan.rule_version,'bill-duplicates-v2');
+ assert.equal((await call('ensure',{...ensure,expected_import_version:3})).id,sid);
+ for(const invalid of [null,'','bill-duplicates-v3']){
+   await assert.rejects(call('ensure',{...v2ensure,scan_id:crypto.randomUUID(),rule_version:invalid}),/duplicate_conflict/);
+ }
+ v2scan=await call('claim',{scan_id:v2sid,session_nonce:nonce});
+ v2scan=await call('checkpoint',{scan_id:v2sid,session_nonce:nonce,generation:v2scan.generation,
+   expected_checkpoint:0,next_checkpoint:1,phase:'packaging',progress:{recordsRead:2,probes:10}});
+ const v2publish={scan_id:v2sid,session_nonce:nonce,generation:v2scan.generation,expected_checkpoint:1,expected_import_version:3};
+ await assert.rejects(call('publish',{...v2publish,manifest:mf()}),/duplicate_invalid_source/);
+ const v2manifest={...mf(),ruleVersion:'bill-duplicates-v2',key:w+'/bill-duplicates/v1/'+iid+'/bill-duplicates-v2/'+'b'.repeat(64)+'.sqlite.gz'};
+ v2scan=await call('publish',{...v2publish,manifest:v2manifest});
+ assert.equal(v2scan.state,'ready');assert.deepEqual(v2scan.manifest,v2manifest);
+ const v2review=await call('review',{...review,scan_id:v2sid,expected_import_version:3,
+   finding_key:'9'.repeat(64),verified_key:'9'.repeat(64),expected_review_version:0});
+ assert.equal(v2review.review.version,1);
+ assert.equal((await q('select count(*)::int n from ap_duplicate_reviews')).rows[0].n,2);
+ const afterUpgrade=await history();
+ assert.deepEqual(afterUpgrade.scans,beforeUpgrade.scans);
+ assert.deepEqual(afterUpgrade.reviews.filter(r=>r.key==='e'.repeat(64)),beforeUpgrade.reviews);
+ assert.deepEqual(afterUpgrade.events.filter(e=>e.key==='e'.repeat(64)),beforeUpgrade.events);
+ assert.equal((await q("select has_function_privilege('service_role','public.ap_duplicate_mutate(text,uuid,uuid,text,jsonb)','execute') allowed")).rows[0].allowed,true);
  // Existing BILL operations still work after the additive quota rewrite.
  await q("update ap_bill_jobs set state='abandoned',reserved_bytes=0");
  const oldCall=(op,data)=>q('select public.ap_bill_mutate($1,$2,$3,$4,$5) value',
@@ -110,5 +145,16 @@ try{
    await assert.rejects(call('ensure',ensure),/permission denied/);
    await db.exec('reset role');
  }
+ // An unexpected deployed definition must stop the upgrade transaction, not
+ // guess at a patch or leave its earlier constraint changes half-applied.
+ const functionSql=(await q("select pg_get_functiondef('public.ap_duplicate_mutate(text,uuid,uuid,text,jsonb)'::regprocedure) definition")).rows[0].definition;
+ const constraintSql=(await q("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='public.ap_duplicate_scans'::regclass and conname='ap_duplicate_scans_rule_version_check'")).rows;
+ const beforeGuard=await history();
+ await db.exec(functionSql.replace("and rule_version=p_data->>'rule_version'","and rule_version=coalesce(p_data->>'rule_version','')"));
+ await assert.rejects(db.exec(readFileSync(upgrade,'utf8')),/unsupported_duplicate_rule_function/);
+ await db.exec('rollback');
+ assert.deepEqual((await q("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='public.ap_duplicate_scans'::regclass and conname='ap_duplicate_scans_rule_version_check'")).rows,constraintSql);
+ assert.deepEqual(await history(),beforeGuard);
+ await db.exec(functionSql);
  console.log('Duplicate bill SQL checks passed');
 }finally{await db.close();}

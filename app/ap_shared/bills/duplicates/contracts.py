@@ -8,7 +8,7 @@ import re
 from typing import TypedDict
 from ...models import allowed, integer, text, require_uuid, normalize_initials, JsonObject
 
-RULE_VERSION = 'bill-duplicates-v1'
+RULE_VERSION = 'bill-duplicates-v2'
 MAX_RECORDS = 500000
 MAX_FINDINGS = 100000
 MAX_BYTES = 512 * 1024 * 1024

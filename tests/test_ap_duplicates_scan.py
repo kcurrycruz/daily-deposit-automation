@@ -15,14 +15,39 @@ class DuplicateScanTests(unittest.TestCase):
             engine.ingest([dict(ordinal=n, bill=bills[n]) for n in range(at, min(at + 5000, len(bills)))])
         engine.finish_input()
         calls = 0
+        last_probes = 0
         while True:
             progress = engine.step(time.monotonic() + 5, max_probes=probes)
+            self.assertLessEqual(progress['probes'] - last_probes, probes)
+            last_probes = progress['probes']
             calls += 1
             if progress['done']:
                 break
             self.assertLess(calls, max(100, len(bills) * 10))
         summary = engine.finish()
         return db, engine, summary, calls
+
+    def test_recurring_different_day_swaps_are_not_fetched_as_candidates(self):
+        # Each reference has one exact, one suffix-stem and three swap queries.
+        # Ten misses plus three node advances, with no different-day fetch.
+        rows = [bill('1234', amount=10000), bill('1243', amount=10000, invoice_date='2026-10-02')]
+        _, _, report, _ = self.scan(rows, probes=1)
+        self.assertEqual(report['findingCount'], 0)
+        self.assertEqual(report['probes'], 13)
+
+    def test_same_day_swaps_remain_visible(self):
+        db, _, report, _ = self.scan([bill('1234', amount=10000), bill('1243', amount=10000)], probes=1)
+        self.assertEqual(report['findingCount'], 1)
+        self.assertEqual(json.loads(db.execute('select reasons from findings').fetchone()[0]), ['digit_transposition'])
+
+    def test_exact_reference_checks_remain_visible_across_dates(self):
+        for amount, classification in [(10000, 'exact_pattern'), (10001, 'amount_difference')]:
+            with self.subTest(amount=amount):
+                rows = [bill('REF1234', amount=10000),
+                        bill('REF 1234', amount=amount, invoice_date='2026-12-01')]
+                db, _, report, _ = self.scan(rows, probes=1)
+                self.assertEqual(report['findingCount'], 1)
+                self.assertEqual(db.execute('select classification from findings').fetchone()[0], classification)
 
     def test_suffix_swap_and_amount_difference_are_direct_pairs(self):
         rows = [bill('271712'), bill('271712X'), bill('888812'), bill('888821'),

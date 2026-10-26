@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 from fixtures.ap_shared.duplicate_cases import PIN, bill
 from test_ap_shared_access import CONFIG
+from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
 
 
 class ProjectionRepository:
@@ -57,7 +58,7 @@ class DuplicateProjectionTests(unittest.TestCase):
         db.commit(); db.close()
         repo=ProjectionRepository(); source=ProjectionSource(repo)
         cache=ProjectionCache(path); scan=dict(id=str(uuid4()),workspace_id=CONFIG.workspace_id,
-            import_id=PIN['importId'],source_digest=PIN['sourceDigest'],rule_version='bill-duplicates-v1',manifest={})
+            import_id=PIN['importId'],source_digest=PIN['sourceDigest'],rule_version=RULE_VERSION,manifest={})
         projection=ReviewProjection(repo,cache,source,time.monotonic); self.addCleanup(projection.close)
         return projection,repo,scan
     def ready(self,p,scan):

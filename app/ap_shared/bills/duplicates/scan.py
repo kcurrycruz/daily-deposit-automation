@@ -108,6 +108,10 @@ class DuplicateScan:
                 sql = '''select * from nodes indexed by node_stem where vendor=? and amount=? and stem=?
                          and ordinal>? and ref<>? and day between ? and ? order by ordinal limit 1'''
                 params = (node['vendor'], node['amount'], key, cur['after'], node['ref'], node['day'] - 30, node['day'] + 30)
+            elif mode == 'swap':
+                sql = '''select * from nodes indexed by node_ref where vendor=? and ref=?
+                         and amount=? and day=? and ordinal>? order by ordinal limit 1'''
+                params = (node['vendor'], key, node['amount'], node['day'], cur['after'])
             else:
                 sql = 'select * from nodes indexed by node_ref where vendor=? and ref=? and ordinal>? order by ordinal limit 1'
                 params = (node['vendor'], key, cur['after'])

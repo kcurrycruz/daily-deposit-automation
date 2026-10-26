@@ -4,13 +4,14 @@ from uuid import uuid4
 import httpx
 from test_ap_shared_repository import BackendTransport, make_repository, IMPORT
 from test_ap_shared_access import CONFIG
+from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
 
 
 class DuplicateTransport(BackendTransport):
     def __init__(self):
         super().__init__()
         self.scan = dict(id=str(uuid4()), workspace_id=CONFIG.workspace_id, import_id=IMPORT,
-                         source_digest='a' * 64, rule_version='bill-duplicates-v1', state='pending')
+                         source_digest='a' * 64, rule_version=RULE_VERSION, state='pending')
         self.error = None
 
     def respond(self, request):

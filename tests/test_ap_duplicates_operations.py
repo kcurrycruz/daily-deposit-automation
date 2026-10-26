@@ -5,7 +5,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dataclasses import replace
-from uuid import uuid4
+from uuid import uuid4, uuid5, UUID
 from unittest.mock import patch
 from fixtures.ap_shared.bill_exports import export
 from fixtures.ap_shared.duplicate_store_double import DuplicateStoreDouble
@@ -55,6 +55,28 @@ class DuplicateOperationsTests(unittest.TestCase):
         self.assertEqual([m['bill']['invoiceNumber'] for m in detail['members']],['271712','271712X'])
         self.assertFalse(self.h.service.repository.completion_events)
         self.assertEqual(self.h.repo.active_id,p['importId'])
+
+    def test_revised_rules_select_new_scan_without_reusing_old_review(self):
+        from copy import deepcopy
+        p=self.complete(self.ensure())
+        legacy_id=str(uuid5(UUID(CONFIG.workspace_id),p['importId']+':bill-duplicates-v1'))
+        self.assertNotEqual(p['scanId'],legacy_id)
+        self.assertEqual(p['scanId'],str(uuid5(UUID(CONFIG.workspace_id),p['importId']+':bill-duplicates-v2')))
+        historical=deepcopy(self.repo.scans[p['scanId']])
+        historical.update(id=legacy_id,rule_version='bill-duplicates-v1')
+        historical['manifest']['ruleVersion']='bill-duplicates-v1'
+        historical['manifest']['key']=historical['manifest']['key'].replace('/bill-duplicates-v2/','/bill-duplicates-v1/')
+        self.repo.scans[legacy_id]=historical
+        old_review=dict(key='e'*64,decision='not_duplicate',initials='KC',note='Old rule review',version=1,
+                        at='2026-10-22T12:00:00Z',reviewedImportId=p['importId'])
+        self.repo.saved[old_review['key']]=deepcopy(old_review)
+        self.ops.projection.invalidate(CONFIG.workspace_id)
+        current=self.complete(self.ensure())
+        self.assertEqual(current['scanId'],p['scanId'])
+        self.assertEqual(current['counts'],dict(all=1,reviewed=0,unreviewed=1))
+        self.assertEqual(self.repo.scans[legacy_id],historical)
+        self.assertEqual(self.repo.saved[old_review['key']],old_review)
+
     def test_progress_exposes_only_safe_optional_timing_metadata(self):
         p=self.ensure(); stored=self.repo.scans[p['scanId']]
         stored['updated_at']='2026-10-22T11:59:00+00:00'

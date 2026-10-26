@@ -20,6 +20,7 @@ from app.ap_shared.bills.duplicates.operations import DuplicateScanRegistry
 from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
 from app.ap_shared.bills.duplicates.source import DuplicateSource,SourcePreparationCache
 from app.ap_shared.bills.duplicates.projection import ReviewProjection
+from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
 from bill_scale_check import peak_rss
 
 
@@ -91,7 +92,7 @@ def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
         counts=engine.finish();db=registry.handles[scan['id']]['db'];keys=hashlib.sha256()
         for key, in db.execute('select key from findings order by key'):keys.update(key.encode())
         patterns=dict(db.execute('select classification,count(*) from findings group by classification'))
-        artifact=reply['artifact'];result_manifest={**artifact,'key':workspace+'/bill-duplicates/v1/'+pin['importId']+'/bill-duplicates-v1/'+artifact['hash']+'.sqlite.gz'}
+        artifact=reply['artifact'];result_manifest={**artifact,'key':workspace+'/bill-duplicates/v1/'+pin['importId']+'/'+RULE_VERSION+'/'+artifact['hash']+'.sqlite.gz'}
         def read_result(expected,target):
             data=reply['path'].read_bytes()
             if hashlib.sha256(data).hexdigest()!=expected['hash']:raise AssertionError('result changed')
@@ -99,7 +100,7 @@ def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
         repo=SimpleNamespace(config=config,current=lambda:pin,review_revision=lambda:0,
             reviews_page=lambda *_:dict(reviews=[],nextCursor=None),read_result=read_result)
         cache=DuplicateArtifactCache(repo);projection=ReviewProjection(repo,cache,source,time.monotonic)
-        ready_scan=dict(id=scan['id'],workspace_id=workspace,import_id=pin['importId'],source_digest=pin['sourceDigest'],rule_version='bill-duplicates-v1',manifest=result_manifest)
+        ready_scan=dict(id=scan['id'],workspace_id=workspace,import_id=pin['importId'],source_digest=pin['sourceDigest'],rule_version=RULE_VERSION,manifest=result_manifest)
         while True:
             started=time.monotonic();deadline=started+5
             ready=cache.prepare(workspace,scan['id'],result_manifest,auth,lambda _:None,deadline)

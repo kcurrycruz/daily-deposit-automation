@@ -143,4 +143,22 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaises(ApStoreError):repo.write_bytes(CONFIG.workspace_id,key,b'different','application/pdf')
         self.assertEqual(repo.read_bytes(CONFIG.workspace_id,key),b'%PDF-synthetic')
 
+    def test_private_duplicate_artifacts_allow_supported_rule_versions_only(self):
+        from app.ap_shared.repository import ApStoreError
+        transport=BackendTransport(); repo=make_repository(transport)
+        for version in ['bill-duplicates-v1','bill-duplicates-v2']:
+            key=CONFIG.workspace_id+'/bill-duplicates/v1/'+IMPORT+'/'+version+'/'+'b'*64+'.sqlite.gz'
+            repo.write_bytes(CONFIG.workspace_id,key,b'synthetic-archive','application/gzip')
+            self.assertEqual(repo.read_bytes(CONFIG.workspace_id,key),b'synthetic-archive')
+        for key in [
+            CONFIG.workspace_id+'/bill-duplicates/v1/'+IMPORT+'/bill-duplicates-v3/'+'b'*64+'.sqlite.gz',
+            CONFIG.workspace_id+'/bill-duplicates/v2/'+IMPORT+'/bill-duplicates-v2/'+'b'*64+'.sqlite.gz',
+            CONFIG.workspace_id+'/bill-duplicates/v1/'+IMPORT+'/bill-duplicates-v2/../'+'b'*64+'.sqlite.gz',
+            str(uuid4())+'/bill-duplicates/v1/'+IMPORT+'/bill-duplicates-v2/'+'b'*64+'.sqlite.gz',
+        ]:
+            before=len(transport.requests)
+            with self.assertRaises(ApStoreError):
+                repo.write_bytes(CONFIG.workspace_id,key,b'synthetic-archive','application/gzip')
+            self.assertEqual(len(transport.requests),before)
+
 if __name__=='__main__': unittest.main()

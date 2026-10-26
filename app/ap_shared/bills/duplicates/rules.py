@@ -75,6 +75,10 @@ def classify(left, right):
     da, db = invoice_day(left), invoice_day(right)
     if not exact and (not equal or da is None or db is None or abs(da - db) > 30):
         return None
+    # Routine deliveries often share totals and nearby sequential references.
+    # A digit swap needs the same invoice day, unlike a trailing-letter variant.
+    if 'digit_transposition' in reasons and da != db:
+        return None
     classification = 'exact_pattern' if exact and equal else 'amount_difference' if exact else 'possible_duplicate'
     if not equal:
         reasons.append('different_amount')

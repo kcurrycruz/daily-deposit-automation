@@ -13,6 +13,7 @@ from fixtures.ap_shared.duplicate_cases import PIN, bill
 from test_ap_duplicates_repository import DuplicateTransport
 from test_ap_shared_repository import make_repository
 from test_ap_shared_access import CONFIG
+from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
 
 
 class DuplicateArtifactTests(unittest.TestCase):
@@ -89,7 +90,7 @@ class DuplicateArtifactTests(unittest.TestCase):
             report = writer.step()
         transport = DuplicateTransport(); repo = DuplicateRepository(make_repository(transport))
         scan = dict(id=str(uuid4()), workspace_id=CONFIG.workspace_id, import_id=PIN['importId'],
-                    source_digest=PIN['sourceDigest'], rule_version='bill-duplicates-v1', result_info=report['artifact'])
+                    source_digest=PIN['sourceDigest'], rule_version=RULE_VERSION, result_info=report['artifact'])
         return folder, source, packed, report, repo, scan, transport
 
     def test_result_round_trip_has_only_final_evidence_and_reuses_objects(self):

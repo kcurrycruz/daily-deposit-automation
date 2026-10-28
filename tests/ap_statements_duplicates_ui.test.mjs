@@ -7,6 +7,15 @@ const finding={key,classification:'possible_duplicate',strength:'possible',reaso
 const base=()=>({phase:'ready',source:{importId:'source',capability:1},filters:{review:'unreviewed',classification:null,search:''},
  progress:{state:'ready',projectionReady:true,counts:{all:1,reviewed:0,unreviewed:1},completedAt:'2026-10-22T12:00:00Z'},
  page:{total:1,findings:[finding],nextCursor:null},selection:null,detail:null,error:null,loading:false,saveState:'idle'});
+
+test('completed scan preparation never presents the saved scan age as a stalled live scan',()=>{
+ const s={...base(),page:null,lastAdvanceAt:Date.now()-189911000,
+  progress:{state:'ready',phase:'complete',projectionReady:false,checkpoint:279,recordsRead:223425,totalRecords:223425}};
+ const html=duplicateViewHTML(s);
+ assert.match(html,/Preparing shared review history/);assert.match(html,/scan is complete/i);
+ assert.doesNotMatch(html,/No recent scan progress|since reported progress|Check not complete/);
+ assert.match(html,/279/);
+});
 test('sidebar badge requires complete review projection; pending and failed never claim no duplicates',()=>{
  const state=base();assert.match(duplicateSidebarHTML(state,{active:true}),/Duplicate bills/);assert.match(duplicateSidebarHTML(state,{active:true}),/aria-current="page"/);
  for(const phase of ['pending','failed','restart_required']){

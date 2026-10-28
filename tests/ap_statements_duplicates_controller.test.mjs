@@ -15,6 +15,23 @@ function setup(handler,options={}){
 }
 async function finish(h){for(let i=0;i<12&&!h.controller.state.page;i++)await h.flush();}
 
+test('an old completed scan prepares at a bounded polling interval and opens its saved list without rescanning',async()=>{
+ let statusCalls=0,time=200000;
+ const h=setup(action=>{
+  if(action==='duplicate_findings_page')return {scanId,reviewRevision:0,total:1,findings:[{key}],nextCursor:null};
+  return progress({state:'ready',phase:'complete',projectionReady:action==='duplicate_status'&&++statusCalls>=2,
+   reviewRevision:0,counts:{all:1,unreviewed:1,reviewed:0},updatedAt:'2026-10-26T14:33:00Z',serverNow:'2026-10-28T19:18:11Z'});
+ },{now:()=>time});
+ h.controller.adoptSource(source);await h.flush();
+ assert.match(duplicateViewHTML(h.controller.state),/Preparing shared review history/);
+ assert.doesNotMatch(duplicateViewHTML(h.controller.state),/No recent scan progress/);
+ assert.equal(h.delays.at(-1),1000);
+ time+=120000;await h.flush();assert.equal(h.delays.at(-1),1000);
+ assert.doesNotMatch(duplicateViewHTML(h.controller.state),/No recent scan progress/);
+ await finish(h);assert.equal(h.controller.state.page.total,1);
+ assert.equal(h.calls.some(c=>c.action==='duplicate_step'),false);h.controller.dispose();
+});
+
 test('scan observations retain elapsed time until real advancement and reset on generation or source change',async()=>{
  let time=100000,checkpoint=0;const h=setup(()=>progress({checkpoint,canStep:false,updatedAt:'2026-10-23T12:00:00Z',serverNow:'2026-10-23T12:01:00Z'}),{now:()=>time});
  h.controller.adoptSource(source);await h.flush();assert.equal(h.controller.state.observedAt,100000);assert.equal(h.controller.state.lastAdvanceAt,40000);

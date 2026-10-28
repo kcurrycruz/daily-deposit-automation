@@ -5,6 +5,16 @@ try{({duplicateProgressPresentation:presentation}=await import('../app/ap_statem
 function show(state,now=100000){assert.equal(typeof presentation,'function','scan presentation must be implemented');return presentation(state,now);}
 const state=(phase,extra={})=>({phase:'running',lastAdvanceAt:100000,observedAt:100000,progress:{state:'running',phase,checkpoint:4,recordsRead:223425,totalRecords:223425,canStep:true,...extra}});
 
+test('completed scans prepare saved reviews regardless of their old completion timestamp',()=>{
+ const s=state('complete',{state:'ready',projectionReady:false});
+ for(const age of [0,60000,189911000]){
+  const p=show(s,100000+age);assert.equal(p.kind,'preparing');assert.equal(p.busy,true);
+  assert.match(p.title,/Preparing.*review/i);assert.match(p.message,/scan is complete/i);
+  assert.doesNotMatch(p.message,/no progress|restart/i);
+ }
+ s.error={code:'duplicate_unavailable'};assert.equal(show(s,190011000).kind,'paused');
+});
+
 test('scan stages distinguish reading, candidates, packaging and review preparation without claiming completion',()=>{
  for(const [phase,title] of [['reading',/Reading/i],['candidates',/Checking.*patterns/i],['packaging',/Packaging/i]]){
   const p=show(state(phase));assert.equal(p.kind,'active');assert.match(p.title,title);assert.equal(p.busy,true);assert.doesNotMatch(p.title,/complete|finished/i);

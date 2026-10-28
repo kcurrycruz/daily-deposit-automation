@@ -14,7 +14,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   const p=state.progress;
   if(p&&['failed','restart_required','superseded'].includes(p.state))return;
   if(p?.state==='ready'&&p.projectionReady&&state.page&&(!state.selection||state.detail))return;
-  timer=schedule(()=>{timer=null;return tick();},p?.canStep===false||duplicateProgressPresentation(state,now()).kind==='interrupted'?1000:10);
+  timer=schedule(()=>{timer=null;return tick();},p?.canStep===false||p?.state==='ready'&&!p.projectionReady||duplicateProgressPresentation(state,now()).kind==='interrupted'?1000:10);
  }
  function enqueue(job){
   const t=token;pending++;cancel();

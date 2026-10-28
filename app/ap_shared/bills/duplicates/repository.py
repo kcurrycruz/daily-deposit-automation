@@ -3,7 +3,7 @@ from functools import wraps
 import hashlib
 from pathlib import Path
 from ...models import require_uuid, integer
-from .contracts import DuplicateError, MESSAGES, canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
+from .contracts import DuplicateError, MESSAGES, STORAGE_VERSION,canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
 
 OPERATIONS = frozenset('ensure claim checkpoint restart publish fail reserve review'.split())
 
@@ -91,7 +91,7 @@ class DuplicateRepository:
         if scan['workspace_id'] != self.config.workspace_id:
             raise PermissionError('AP workspace access denied.')
         info = scan['result_info']
-        key = f'{self.config.workspace_id}/bill-duplicates/v1/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
+        key = f'{self.config.workspace_id}/bill-duplicates/{STORAGE_VERSION}/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
         manifest = validate_manifest({**info, 'key': key})
         if manifest['importId'] != scan['import_id'] or manifest['sourceDigest'] != scan['source_digest']:
             raise DuplicateError('duplicate_invalid_source')

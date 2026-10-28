@@ -150,6 +150,9 @@ class RepositoryTests(unittest.TestCase):
             key=CONFIG.workspace_id+'/bill-duplicates/v1/'+IMPORT+'/'+version+'/'+'b'*64+'.sqlite.gz'
             repo.write_bytes(CONFIG.workspace_id,key,b'synthetic-archive','application/gzip')
             self.assertEqual(repo.read_bytes(CONFIG.workspace_id,key),b'synthetic-archive')
+        key=CONFIG.workspace_id+'/bill-duplicates/v2/'+IMPORT+'/bill-duplicates-v3/'+'b'*64+'.sqlite.gz'
+        repo.write_bytes(CONFIG.workspace_id,key,b'synthetic-archive','application/gzip')
+        self.assertEqual(repo.read_bytes(CONFIG.workspace_id,key),b'synthetic-archive')
         for key in [
             CONFIG.workspace_id+'/bill-duplicates/v1/'+IMPORT+'/bill-duplicates-v3/'+'b'*64+'.sqlite.gz',
             CONFIG.workspace_id+'/bill-duplicates/v2/'+IMPORT+'/bill-duplicates-v2/'+'b'*64+'.sqlite.gz',

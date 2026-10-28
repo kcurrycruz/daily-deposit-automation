@@ -126,9 +126,9 @@ class DuplicateContractTests(unittest.TestCase):
             validate_manifest(manifest)
 
     def test_manifest_and_cursor_bind_to_source_and_workspace(self):
-        from app.ap_shared.bills.duplicates.contracts import RULE_VERSION, validate_manifest, encode_cursor, decode_cursor
-        manifest = dict(format='bill-duplicates-v1', ruleVersion=RULE_VERSION, sourceDigest='a' * 64,
-                        importId=PIN['importId'], key=PIN['importId'] + '/bill-duplicates/v1/' + PIN['importId'] +
+        from app.ap_shared.bills.duplicates.contracts import RULE_VERSION, ARTIFACT_FORMAT,STORAGE_VERSION,validate_manifest, encode_cursor, decode_cursor
+        manifest = dict(format=ARTIFACT_FORMAT, ruleVersion=RULE_VERSION, sourceDigest='a' * 64,
+                        importId=PIN['importId'], key=PIN['importId'] + '/bill-duplicates/'+STORAGE_VERSION+'/' + PIN['importId'] +
                         '/' + RULE_VERSION + '/' + 'b' * 64 + '.sqlite.gz', hash='b' * 64, bytes=50,
                         expandedHash='c' * 64, expandedBytes=4096, findingCount=1, recordCount=2)
         self.assertEqual(validate_manifest(manifest), manifest)

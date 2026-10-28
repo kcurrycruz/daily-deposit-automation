@@ -20,7 +20,7 @@ from app.ap_shared.bills.duplicates.operations import DuplicateScanRegistry
 from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
 from app.ap_shared.bills.duplicates.source import DuplicateSource,SourcePreparationCache
 from app.ap_shared.bills.duplicates.projection import ReviewProjection
-from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
+from app.ap_shared.bills.duplicates.contracts import RULE_VERSION,STORAGE_VERSION
 from bill_scale_check import peak_rss
 
 
@@ -92,7 +92,7 @@ def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
         counts=engine.finish();db=registry.handles[scan['id']]['db'];keys=hashlib.sha256()
         for key, in db.execute('select key from findings order by key'):keys.update(key.encode())
         patterns=dict(db.execute('select classification,count(*) from findings group by classification'))
-        artifact=reply['artifact'];result_manifest={**artifact,'key':workspace+'/bill-duplicates/v1/'+pin['importId']+'/'+RULE_VERSION+'/'+artifact['hash']+'.sqlite.gz'}
+        artifact=reply['artifact'];result_manifest={**artifact,'key':workspace+'/bill-duplicates/'+STORAGE_VERSION+'/'+pin['importId']+'/'+RULE_VERSION+'/'+artifact['hash']+'.sqlite.gz'}
         def read_result(expected,target):
             data=reply['path'].read_bytes()
             if hashlib.sha256(data).hexdigest()!=expected['hash']:raise AssertionError('result changed')

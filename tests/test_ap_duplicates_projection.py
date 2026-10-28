@@ -50,9 +50,10 @@ class DuplicateProjectionTests(unittest.TestCase):
         path=Path(temp.name)/'result.sqlite'; db=sqlite3.connect(path)
         for name, schema in SCHEMA.items(): db.execute('create table '+name+'('+schema+')')
         for n in range(620):
-            db.execute('insert into findings values(?,?,?,?,?,?,?,?,?)',
+            db.execute('insert into findings values(?,?,?,?,?,?,?,?,?,?)',
                        (n,f'{n:064x}','possible_duplicate','possible','["suffix"]','2026-10-01',
-                        10000 if n==619 else 2,'[]', 'é 100%_ "quote"' if n==600 else 'synthetic '+str(n)))
+                        10000 if n==619 else 2,'[]', 'é 100%_ "quote"' if n==600 else 'synthetic '+str(n),
+                        json.dumps(dict(version=1,dateGapDays=0,referenceReuse=False,profiles=[]))))
             count=10000 if n==619 else 2
             db.executemany('insert into members values(?,?,?)', ((n,i,'a'*64) for i in range(count)))
         db.commit(); db.close()
@@ -79,6 +80,14 @@ class DuplicateProjectionTests(unittest.TestCase):
         self.assertEqual(page['findings'][0]['latestInvoiceDate'],'2026-10-01')
         self.assertEqual(page['findings'][0]['preview'],[])
         self.assertFalse(page['findings'][0]['priorReview'])
+        self.assertEqual(page['findings'][0]['evidence']['version'],1)
+
+    def test_new_pattern_filters_accept_valid_classes_without_expanding_review_scope(self):
+        p,_,scan=self.fixture();self.ready(p,scan)
+        for kind in ['reference_entry_issue','possible_wrong_vendor']:
+            page=p.findings_page(scan,dict(classification=kind),None,100,None)
+            self.assertEqual(page['total'],0)
+        with self.assertRaises(ValueError):p.findings_page(scan,dict(classification='any_sql'),None,100,None)
     def test_order_cursor_binding_literal_search_and_revision_changes(self):
         p,repo,scan=self.fixture(); self.ready(p,scan)
         filters=dict(review='all',classification=None,search='')

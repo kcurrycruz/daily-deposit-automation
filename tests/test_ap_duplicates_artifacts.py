@@ -17,6 +17,21 @@ from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
 
 
 class DuplicateArtifactTests(unittest.TestCase):
+    def test_packaging_rejects_unbound_evidence_before_compressed_output(self):
+        from test_ap_duplicates_vendor_scan import history
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter
+        rows=history()+[bill('INV451234',amount=88888),bill('INV45124',amount=88888)]
+        folder,source,*_=self.fixture(rows)
+        with sqlite3.connect(source) as db:
+            value=json.loads(db.execute('select evidence from findings').fetchone()[0])
+            for p in value['profiles']:p['vendor']='Unrelated'
+            db.execute('update findings set evidence=?',(json.dumps(value),))
+        db.close()
+        target=folder/'corrupt.gz';writer=DuplicateArtifactWriter(source,target);self.addCleanup(writer.close)
+        with self.assertRaises(ValueError):
+            while not writer.step()['done']:pass
+        self.assertFalse(target.exists())
+
     def test_packaging_resumes_on_a_different_request_thread(self):
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter
         folder, source, _, _, _, _, _ = self.fixture()
@@ -34,6 +49,40 @@ class DuplicateArtifactTests(unittest.TestCase):
         self.assertEqual(report['artifact']['recordCount'], 3)
         raw = gzip.decompress((folder / 'cross-thread.gz').read_bytes())
         self.assertEqual(hashlib.sha256(raw).hexdigest(), report['artifact']['expandedHash'])
+
+    def test_semantically_corrupt_profiles_fail_both_cache_loading_paths(self):
+        from test_ap_duplicates_vendor_scan import history
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
+        rows=history()+[bill('INV451234',amount=88888),bill('INV45124',amount=88888)]
+        folder,_,packed,_,repo,scan,transport=self.fixture(rows)
+        original=gzip.decompress(packed.read_bytes())
+        for corruption in ('vendor','future','member'):
+            target=folder/'invalid-profile.sqlite';target.write_bytes(original)
+            db=sqlite3.connect(target)
+            try:
+                value=json.loads(db.execute('select evidence from findings').fetchone()[0])
+                if corruption=='vendor':
+                    for p in value['profiles']:p['vendor']='Unrelated'
+                elif corruption=='future':
+                    for p in value['profiles']:p.update(periodStart='2026-10-01',periodEnd='2027-09-30')
+                else:db.execute('update members set ordinal=0 where ordinal=24')
+                db.execute('update findings set evidence=?',(json.dumps(value),));db.commit()
+            finally:db.close()
+            payload=target.read_bytes();archive=gzip.compress(payload,mtime=0)
+            corrupt=folder/'invalid-profile.gz';corrupt.write_bytes(archive)
+            info=dict(**{**scan['result_info'],'hash':hashlib.sha256(archive).hexdigest(),'bytes':len(archive),
+                  'expandedHash':hashlib.sha256(payload).hexdigest(),'expandedBytes':len(payload)})
+            manifest=repo.put_result({**scan,'result_info':info},corrupt,str(uuid4()))
+            for cooperative in (False,True):
+                cache=DuplicateArtifactCache(repo);self.addCleanup(cache.close)
+                with self.subTest(corruption=corruption,cooperative=cooperative),self.assertRaises(ValueError):
+                    if cooperative:
+                        for _ in range(20):
+                            if cache.prepare(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None,time.monotonic()+5):
+                                self.fail('corrupt pair became ready')
+                    else:
+                        with cache.acquire(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None):
+                            self.fail('corrupt pair became readable')
 
     def test_warm_verified_cache_does_not_repeat_full_validation(self):
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
@@ -68,17 +117,17 @@ class DuplicateArtifactTests(unittest.TestCase):
         cache.prepare(CONFIG.workspace_id,str(uuid4()),manifest,None,lambda _:None,time.monotonic()+5)
         self.assertEqual(len(cache.pending),1)
         self.assertFalse(old.exists())
-    def fixture(self):
+    def fixture(self,bills=None):
         from app.ap_shared.bills.duplicates.scan import DuplicateScan
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter
         from app.ap_shared.bills.duplicates.repository import DuplicateRepository
         temp = tempfile.TemporaryDirectory(prefix='duplicate-artifact-'); self.addCleanup(temp.cleanup)
         folder = Path(temp.name); source = folder / 'working.sqlite'
         db = sqlite3.connect(source)
-        pin = {**PIN, 'recordCount': 3}
+        bills=bills or [bill(),bill('271712X'),bill('WORKING-ONLY-SECRET',vendor='Unrelated')]
+        pin = {**PIN, 'recordCount': len(bills)}
         engine = DuplicateScan(db, pin, time.monotonic)
-        engine.ingest([dict(ordinal=0, bill=bill()), dict(ordinal=1, bill=bill('271712X')),
-                       dict(ordinal=2, bill=bill('WORKING-ONLY-SECRET', vendor='Unrelated'))])
+        engine.ingest([dict(ordinal=n,bill=value) for n,value in enumerate(bills)])
         engine.finish_input()
         while not engine.step(time.monotonic() + 5)['done']:
             pass
@@ -92,6 +141,20 @@ class DuplicateArtifactTests(unittest.TestCase):
         scan = dict(id=str(uuid4()), workspace_id=CONFIG.workspace_id, import_id=PIN['importId'],
                     source_digest=PIN['sourceDigest'], rule_version=RULE_VERSION, result_info=report['artifact'])
         return folder, source, packed, report, repo, scan, transport
+
+    def test_recorded_vendor_profiles_survive_private_artifact_round_trip(self):
+        from test_ap_duplicates_vendor_scan import history
+        from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
+        rows=history()+[bill('INV451234',amount=88888),bill('INV45124',amount=88888)]
+        _,_,packed,_,repo,scan,_=self.fixture(rows)
+        manifest=repo.put_result(scan,packed,str(uuid4()))
+        self.assertEqual(manifest['format'],'bill-duplicates-v2')
+        cache=DuplicateArtifactCache(repo);self.addCleanup(cache.close)
+        with cache.acquire(CONFIG.workspace_id,scan['id'],manifest,None,lambda _:None) as db:
+            self.assertEqual(db.execute('pragma user_version').fetchone()[0],2)
+            kind,raw=db.execute('select classification,evidence from findings').fetchone()
+            self.assertEqual(kind,'reference_entry_issue')
+            self.assertEqual(len(json.loads(raw)['profiles']),2)
 
     def test_result_round_trip_has_only_final_evidence_and_reuses_objects(self):
         from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactCache
@@ -170,7 +233,8 @@ class DuplicateArtifactTests(unittest.TestCase):
         for sql in ('alter table findings add column secret text',
                     'create view unexpected as select * from findings',
                     'update members set ordinal=ordinal+1000',
-                    'update findings set member_count=99'):
+                    'update findings set member_count=99',
+                    "update findings set evidence='{}'"):
             with self.subTest(sql=sql):
                 target = folder / 'invalid.sqlite'; target.write_bytes(original)
                 db = sqlite3.connect(target)

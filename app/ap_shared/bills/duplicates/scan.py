@@ -6,8 +6,10 @@ import sqlite3
 from ...models import validate_record
 from ..normalization import vendor_key, invoice_key
 from .contracts import (DuplicateError, RULE_VERSION, MAX_FINDINGS, MAX_BYTES, encoded,
-                        canonical_hash, validate_pin)
+                        canonical_hash, validate_pin,validate_finding_evidence)
 from .rules import eligible, classify, bill_fingerprint, normalized_identity, identity_warnings, invoice_day, currency_key
+from .vendor_patterns import compact_reference,reference_shape
+from .vendor_scan import VendorCandidates
 
 
 class DuplicateScan:
@@ -23,16 +25,17 @@ class DuplicateScan:
           create table scan_records(ordinal integer primary key,ident text,fp text,warn text,raw_ref text);
           create index scan_identity on scan_records(ident,ordinal);
           create table nodes(ident text primary key,ordinal integer unique,n integer,
-            vendor text,ref text,amount integer,currency text,stem text,day integer,warning integer,preview text);
+            vendor text,ref text,amount integer,currency text,stem text,day integer,warning integer,preview text,compact text,shape text);
           create index node_ref on nodes(vendor,ref,ordinal);
           create index node_stem on nodes(vendor,amount,stem,ordinal);
           create table fingerprints(ident text,fp text,n integer,primary key(ident,fp));
           create table warning_keys(ident text,warn text,primary key(ident,warn));
           create table findings(id integer primary key,key text unique,classification text,strength text,
-            reasons text,latest_date text,member_count integer,preview text,search text);
+            reasons text,latest_date text,member_count integer,preview text,search text,evidence text not null);
           create table members(finding_id integer,ordinal integer,fp text,primary key(finding_id,ordinal));
           create table scan_meta(key text primary key,value text not null);
         ''')
+        self.vendor_candidates=VendorCandidates(self)
         self.db.execute('insert into scan_meta values(?,?)', ('pin', encoded(pin)))
         self.db.commit()
 
@@ -59,10 +62,10 @@ class DuplicateScan:
             preview = {k: value.get(k, '') for k in ('vendor', 'invoiceNumber', 'amount', 'invoiceDate', 'currency')}
             preview.update(kind='invoice', sourceIssues='. '.join(issues))
             self.db.execute('insert into scan_records values(?,?,?,?,?)', (ordinal, ident, fp, warn, value['invoiceNumber']))
-            self.db.execute('''insert into nodes values(?,?,?,?,?,?,?,?,?,?,?)
+            self.db.execute('''insert into nodes values(?,?,?,?,?,?,?,?,?,?,?,?,?)
               on conflict(ident) do update set n=n+1,warning=max(warning,excluded.warning)''',
                 (ident, ordinal, 1, vk, ref, value['amount'], currency_key(value.get('currency')),
-                 stem[1] if stem else '', invoice_day(value), bool(issues), encoded(preview)))
+                 stem[1] if stem else '', invoice_day(value), bool(issues), encoded(preview),compact_reference(value['invoiceNumber']),reference_shape(value['invoiceNumber'])))
             self.db.execute('insert into fingerprints values(?,?,1) on conflict(ident,fp) do update set n=n+1', (ident, fp))
             if warn:
                 self.db.execute('insert or ignore into warning_keys values(?,?)', (ident, warn))
@@ -75,7 +78,7 @@ class DuplicateScan:
         self.input_done = True
 
     def _node(self, row):
-        names = 'ident ordinal n vendor ref amount currency stem day warning preview'.split()
+        names = 'ident ordinal n vendor ref amount currency stem day warning preview compact shape'.split()
         return dict(zip(names, row))
 
     def _next_node(self):
@@ -128,7 +131,8 @@ class DuplicateScan:
                     evidence['reasons'] = sorted(set(evidence['reasons'] + ['ambiguous_source']))
                 self._begin([node, other], evidence)
             return
-        self.after = node['ordinal']; self.current = None
+        if self.vendor_candidates.step(cur):
+            self.after = node['ordinal']; self.current = None
 
     def _begin(self, nodes, evidence):
         if self.db.execute('select count(*) from findings').fetchone()[0] >= MAX_FINDINGS:
@@ -139,10 +143,15 @@ class DuplicateScan:
         previews = [{**{k: json.loads(raw)[k] for k in ('vendor', 'amount', 'invoiceDate', 'currency')},
                      'ordinal': ordinal, 'invoiceNumber': ref} for ordinal, ref, raw in rows]
         latest = max((json.loads(n['preview'])['invoiceDate'] for n in nodes), default='')
-        search = ' '.join([nodes[0]['vendor']] + [n['ref'] for n in nodes]).casefold()
-        result = self.db.execute('insert into findings values(NULL,NULL,?,?,?,?,?,?,?)',
+        search = ' '.join([n['vendor'] for n in nodes] + [n['ref'] for n in nodes]).casefold()
+        days=[n['day'] for n in nodes]
+        gap=max(days)-min(days) if all(d is not None for d in days) else None
+        detail=evidence.get('evidence',dict(version=1,dateGapDays=gap,
+            referenceReuse='exact_reference' in evidence['reasons'] and gap is not None and gap>30,profiles=[]))
+        validate_finding_evidence(detail,evidence['classification'],previews,sum(n['n'] for n in nodes))
+        result = self.db.execute('insert into findings values(NULL,NULL,?,?,?,?,?,?,?,?)',
             (evidence['classification'], evidence['strength'], encoded(evidence['reasons']), latest,
-             sum(n['n'] for n in nodes), encoded(previews), search))
+             sum(n['n'] for n in nodes), encoded(previews), search,encoded(detail)))
         hasher = hashlib.sha256(('[1,' + encoded(RULE_VERSION) + ',[').encode())
         fps = self.db.execute('select fp,sum(n) from fingerprints where ident in (' + placeholders + ') group by fp order by fp', ids)
         self.pending = dict(ids=ids, placeholders=placeholders, id=result.lastrowid, evidence=evidence,

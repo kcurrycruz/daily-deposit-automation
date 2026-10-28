@@ -141,6 +141,12 @@ html body{background:#fff}.main{background:#fff}
 .duplicate-evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:24px}
 .duplicate-record{padding:20px;border:1px solid #dce3d5;border-radius:10px;min-width:0}
 .duplicate-record h3{font-size:14px;margin:0 0 18px}
+.duplicate-profile-evidence{padding:20px 24px;background:#f7f9f4;border-block:1px solid #dce3d5;overflow-wrap:anywhere}
+.duplicate-profile-evidence h3{font-size:15px;margin:0 0 10px}.duplicate-profile-evidence>p,.duplicate-profile-evidence>small{font-size:12px;line-height:1.7;color:#5b7056}
+.duplicate-profile-evidence .duplicate-evidence-grid{padding:12px 0}.duplicate-profile-evidence .duplicate-record{background:white}
+.duplicate-profile-evidence h4{font-size:13px;margin:0 0 12px}.duplicate-profile-evidence .duplicate-record p,.duplicate-profile-evidence li{font-size:12px;line-height:1.7}
+.duplicate-profile-evidence ul{padding-left:18px}.duplicate-profile-evidence code{white-space:pre-wrap;overflow-wrap:anywhere}.duplicate-profile-fit{font-weight:650;color:#345c43}
+.duplicate-detail>.duplicate-reuse-context{display:block;padding:14px 24px;color:#6d7e69;font-size:12px}
 .duplicate-record dl{display:grid;gap:14px;font-size:12px}
 .duplicate-record dl>div{display:grid;grid-template-columns:minmax(100px,1fr) minmax(0,1.4fr);gap:16px}
 .duplicate-record dt{color:#75866f}

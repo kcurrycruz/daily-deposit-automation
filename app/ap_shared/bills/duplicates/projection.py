@@ -8,7 +8,7 @@ import threading
 from ...models import allowed, integer, text
 from .artifacts import SCHEMA
 from .contracts import (DuplicateError, RULE_VERSION, RESPONSE_BYTES, MAX_BYTES, encoded,
-                        digest, encode_cursor, decode_cursor)
+                        digest, encode_cursor, decode_cursor,CLASSIFICATIONS,validate_finding_evidence)
 from .preparation import bounded
 
 
@@ -68,7 +68,8 @@ class ReviewProjection:
                             inserted=[]
                             for row in rows:
                                 if self.clock()>=deadline:break
-                                db.execute('insert into findings values(?,?,?,?,?,?,?,?,?)',row);inserted.append(row[0])
+                                validate_finding_evidence(json.loads(row[9]),row[2],json.loads(row[7]),row[6])
+                                db.execute('insert into findings values(?,?,?,?,?,?,?,?,?,?)',row);inserted.append(row[0])
                             db.commit()
                             if inserted:entry['after']=inserted[-1]
                         else:
@@ -112,7 +113,7 @@ class ReviewProjection:
     def _filters(self, filters):
         out = allowed(filters, 'review classification search')
         out = dict(review=out.get('review', 'unreviewed'), classification=out.get('classification'), search=out.get('search', ''))
-        if out['review'] not in ('unreviewed', 'reviewed', 'all') or out['classification'] not in (None, 'exact_pattern', 'possible_duplicate', 'amount_difference', 'export_review'):
+        if out['review'] not in ('unreviewed', 'reviewed', 'all') or out['classification'] not in (None,*CLASSIFICATIONS):
             raise DuplicateError('duplicate_conflict')
         text(out['search'], maximum=256)
         return out
@@ -130,11 +131,11 @@ class ReviewProjection:
         return dict(scanId=scan['id'], importId=scan['import_id'], ruleVersion=RULE_VERSION, reviewRevision=revision)
 
     def _finding(self, row, import_id):
-        review=json.loads(row[9]) if row[9] else None
+        review=json.loads(row[10]) if row[10] else None
         previews=json.loads(row[7])
         return dict(key=row[1], classification=row[2], strength=row[3], reasons=json.loads(row[4]), latestDate=row[5],
                     latestInvoiceDate=row[5],memberCount=row[6],previews=previews,preview=previews,review=review,
-                    priorReview=bool(review and review['reviewedImportId']!=import_id))
+                    priorReview=bool(review and review['reviewedImportId']!=import_id),evidence=validate_finding_evidence(json.loads(row[9]),row[2],previews,row[6]))
 
     def findings_page(self, scan, filters, cursor, limit, authorization):
         integer(limit, minimum=1, maximum=100); filters = self._filters(filters)

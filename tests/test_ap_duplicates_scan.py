@@ -28,12 +28,12 @@ class DuplicateScanTests(unittest.TestCase):
         return db, engine, summary, calls
 
     def test_recurring_different_day_swaps_are_not_fetched_as_candidates(self):
-        # Each reference has one exact, one suffix-stem and three swap queries.
-        # Ten misses plus three node advances, with no different-day fetch.
+        # Existing exact/stem/swap queries plus bounded v3 profile/cross lookups.
+        # No different-day digit-swap finding or unbounded amount-bucket work.
         rows = [bill('1234', amount=10000), bill('1243', amount=10000, invoice_date='2026-10-02')]
         _, _, report, _ = self.scan(rows, probes=1)
         self.assertEqual(report['findingCount'], 0)
-        self.assertEqual(report['probes'], 13)
+        self.assertLessEqual(report['probes'], 30)
 
     def test_same_day_swaps_remain_visible(self):
         db, _, report, _ = self.scan([bill('1234', amount=10000), bill('1243', amount=10000)], probes=1)

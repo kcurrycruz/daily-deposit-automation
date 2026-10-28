@@ -105,3 +105,38 @@ test('ambiguous source and amount differences are explicit while reviewed work i
  state.page.findings=[{...finding,review:{decision:'confirmed_duplicate',initials:'KC',version:1,at:'2026-10-22T12:00:00Z'}}];
  assert.match(duplicateViewHTML(state),/duplicate-tone-green/);assert.match(duplicateViewHTML(state),/Reviewed — duplicate flagged/);
 });
+
+function profiledFinding(classification='possible_wrong_vendor'){
+ const profiles=[{vendor:'Synthetic Paper',invoiceNumber:'PAP451234',periodStart:'2025-10-01',periodEnd:'2026-09-30',distinctReferences:24,
+  shapes:[{shape:'PAP######',references:24}],established:true,matches:true},
+ {vendor:'Synthetic <Produce>',invoiceNumber:'PAP451234',periodStart:'2025-10-01',periodEnd:'2026-09-30',distinctReferences:30,
+  shapes:[{shape:'FOOD#######',references:30}],established:true,matches:false}];
+ return {...finding,classification,reasons:['cross_vendor_reference','vendor_format_mismatch'],
+  previews:[{...finding.previews[0],vendor:'Synthetic Paper',invoiceNumber:'PAP451234'},
+            {...finding.previews[1],vendor:'Synthetic <Produce>',invoiceNumber:'PAP451234'}],
+  evidence:{version:1,dateGapDays:0,referenceReuse:false,profiles}};
+}
+test('wrong-vendor list identifies both vendors and provides the new pattern filters',()=>{
+ const state=base();state.page.findings=[profiledFinding()];const html=duplicateViewHTML(state);
+ assert.match(html,/Possible wrong vendor/);assert.match(html,/Possible reference entry issue/);
+ assert.match(html,/aria-label="Review Synthetic Paper and Synthetic &lt;Produce&gt;/);
+ assert.match(html,/Vendor format mismatch/);assert.doesNotMatch(html,/Synthetic <Produce>/);
+});
+test('detail shows the immutable profile history and avoids selecting a correct vendor',()=>{
+ const state=base(),f=profiledFinding();state.selection=f.key;state.detail={finding:f,members:f.previews.map((bill,n)=>({ordinal:n,bill})),total:2};
+ const html=duplicateViewHTML(state);
+ assert.match(html,/Why this was flagged/);assert.match(html,/2025-10-01/);assert.match(html,/2026-09-30/);
+ assert.match(html,/24 distinct references/);assert.match(html,/PAP######/);assert.match(html,/FOOD#######/);
+ assert.match(html,/Fits observed format/);assert.match(html,/Outside observed formats/);
+ assert.match(html,/original invoice/i);assert.doesNotMatch(html,/Correct vendor:|automatically reassigned/);
+ state.detail.finding={...f,classification:'reference_entry_issue',evidence:{...f.evidence,edit:'one_character_added_or_missing'}};
+ assert.match(duplicateViewHTML(state),/One character added or missing/);
+});
+test('reference reuse remains visible alongside amount difference and review controls',()=>{
+ const state=base();state.page.findings=[{...finding,classification:'amount_difference',evidence:{version:1,dateGapDays:400,referenceReuse:true,profiles:[]}}];
+ const html=duplicateViewHTML(state);assert.match(html,/Amount difference/);assert.match(html,/Reused reference — check context/);assert.match(html,/400 days apart/);
+});
+test('missing or unsupported profile evidence is not presented as a learned fact',()=>{
+ const state=base(),f=profiledFinding();state.selection=f.key;state.detail={finding:{...f,evidence:{version:99,profiles:[{vendor:'SECRET'}]}},members:[],total:0};
+ const html=duplicateViewHTML(state);assert.doesNotMatch(html,/SECRET|Why this was flagged/);assert.match(html,/Compare the source bills/);
+});

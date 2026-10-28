@@ -9,15 +9,22 @@ import sqlite3
 import tempfile
 import threading
 import time
-from .contracts import (DuplicateError, RULE_VERSION, MAX_BYTES, MAX_ARCHIVE_BYTES,
-                        canonical_hash, validate_manifest, validate_pin)
+from .contracts import (DuplicateError, RULE_VERSION, ARTIFACT_FORMAT,MAX_BYTES, MAX_ARCHIVE_BYTES,
+                        canonical_hash, validate_manifest, validate_pin,validate_finding_evidence)
 from .preparation import Unpack,connect,bounded,stamp
 
 SCHEMA = {
-    'findings': 'id integer primary key,key text unique,classification text,strength text,reasons text,latest_date text,member_count integer,preview text,search text',
+    'findings': 'id integer primary key,key text unique,classification text,strength text,reasons text,latest_date text,member_count integer,preview text,search text,evidence text not null',
     'members': 'finding_id integer,ordinal integer,fp text,primary key(finding_id,ordinal)',
     'scan_meta': 'key text primary key,value text not null',
 }
+
+
+def _finding_evidence(db,ident,kind,raw,previews,count):
+    members=None
+    if kind in ('reference_entry_issue','possible_wrong_vendor'):
+        members=[n for n, in db.execute('select ordinal from members where finding_id=? order by ordinal limit 3',(ident,))]
+    return validate_finding_evidence(json.loads(raw),kind,json.loads(previews),count,members)
 
 
 class DuplicateArtifactWriter:
@@ -54,12 +61,13 @@ class DuplicateArtifactWriter:
                 marks = ','.join('?' for _ in rows[0][1:])
                 for row in rows:
                     if time.monotonic()>=deadline:break
+                    if name=='findings':_finding_evidence(self.source,row[1],row[3],row[10],row[8],row[7])
                     self.db.execute('insert into '+name+' values('+marks+')',row[1:]);self.after=row[0]
             else:
                 self.table += 1; self.after = -1
             self.db.commit(); self._bounded()
             if self.table == len(self.tables):
-                self.db.execute('pragma user_version=1')
+                self.db.execute('pragma user_version=2')
                 self.db.commit(); self.db.close(); self.db = None; self.source.close(); self.source = None
                 self._bounded()
                 self.input = open(self.final, 'rb'); self.output = open(self.target, 'wb')
@@ -77,7 +85,7 @@ class DuplicateArtifactWriter:
                         raise DuplicateError('duplicate_limit')
                     with closing(sqlite3.connect(self.final.resolve().as_uri() + '?mode=ro', uri=True)) as db:
                         meta = {k: json.loads(v) for k, v in db.execute('select key,value from scan_meta')}
-                    self.info = dict(format='bill-duplicates-v1', ruleVersion=RULE_VERSION,
+                    self.info = dict(format=ARTIFACT_FORMAT, ruleVersion=RULE_VERSION,
                         sourceDigest=meta['pin']['sourceDigest'], importId=meta['pin']['importId'],
                         hash=hashlib.sha256(data).hexdigest(), bytes=len(data),
                         expandedHash=self.expanded_hash.hexdigest(), expandedBytes=self.final.stat().st_size,
@@ -126,14 +134,14 @@ class DuplicateArtifactCache:
             db.execute('pragma query_only=ON'); db.execute('pragma trusted_schema=OFF'); db.execute('pragma cache_size=-8192')
             if hasattr(db, 'enable_load_extension'):
                 db.enable_load_extension(False)
-            if db.execute('pragma user_version').fetchone()[0] != 1 or validate and db.execute('pragma quick_check').fetchone()[0] != 'ok':
+            if db.execute('pragma user_version').fetchone()[0] != 2 or validate and db.execute('pragma quick_check').fetchone()[0] != 'ok':
                 raise DuplicateError('duplicate_invalid_source')
             tables = {r[0] for r in db.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'")}
             if tables != set(SCHEMA):
                 raise DuplicateError('duplicate_invalid_source')
             if db.execute("select 1 from sqlite_master where type in ('view','trigger') limit 1").fetchone():
                 raise DuplicateError('duplicate_invalid_source')
-            columns = {'findings': 'id key classification strength reasons latest_date member_count preview search',
+            columns = {'findings': 'id key classification strength reasons latest_date member_count preview search evidence',
                        'members': 'finding_id ordinal fp', 'scan_meta': 'key value'}
             for table, names in columns.items():
                 if [r[1] for r in db.execute('pragma table_info(' + table + ')')] != names.split():
@@ -151,6 +159,8 @@ class DuplicateArtifactCache:
                 raise DuplicateError('duplicate_invalid_source')
             if db.execute('select 1 from findings f where f.member_count<>(select count(*) from members m where m.finding_id=f.id) limit 1').fetchone():
                 raise DuplicateError('duplicate_invalid_source')
+            for ident,kind,raw,previews,count in db.execute('select id,classification,evidence,preview,member_count from findings'):
+                _finding_evidence(db,ident,kind,raw,previews,count)
             return db
         except Exception:
             db.close(); raise
@@ -247,10 +257,11 @@ class DuplicateArtifactCache:
                     bounded(db,deadline)
                     if item['phase']=='findings':
                         if db.execute('select 1 from findings where id<0 limit 1').fetchone():raise DuplicateError('duplicate_invalid_source')
-                        rows=db.execute('''select f.id,f.key,f.member_count,(select count(*) from members m where m.finding_id=f.id)
+                        rows=db.execute('''select f.id,f.key,f.member_count,(select count(*) from members m where m.finding_id=f.id),f.classification,f.evidence,f.preview
                             from findings f where f.id>? order by f.id limit 250''',(item['after'],)).fetchall()
-                        for ident,key_text,count,actual in rows:
+                        for ident,key_text,count,actual,kind,raw,previews in rows:
                             if key_text is None or count<2 or count!=actual:raise DuplicateError('duplicate_invalid_source')
+                            _finding_evidence(db,ident,kind,raw,previews,count)
                         item['n']+=len(rows)
                         if rows:item['after']=rows[-1][0]
                         else:

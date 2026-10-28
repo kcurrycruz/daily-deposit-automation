@@ -61,11 +61,12 @@ class DuplicateOperationsTests(unittest.TestCase):
         p=self.complete(self.ensure())
         legacy_id=str(uuid5(UUID(CONFIG.workspace_id),p['importId']+':bill-duplicates-v1'))
         self.assertNotEqual(p['scanId'],legacy_id)
-        self.assertEqual(p['scanId'],str(uuid5(UUID(CONFIG.workspace_id),p['importId']+':bill-duplicates-v2')))
+        self.assertEqual(p['scanId'],str(uuid5(UUID(CONFIG.workspace_id),p['importId']+':bill-duplicates-v3')))
         historical=deepcopy(self.repo.scans[p['scanId']])
         historical.update(id=legacy_id,rule_version='bill-duplicates-v1')
         historical['manifest']['ruleVersion']='bill-duplicates-v1'
-        historical['manifest']['key']=historical['manifest']['key'].replace('/bill-duplicates-v2/','/bill-duplicates-v1/')
+        historical['manifest']['format']='bill-duplicates-v1'
+        historical['manifest']['key']=historical['manifest']['key'].replace('/bill-duplicates/v2/','/bill-duplicates/v1/').replace('/bill-duplicates-v3/','/bill-duplicates-v1/')
         self.repo.scans[legacy_id]=historical
         old_review=dict(key='e'*64,decision='not_duplicate',initials='KC',note='Old rule review',version=1,
                         at='2026-10-22T12:00:00Z',reviewedImportId=p['importId'])

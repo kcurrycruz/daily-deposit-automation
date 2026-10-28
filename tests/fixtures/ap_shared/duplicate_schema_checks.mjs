@@ -110,6 +110,34 @@ try{
  assert.deepEqual(afterUpgrade.reviews.filter(r=>r.key==='e'.repeat(64)),beforeUpgrade.reviews);
  assert.deepEqual(afterUpgrade.events.filter(e=>e.key==='e'.repeat(64)),beforeUpgrade.events);
  assert.equal((await q("select has_function_privilege('service_role','public.ap_duplicate_mutate(text,uuid,uuid,text,jsonb)','execute') allowed")).rows[0].allowed,true);
+ // V3 adds immutable profile evidence using result format/namespace v2.
+ const v3upgrade=resolve(root,'supabase/migrations/202610280001_ap_duplicate_vendor_rules_v3.sql');
+ assert.ok(existsSync(v3upgrade),'Add the v3 vendor-aware compatibility migration');
+ const allHistory=async()=>({scans:(await q('select * from ap_duplicate_scans order by id')).rows,
+   reviews:(await q('select * from ap_duplicate_reviews order by key')).rows,
+   events:(await q('select * from ap_duplicate_review_events order by id')).rows});
+ { // Check the old migration guard before any immutable v3 scan exists.
+   const oldDefinition=(await q("select pg_get_functiondef('public.ap_duplicate_mutate(text,uuid,uuid,text,jsonb)'::regprocedure) definition")).rows[0].definition;
+   const savedHistory=await allHistory();
+   await db.exec(oldDefinition.replace("and rule_version=p_data->>'rule_version'","and rule_version=coalesce(p_data->>'rule_version','')"));
+   await assert.rejects(db.exec(readFileSync(upgrade,'utf8')),/unsupported_duplicate_rule_function/);
+   await db.exec('rollback');assert.deepEqual(await allHistory(),savedHistory);await db.exec(oldDefinition);
+ }
+ const beforeV3=await allHistory();
+ await db.exec(readFileSync(v3upgrade,'utf8'));await db.exec(readFileSync(v3upgrade,'utf8'));
+ assert.deepEqual(await allHistory(),beforeV3);
+ const v3sid=crypto.randomUUID();let v3scan=await call('ensure',{...v2ensure,scan_id:v3sid,rule_version:'bill-duplicates-v3'});
+ assert.equal(v3scan.rule_version,'bill-duplicates-v3');
+ for(const invalid of [null,'','bill-duplicates-v4'])await assert.rejects(call('ensure',{...v2ensure,rule_version:invalid}),/duplicate_conflict/);
+ v3scan=await call('claim',{scan_id:v3sid,session_nonce:nonce});
+ v3scan=await call('checkpoint',{scan_id:v3sid,session_nonce:nonce,generation:v3scan.generation,expected_checkpoint:0,next_checkpoint:1,phase:'packaging',progress:{recordsRead:2,probes:30}});
+ const v3publish={scan_id:v3sid,session_nonce:nonce,generation:v3scan.generation,expected_checkpoint:1,expected_import_version:3};
+ const v3manifest={...mf(),format:'bill-duplicates-v2',ruleVersion:'bill-duplicates-v3',key:w+'/bill-duplicates/v2/'+iid+'/bill-duplicates-v3/'+'b'.repeat(64)+'.sqlite.gz'};
+ for(const bad of [{...v3manifest,format:'bill-duplicates-v1'},{...v3manifest,key:v3manifest.key.replace('/v2/','/v1/')},{...v3manifest,ruleVersion:'bill-duplicates-v2'}])
+   await assert.rejects(call('publish',{...v3publish,manifest:bad}),/duplicate_invalid_source/);
+ v3scan=await call('publish',{...v3publish,manifest:v3manifest});assert.equal(v3scan.state,'ready');
+ assert.deepEqual((await allHistory()).scans.filter(r=>r.id!==v3sid),beforeV3.scans);
+ assert.deepEqual((await allHistory()).reviews,beforeV3.reviews);assert.deepEqual((await allHistory()).events,beforeV3.events);
  // Existing BILL operations still work after the additive quota rewrite.
  await q("update ap_bill_jobs set state='abandoned',reserved_bytes=0");
  const oldCall=(op,data)=>q('select public.ap_bill_mutate($1,$2,$3,$4,$5) value',
@@ -150,8 +178,8 @@ try{
  const functionSql=(await q("select pg_get_functiondef('public.ap_duplicate_mutate(text,uuid,uuid,text,jsonb)'::regprocedure) definition")).rows[0].definition;
  const constraintSql=(await q("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='public.ap_duplicate_scans'::regclass and conname='ap_duplicate_scans_rule_version_check'")).rows;
  const beforeGuard=await history();
- await db.exec(functionSql.replace("and rule_version=p_data->>'rule_version'","and rule_version=coalesce(p_data->>'rule_version','')"));
- await assert.rejects(db.exec(readFileSync(upgrade,'utf8')),/unsupported_duplicate_rule_function/);
+ await db.exec(functionSql.replace("then 'bill-duplicates-v2' else 'bill-duplicates-v1' end)","then 'unsupported-artifact' else 'bill-duplicates-v1' end)"));
+ await assert.rejects(db.exec(readFileSync(v3upgrade,'utf8')),/unsupported_duplicate_vendor_function/);
  await db.exec('rollback');
  assert.deepEqual((await q("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='public.ap_duplicate_scans'::regclass and conname='ap_duplicate_scans_rule_version_check'")).rows,constraintSql);
  assert.deepEqual(await history(),beforeGuard);

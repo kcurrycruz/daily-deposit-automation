@@ -5,10 +5,14 @@ import hmac
 import json
 import os
 import re
+from datetime import date,timedelta
 from typing import TypedDict
 from ...models import allowed, integer, text, require_uuid, normalize_initials, JsonObject
 
-RULE_VERSION = 'bill-duplicates-v2'
+RULE_VERSION = 'bill-duplicates-v3'
+ARTIFACT_FORMAT = 'bill-duplicates-v2'
+STORAGE_VERSION = 'v2'
+CLASSIFICATIONS = ('exact_pattern','possible_duplicate','amount_difference','export_review','reference_entry_issue','possible_wrong_vendor')
 MAX_RECORDS = 500000
 MAX_FINDINGS = 100000
 MAX_BYTES = 512 * 1024 * 1024
@@ -76,6 +80,7 @@ class FindingSummary(Finding):
     preview: list[BillPreview]
     review: Review | None
     priorReview: bool
+    evidence: JsonObject
 
 
 class ResultManifest(TypedDict):
@@ -155,7 +160,7 @@ def validate_pin(value):
 def validate_manifest(value):
     keys = 'format ruleVersion sourceDigest importId key hash bytes expandedHash expandedBytes findingCount recordCount'
     out = allowed(value, keys, keys)
-    if out['format'] != 'bill-duplicates-v1' or out['ruleVersion'] != RULE_VERSION:
+    if out['format'] != ARTIFACT_FORMAT or out['ruleVersion'] != RULE_VERSION:
         raise DuplicateError('duplicate_invalid_source')
     for name in ('sourceDigest', 'hash', 'expandedHash'):
         digest(out[name])
@@ -165,9 +170,89 @@ def validate_manifest(value):
     integer(out['findingCount'], minimum=0, maximum=MAX_FINDINGS)
     integer(out['recordCount'], minimum=1, maximum=MAX_RECORDS)
     parts = text(out['key'], maximum=1024).split('/')
-    if len(parts) != 6 or parts[1:3] != ['bill-duplicates', 'v1'] or parts[3] != out['importId'] or parts[4] != RULE_VERSION or parts[5] != out['hash'] + '.sqlite.gz':
+    if len(parts) != 6 or parts[1:3] != ['bill-duplicates', STORAGE_VERSION] or parts[3] != out['importId'] or parts[4] != RULE_VERSION or parts[5] != out['hash'] + '.sqlite.gz':
         raise DuplicateError('duplicate_invalid_source')
     require_uuid(parts[0])
+    return out
+
+
+def validate_evidence(value,classification):
+    """Strict, bounded immutable explanations; never trust stored format claims."""
+    from .vendor_patterns import reference_shape
+    if classification not in CLASSIFICATIONS:raise DuplicateError('duplicate_invalid_source')
+    out=allowed(value,'version dateGapDays referenceReuse profiles edit','version dateGapDays referenceReuse profiles')
+    if type(out['version']) is not int or out['version']!=1 or type(out['referenceReuse']) is not bool:
+        raise DuplicateError('duplicate_invalid_source')
+    integer(out['dateGapDays'],nullable=True,minimum=0,maximum=3652058)
+    profiles=out['profiles'];new=classification in ('reference_entry_issue','possible_wrong_vendor')
+    if type(profiles) is not list or len(profiles)!=(2 if new else 0):raise DuplicateError('duplicate_invalid_source')
+    if out['referenceReuse'] and (new or out['dateGapDays'] is None or out['dateGapDays']<=30):raise DuplicateError('duplicate_invalid_source')
+    if new and (out['dateGapDays'] is None or out['dateGapDays']>3):raise DuplicateError('duplicate_invalid_source')
+    for profile in profiles:
+        p=allowed(profile,'periodStart periodEnd distinctReferences shapes established vendor invoiceNumber matches',
+                  'periodStart periodEnd distinctReferences shapes established vendor invoiceNumber matches')
+        text(p['vendor'],maximum=1024,blank=False);text(p['invoiceNumber'],maximum=1024,blank=False)
+        if p['established'] is not True or type(p['matches']) is not bool:raise DuplicateError('duplicate_invalid_source')
+        integer(p['distinctReferences'],minimum=20,maximum=MAX_RECORDS)
+        try:
+            start=date.fromisoformat(p['periodStart']);end=date.fromisoformat(p['periodEnd'])
+            cutoff=end+timedelta(days=1)
+            expected_start=date.fromordinal(max(1,cutoff.toordinal()-365))
+            if len(p['periodStart'])!=10 or len(p['periodEnd'])!=10 or cutoff.day!=1 or start!=expected_start:raise ValueError
+        except (ValueError,TypeError,OverflowError):raise DuplicateError('duplicate_invalid_source') from None
+        if type(p['shapes']) is not list or not 1<=len(p['shapes'])<=3:raise DuplicateError('duplicate_invalid_source')
+        seen=set();total=0;order=[]
+        for shape in p['shapes']:
+            v=allowed(shape,'shape references','shape references');text(v['shape'],maximum=2048,blank=False)
+            n=integer(v['references'],minimum=3,maximum=p['distinctReferences'])
+            if v['shape'] in seen:raise DuplicateError('duplicate_invalid_source')
+            seen.add(v['shape']);total+=n;order.append((-n,v['shape']))
+        if total>p['distinctReferences'] or total*10<p['distinctReferences']*9 or order!=sorted(order):raise DuplicateError('duplicate_invalid_source')
+        if p['matches']!=(reference_shape(p['invoiceNumber']) in seen):raise DuplicateError('duplicate_invalid_source')
+    if new and (profiles[0]['matches']==profiles[1]['matches'] or profiles[0]['periodStart']!=profiles[1]['periodStart'] or profiles[0]['periodEnd']!=profiles[1]['periodEnd']):
+        raise DuplicateError('duplicate_invalid_source')
+    if classification=='reference_entry_issue':
+        from ..normalization import vendor_key
+        from .vendor_patterns import compact_reference,edit_kind
+        if vendor_key(profiles[0]['vendor'])!=vendor_key(profiles[1]['vendor']):raise DuplicateError('duplicate_invalid_source')
+        actual=edit_kind(*(compact_reference(p['invoiceNumber']) for p in profiles))
+        if actual is None or out.get('edit')!=actual:raise DuplicateError('duplicate_invalid_source')
+    elif 'edit' in out:raise DuplicateError('duplicate_invalid_source')
+    elif classification=='possible_wrong_vendor':
+        from ..normalization import vendor_key
+        from .vendor_patterns import compact_reference
+        if vendor_key(profiles[0]['vendor'])==vendor_key(profiles[1]['vendor']) or compact_reference(profiles[0]['invoiceNumber'])!=compact_reference(profiles[1]['invoiceNumber']):
+            raise DuplicateError('duplicate_invalid_source')
+    if len(encoded(out).encode('utf8'))>16384:raise DuplicateError('duplicate_limit')
+    return out
+
+
+def validate_finding_evidence(value,classification,previews,member_count,member_ordinals=None):
+    """Bind vendor-format explanations to the complete immutable invoice pair."""
+    out=validate_evidence(value,classification)
+    if classification not in ('reference_entry_issue','possible_wrong_vendor'):return out
+    if type(previews) is not list or len(previews)!=2 or member_count!=2:
+        raise DuplicateError('duplicate_invalid_source')
+    identities=[];days=[];ordinals=[];amounts=[];currencies=[]
+    try:
+        for p in previews:
+            text(p['vendor'],maximum=1024,blank=False);text(p['invoiceNumber'],maximum=1024,blank=False)
+            ordinals.append(integer(p['ordinal'],minimum=0,maximum=MAX_RECORDS-1))
+            identities.append((p['vendor'],p['invoiceNumber']))
+            day=date.fromisoformat(p['invoiceDate'])
+            if len(p['invoiceDate'])!=10:raise ValueError
+            days.append(day)
+            amounts.append(integer(p['amount'],minimum=1))
+            currency=text(p['currency'],maximum=1024).strip().upper()
+            currencies.append(currency if re.fullmatch('[A-Z]{3}',currency) else '')
+        cutoff=min(days).replace(day=1)
+        if len(set(ordinals))!=2 or amounts[0]!=amounts[1] or (all(currencies) and currencies[0]!=currencies[1]):raise ValueError
+        if out['dateGapDays']!=abs((days[0]-days[1]).days):raise ValueError
+        if sorted(identities)!=sorted((p['vendor'],p['invoiceNumber']) for p in out['profiles']):raise ValueError
+        if any(date.fromisoformat(p['periodEnd'])+timedelta(days=1)!=cutoff for p in out['profiles']):raise ValueError
+        if member_ordinals is not None and sorted(ordinals)!=sorted(member_ordinals):raise ValueError
+    except (KeyError,TypeError,ValueError,OverflowError):
+        raise DuplicateError('duplicate_invalid_source') from None
     return out
 
 

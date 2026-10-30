@@ -66,7 +66,8 @@ class ApRepository:
     def _object_key(self,workspace_id,key):
         self._workspace(workspace_id)
         pattern=re.escape(workspace_id)+r'/(?:pdf/[0-9a-f]{64}\.pdf|csv/[0-9a-f]{64}\.csv|staging/[0-9a-f-]{36}/\d{1,3}-[0-9a-f]{64}\.bin|bills/v2/[0-9a-f]{64}/[0-9a-f]{64}\.(?:csv|sqlite)\.gz|bill-duplicates/(?:v1/[0-9a-f-]{36}/bill-duplicates-v[12]|v2/[0-9a-f-]{36}/bill-duplicates-v3)/[0-9a-f]{64}\.sqlite\.gz)'
-        if type(key) is not str or not re.fullmatch(pattern,key): raise ApStoreError('validation')
+        working=re.escape(workspace_id)+r'/bill-working/v1/[0-9a-f]{64}/[0-9a-f]{64}\.sqlite\.gz'
+        if type(key) is not str or not (re.fullmatch(pattern,key) or re.fullmatch(working,key)): raise ApStoreError('validation')
 
     def _table(self,name,columns='*'):
         return self.client.table(name).select(columns).eq('workspace_id',self.config.workspace_id)

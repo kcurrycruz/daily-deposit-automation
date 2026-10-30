@@ -149,3 +149,12 @@ test('missing or unsupported profile evidence is not presented as a learned fact
  const state=base(),f=profiledFinding();state.selection=f.key;state.detail={finding:{...f,evidence:{version:99,profiles:[{vendor:'SECRET'}]}},members:[],total:0};
  const html=duplicateViewHTML(state);assert.doesNotMatch(html,/SECRET|Why this was flagged/);assert.match(html,/Compare the source bills/);
 });
+
+
+test('exact-reference exclusions are separate from alerts and new typo coverage is versioned',()=>{
+ const state=base();state.progress.ruleVersion='bill-duplicates-v5';state.progress.excludedExactReferenceCount=3;state.page.excludedExactReferenceCount=3;
+ state.page.findings=[{...finding,reasons:['single_digit_substitution']}];
+ const html=duplicateViewHTML(state);assert.match(html,/3 exact-reference groups excluded/);assert.match(html,/One digit differs/);assert.match(html,/same vendor, original amount and invoice date/);
+ state.progress.ruleVersion='bill-duplicates-v3';const old=duplicateViewHTML(state);assert.match(old,/does not include single-digit typo checks/);assert.doesNotMatch(old,/Checks for single-digit invoice typos use/);
+ state.page.findings=[];state.page.total=0;state.progress.counts={all:0,reviewed:0,unreviewed:0};assert.match(duplicateViewHTML(state),/No possible duplicates found by these rules/);assert.match(duplicateSidebarHTML(state),/class="count">0/);
+});

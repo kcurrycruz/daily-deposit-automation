@@ -55,3 +55,20 @@ class NearContractTests(unittest.TestCase):
     wrong={**mf,'ruleVersion':'bill-duplicates-v3','key':mf['key'].replace('/bill-duplicates-v5/','/bill-duplicates-v3/')}
     with self.assertRaises(ValueError):cache._open(Path(folder)/'result.sqlite',wrong)
    finally:cache.close()
+
+ def test_enabled_rule_gets_a_new_scan_and_preserves_the_previous_ready_scan(self):
+  from uuid import uuid4
+  import test_ap_duplicates_operations as f
+  h,ops,repo=f.setup_detector(self)
+  def ensure():
+   pin=repo.current();return ops.handle('duplicate_ensure',dict(import_id=pin['importId'],expected_import_version=pin['importVersion']),str(uuid4()),h.auth)
+  def complete(p):
+   for _ in range(100):
+    if p['state']=='ready' and p['projectionReady']:return p
+    if p['state']=='ready':p=ops.handle('duplicate_status',dict(scan_id=p['scanId']),str(uuid4()),h.auth)
+    else:p=ops.handle('duplicate_step',dict(scan_id=p['scanId'],generation=p['generation'],expected_checkpoint=p['checkpoint'],restart=False),str(uuid4()),h.auth)
+   self.fail('new version did not complete')
+  previous=complete(ensure());old_current=repo.current;repo.current=lambda:{**old_current(),'ruleVersion':'bill-duplicates-v5'}
+  old_home=ops.source.ops.repository.current;ops.source.ops.repository.current=lambda:{**old_home(),'duplicate_near_schema_version':1}
+  current=complete(ensure());self.assertNotEqual(current['scanId'],previous['scanId']);self.assertEqual(current['ruleVersion'],'bill-duplicates-v5')
+  self.assertEqual(repo.scans[previous['scanId']]['state'],'ready');self.assertEqual(len(repo.scans),2)

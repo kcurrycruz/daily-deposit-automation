@@ -50,6 +50,7 @@ export function createDuplicateBills(client,{onChange=()=>{},beforeRequest=null,
  }
  const scopePayload=()=>state.source?.workingSetId?{working_set_id:state.source.workingSetId,expected_working_version:state.source.workingVersion}:{};
  function adoptProgress(p){
+  if(state.source.nearReferences===1&&p.ruleVersion!==(state.source.workingSetId?'bill-duplicates-v6':'bill-duplicates-v5'))throw Error('Duplicate rules changed. Refresh the workspace before reviewing.');
   if(state.source.workingSetId&&(p.workingSetId!==state.source.workingSetId||p.workingDigest!==state.source.workingDigest||p.workingVersion!==state.source.workingVersion))throw Error('Duplicate source changed. Refresh the workspace.');
   if(p.importId&&p.importId!==state.source.importId||p.importVersion!==undefined&&p.importVersion!==state.source.importVersion)throw Error('Duplicate source changed. Refresh the workspace.');
   if(state.reviewRevision!==null&&p.reviewRevision!==null&&p.reviewRevision!==undefined&&state.reviewRevision!==p.reviewRevision){state.page=null;state.detail=null;}
@@ -74,7 +75,7 @@ export function createDuplicateBills(client,{onChange=()=>{},beforeRequest=null,
  }
  function adoptSource(source){
   if(disposed)return;
-  const next={importId:source.importId||null,importVersion:source.importVersion??0,capability:source.capability,...(source.workingSetId?{workingSetId:source.workingSetId,workingDigest:source.workingDigest,workingVersion:source.workingVersion,workingSet:source.workingSet}: {})};
+  const next={importId:source.importId||null,importVersion:source.importVersion??0,capability:source.capability,nearReferences:source.nearReferences===1?1:0,...(source.workingSetId?{workingSetId:source.workingSetId,workingDigest:source.workingDigest,workingVersion:source.workingVersion,workingSet:source.workingSet}: {})};
   if(JSON.stringify(next)===JSON.stringify(state.source))return;
   token++;listToken++;selectionToken++;cancel();failed=null;recovery=null;clearEvidence();state.source=next;
   state.phase=next.capability!==1?'disabled':next.importId?'pending':'no_source';emit();plan();

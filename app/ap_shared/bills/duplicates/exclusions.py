@@ -9,10 +9,29 @@ POLICY='exact-vendor-reference-v1'
 class ExactReferenceExclusions:
     def __init__(self,source_reader,*,clock=time.monotonic):
         self.source,self.clock=source_reader,clock
-        self.after=-1;self.current=None;self.done=False
+        self.after=-1;self.current=None;self.done=False;self.records={}
 
     def initialize(self,db):
         db.execute('create table exact_reference_exclusions(key text primary key)')
+
+    def _members(self,db,artifact,job,pairs,pin,auth):
+        ordinals=[n for n,_ in pairs]
+        if any(n not in self.records for n in ordinals):
+            # At most 100 immutable source records, shared across nearby small
+            # groups. Source.members revalidates the source before/after the read.
+            kept={n:self.records[n] for n in ordinals if n in self.records}
+            wanted=list(dict.fromkeys(n for n in ordinals if n not in kept))
+            seen=set(wanted)|set(kept)
+            for ident, in db.execute('select id from findings where id>? order by id limit 49',(job['id'],)):
+                if len(wanted)+len(kept)>=100:break
+                for n, in artifact.execute('select ordinal from members where finding_id=? order by ordinal limit 100',(ident,)):
+                    if n not in seen:
+                        wanted.append(n);seen.add(n)
+                        if len(wanted)+len(kept)==100:break
+            values=self.source.members(pin,wanted,auth)
+            if len(values)!=len(wanted) or any(value.get('ordinal')!=n for n,value in zip(wanted,values)):raise DuplicateError('duplicate_invalid_source')
+            kept.update(zip(wanted,values));self.records=kept
+        return [self.records[n] for n in ordinals]
 
     def advance(self,db,artifact,scan,pin,auth,deadline):
         used=groups=0
@@ -28,9 +47,9 @@ class ExactReferenceExclusions:
             if not pairs:raise DuplicateError('duplicate_invalid_source')
             ordinals=[n for n,_ in pairs]
             self.source.ops._check(auth)
-            values=self.source.members(pin,ordinals,auth)
+            values=self._members(db,artifact,job,pairs,pin,auth)
             if len(values)!=len(pairs):raise DuplicateError('duplicate_invalid_source')
-            mixed=False
+            mixed=False;pending=dict(job)
             for (n,fp),value in zip(pairs,values):
                 if type(n) is not int or not 0<=n<pin['recordCount'] or value.get('ordinal')!=n:raise DuplicateError('duplicate_invalid_source')
                 bill=value['bill'];original=n
@@ -41,12 +60,14 @@ class ExactReferenceExclusions:
                 if bill.get('id')!=f'{pin["importId"]}:{original}' or bill_fingerprint(bill)!=fp:raise DuplicateError('duplicate_invalid_source')
                 identity=(vendor_key(bill['vendor']),invoice_key(bill['invoiceNumber']))
                 if not all(identity):raise DuplicateError('duplicate_invalid_source')
-                if job['identity'] is None:job['identity']=identity
-                elif job['identity']!=identity:mixed=True
-                job['read']+=1;job['after']=n;used+=1
+                if pending['identity'] is None:pending['identity']=identity
+                elif pending['identity']!=identity:mixed=True
+                pending['read']+=1;pending['after']=n;used+=1
             self.source.ops._check(auth)
-            if job['read']>job['total']:raise DuplicateError('duplicate_invalid_source')
-            if mixed or job['read']==job['total']:
-                if not mixed:db.execute('insert into exact_reference_exclusions values(?)',(job['key'],))
+            if pending['read']>job['total']:raise DuplicateError('duplicate_invalid_source')
+            if mixed or pending['read']==job['total']:
+                if not mixed:
+                    db.execute('insert into exact_reference_exclusions values(?)',(job['key'],));db.commit()
                 self.after=job['id'];self.current=None;groups+=1
+            else:self.current=pending
         db.commit();return self.done

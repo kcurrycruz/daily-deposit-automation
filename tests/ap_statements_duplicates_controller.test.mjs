@@ -231,3 +231,15 @@ test('scoped reviews submit acknowledged range version with saved member evidenc
  assert.equal(h.calls.at(-1).payload.working_set_id,workingSetId);assert.equal(h.calls.at(-1).payload.expected_working_version,2);
  h.controller.dispose();
 });
+
+
+test('enabling near-reference rules invalidates a cached legacy scan for the same import',async()=>{
+ let near=false;const h=setup(action=>action==='duplicate_findings_page'?{scanId,reviewRevision:0,total:0,findings:[],nextCursor:null}:progress({state:'ready',ruleVersion:near?'bill-duplicates-v5':'bill-duplicates-v3',projectionReady:true,reviewRevision:0,counts:{all:0,unreviewed:0,reviewed:0}}));
+ h.controller.adoptSource(source);await finish(h);const before=h.calls.filter(c=>c.action==='duplicate_ensure').length;near=true;
+ h.controller.adoptSource({...source,nearReferences:1});assert.equal(h.controller.state.page,null);await finish(h);
+ assert.equal(h.calls.filter(c=>c.action==='duplicate_ensure').length,before+1);assert.equal(h.controller.state.progress.ruleVersion,'bill-duplicates-v5');h.controller.dispose();
+});
+test('new-rule capability cannot adopt a reply from a legacy scan',async()=>{
+ const h=setup(()=>progress({ruleVersion:'bill-duplicates-v3'}));h.controller.adoptSource({...source,nearReferences:1});await h.flush();
+ assert.ok(h.controller.state.error);assert.equal(h.controller.state.progress,null);h.controller.dispose();
+});

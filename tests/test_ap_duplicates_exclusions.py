@@ -50,3 +50,25 @@ class ExclusionTests(unittest.TestCase):
   self.assertFalse(h.advance(local,artifact,{},pin,None,0));self.assertEqual(calls,[])
   self.assertFalse(h.advance(local,artifact,{},pin,None,1));self.assertEqual(local.execute('select count(*) from exact_reference_exclusions').fetchone()[0],0)
   self.assertTrue(h.advance(local,artifact,{},pin,None,20));self.assertEqual(len(calls),4);self.assertTrue(all(len(c)<=100 for c in calls))
+
+ def test_interrupted_write_resumes_without_losing_previously_verified_exclusions(self):
+  f=self.fixture([bill('FIRST'),bill('FIRST'),bill('SECOND'),bill('SECOND')],groups=[[0,1],[2,3]])
+  h,local,artifact,source,calls,pin=f
+  class Interrupted:
+   def __init__(self):self.inserts=0
+   def execute(self,sql,args=()):
+    if sql.startswith('insert into exact_reference_exclusions'):
+     self.inserts+=1
+     if self.inserts==2:raise sqlite3.OperationalError('interrupted')
+    return local.execute(sql,args)
+   def commit(self):return local.commit()
+  wrapped=Interrupted()
+  with self.assertRaises(sqlite3.OperationalError):h.advance(wrapped,artifact,{},pin,None,time.monotonic()+5)
+  local.rollback()
+  self.assertTrue(h.advance(wrapped,artifact,{},pin,None,time.monotonic()+5))
+  self.assertEqual(local.execute('select count(*) from exact_reference_exclusions').fetchone()[0],2)
+
+ def test_source_members_are_batched_across_small_groups(self):
+  rows=[bill(f'INV{n//2:05}') for n in range(200)];groups=[[n,n+1] for n in range(0,200,2)]
+  f=self.fixture(rows,groups=groups);self.assertEqual(len(self.run_all(f)),100)
+  self.assertEqual(len(f[4]),2);self.assertTrue(all(len(page)<=100 for page in f[4]))

@@ -18,7 +18,7 @@ class VendorCandidates:
         node=cur['node']
         if node['n']!=1 or other['n']!=1 or node['warning'] or other['warning']:return
         if node['currency'] and other['currency'] and node['currency']!=other['currency']:return
-        if classify(json.loads(node['preview']),json.loads(other['preview'])) is not None:return
+        if classify(json.loads(node['preview']),json.loads(other['preview']),rule_version=self.scan.rule_version) is not None:return
         if kind=='reference_entry_issue' and (len(node['compact'])<4 or len(other['compact'])<4 or edit_kind(node['compact'],other['compact']) is None):return
         ids=sorted([node['ident'],other['ident']])
         found=self.db.execute('insert or ignore into vendor_candidate_pairs values(?,?,?)',(*ids,kind))

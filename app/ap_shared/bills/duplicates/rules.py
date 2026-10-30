@@ -3,7 +3,7 @@ from datetime import date
 import re
 from ...models import MAX_SAFE_CENTS
 from ..normalization import vendor_key, invoice_key, trim
-from .contracts import RULE_VERSION, canonical_hash
+from .contracts import RULE_VERSION, canonical_hash,has_digit_typos
 
 _STEM = re.compile(r'^([0-9]{4,})([A-Z]?)$')
 _PAYMENT_WARNING = ('Paid Amount ', 'Amount Due ', 'Credits Applied ', 'Paid On ',
@@ -61,13 +61,27 @@ def reference_reasons(left, right):
     return reasons
 
 
-def classify(left, right):
+def digit_substitution(left,right):
+    if len(left)!=len(right) or len(left)<4:return False
+    differences=[(a,b) for a,b in zip(left,right) if a!=b]
+    return len(differences)==1 and all(ch in '0123456789' for ch in differences[0])
+
+
+def digit_variants(reference):
+    for at,ch in enumerate(reference):
+        if ch in '0123456789':
+            for other in '0123456789':
+                if other!=ch:yield reference[:at]+other+reference[at+1:]
+
+
+def classify(left, right,*,rule_version=RULE_VERSION):
     if not eligible(left) or not eligible(right) or vendor_key(left['vendor']) != vendor_key(right['vendor']):
         return None
     ca, cb = currency_key(left.get('currency')), currency_key(right.get('currency'))
     if ca and cb and ca != cb:
         return None
     reasons = reference_reasons(left, right)
+    if has_digit_typos(rule_version) and digit_substitution(invoice_key(left['invoiceNumber']),invoice_key(right['invoiceNumber'])):reasons.append('single_digit_substitution')
     if not reasons:
         return None
     exact = 'exact_reference' in reasons
@@ -77,7 +91,7 @@ def classify(left, right):
         return None
     # Routine deliveries often share totals and nearby sequential references.
     # A digit swap needs the same invoice day, unlike a trailing-letter variant.
-    if 'digit_transposition' in reasons and da != db:
+    if ('digit_transposition' in reasons or 'single_digit_substitution' in reasons) and da != db:
         return None
     classification = 'exact_pattern' if exact and equal else 'amount_difference' if exact else 'possible_duplicate'
     if not equal:

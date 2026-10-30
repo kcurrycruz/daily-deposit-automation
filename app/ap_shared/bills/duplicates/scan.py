@@ -6,8 +6,8 @@ import sqlite3
 from ...models import validate_record
 from ..normalization import vendor_key, invoice_key
 from .contracts import (DuplicateError, RULE_VERSION, MAX_FINDINGS, MAX_BYTES, encoded,
-                        canonical_hash, validate_pin,validate_finding_evidence,rule_for_pin)
-from .rules import eligible, classify, bill_fingerprint, normalized_identity, identity_warnings, invoice_day, currency_key
+                        canonical_hash, validate_pin,validate_finding_evidence,rule_for_pin,has_digit_typos)
+from .rules import eligible, classify, bill_fingerprint, normalized_identity, identity_warnings, invoice_day, currency_key,digit_variants
 from .vendor_patterns import compact_reference,reference_shape
 from .vendor_scan import VendorCandidates
 
@@ -113,9 +113,15 @@ class DuplicateScan:
                     if ref[i] != ref[i + 1] and ref[i] in '0123456789' and ref[i + 1] in '0123456789':
                         variants.add(ref[:i] + ref[i + 1] + ref[i] + ref[i + 2:])
             modes.extend(('swap', ref) for ref in sorted(variants))
+            if has_digit_typos(self.rule_version) and len(node['ref'])>=4:
+                batch=[]
+                for ref in digit_variants(node['ref']):
+                    batch.append(ref)
+                    if len(batch)==100:modes.append(('digit',tuple(batch)));batch=[]
+                if batch:modes.append(('digit',tuple(batch)))
         self.current = dict(node=node, modes=modes, mode=0, after=node['ordinal'])
         if node['n'] > 1:
-            evidence = classify(json.loads(node['preview']), json.loads(node['preview']))
+            evidence = classify(json.loads(node['preview']), json.loads(node['preview']),rule_version=self.rule_version)
             self._begin([node], evidence)
 
     def _next_pair(self):
@@ -126,6 +132,9 @@ class DuplicateScan:
                 sql = '''select * from nodes indexed by node_stem where vendor=? and amount=? and stem=?
                          and ordinal>? and ref<>? and day between ? and ? order by ordinal limit 1'''
                 params = (node['vendor'], node['amount'], key, cur['after'], node['ref'], node['day'] - 30, node['day'] + 30)
+            elif mode=='digit':
+                sql='select * from nodes indexed by node_ref where vendor=? and ref in ('+','.join('?' for _ in key)+') and amount=? and day=? and ordinal>? order by ordinal limit 1'
+                params=(node['vendor'],*key,node['amount'],node['day'],cur['after'])
             elif mode == 'swap':
                 sql = '''select * from nodes indexed by node_ref where vendor=? and ref=?
                          and amount=? and day=? and ordinal>? order by ordinal limit 1'''
@@ -139,7 +148,7 @@ class DuplicateScan:
                 cur['mode'] += 1; cur['after'] = node['ordinal']
                 return
             other = self._node(raw); cur['after'] = other['ordinal']
-            evidence = classify(json.loads(node['preview']), json.loads(other['preview']))
+            evidence = classify(json.loads(node['preview']), json.loads(other['preview']),rule_version=self.rule_version)
             if evidence:
                 if node['n'] > 1 or other['n'] > 1 or node['warning'] or other['warning']:
                     evidence['classification'] = 'export_review'

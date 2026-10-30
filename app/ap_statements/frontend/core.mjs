@@ -244,6 +244,7 @@ export const statuses = {
   history: { label: 'History needed', tone: 'amber' }, presence: { label: 'Invoice found', tone: 'blue' },
   source: { label: 'Check BILL export', tone: 'amber' },
   possible: { label: 'Possible match', tone: 'amber' }, vendor: { label: 'Check vendor', tone: 'amber' },
+  range: { label: 'Check archived data', tone: 'amber' },
 };
 export function comparisonInputKey(statement,mappings={}){
   return JSON.stringify([MATCH_RULE_VERSION,statement.vendor,mappings[statement.vendor]??null,
@@ -251,15 +252,15 @@ export function comparisonInputKey(statement,mappings={}){
 }
 export function reconcile(statement, provider, mappings = {}) {
   const scope=provider.scopes?.[statement.id];
-  const complete=!provider.scopes||!!scope?.complete&&scope.inputKey===comparisonInputKey(statement,mappings)&&scope.directoryComplete;
+  const complete=!provider.scopes||!!scope?.complete&&scope.inputKey===comparisonInputKey(statement,mappings)&&scope.directoryComplete&&scope.workingSet?.workingSetId===provider.workingSet?.workingSetId;
   const directory=scope?.directoryComplete?scope.vendorDirectory:(provider.vendorDirectory||provider.records||[]);
   const identity=resolveStatementVendor(statement.vendor,directory,mappings);
   const vendor = vendorKey(identity.vendor || '');
-  const records = provider.scopes?(complete?scope.records:[]):(provider.records??[]);
+  const records = provider.scopes?(complete?[...new Map([...scope.records,...(scope.archivedRecords||[])].map(record=>[record.id,record])).values()]:[]):(provider.records??[]);
   const sourceAsOf=scope?.metadata?.asOf??provider.asOf;
   return groupInvoices(statement).map(row => {
     let matchMethod = null,referenceRule=null;
-    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
+    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),...(candidates.some(c=>scope?.archivedIds?.includes(c.id))?{coverage:'archived'}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
     if (row.kind === 'opening') return result('history', 'Carried-forward balance: older invoice detail is needed. It is not a new invoice.');
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
     if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
@@ -275,11 +276,14 @@ export function reconcile(statement, provider, mappings = {}) {
       matchMethod = 'reference';
       return result('vendor', 'This invoice number exists, but the vendor is not confirmed. Choose the correct vendor above.', references);
     } else {
+      const policy=scope?.workingSet?.policy,validDate=typeof row.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(row.date)&&!Number.isNaN(Date.parse(row.date))&&new Date(row.date).toISOString().slice(0,10)===row.date;
+      if(policy?.mode==='last_12_months'&&(!validDate||row.date<policy.cutoffDate))return result('range','Outside active BILL range — check archived data. This invoice has not been checked against the complete saved export.');
       if (directory.length && (!vendor || !directory.some(r => vendorKey(r.vendor) === vendor))) return result('vendor', 'Confirm which BILL vendor sent this statement using the question above.');
       candidates = kindRecords.filter(r => vendorKey(r.vendor) === vendor && Number.isSafeInteger(row.originalAmount) && Number.isSafeInteger(r.amount) && r.amount === row.originalAmount);
       if (candidates.length) matchMethod = 'amount';
     }
     if (candidates.length > 1) return result('ambiguous', matchMethod === 'amount' ? 'Multiple invoices for this vendor have the same original amount. Review all candidates; no invoice has been selected.' : 'Multiple BILL records have this vendor and reference. Review candidates.', candidates);
+    if (!candidates.length&&scope?.workingSet?.policy.mode==='last_12_months')return result('range','No match in active BILL range. Check archived data before treating this as missing from the full export.');
     if (!candidates.length) return result('missing', provider.simulated ? 'No match in the simulated BILL dataset.' : 'No match in the imported BILL records. Verify export coverage before treating this as missing.');
     const bill = candidates[0];
     if (bill.sourceIssues) return result('source', `BILL export row(s) ${bill.sourceRows}: ${bill.sourceIssues}`, candidates);

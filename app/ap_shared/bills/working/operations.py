@@ -136,6 +136,9 @@ class WorkingOperations:
 
     def handle(self,action,payload,request_id,authorization):
         require_uuid(request_id);self._check(authorization);auth=authorization
+        if action in ('bill_candidates_page','bill_vendors_page','bill_archived_candidates_page'):
+            from .queries import WorkingQueries
+            return WorkingQueries(self).handle(action,payload,auth)
         if action=='bill_range_begin':
             data=allowed(payload,'source_import_id mode expected_import_version expected_working_version upload_job_id refresh',
                          'source_import_id mode expected_import_version expected_working_version')

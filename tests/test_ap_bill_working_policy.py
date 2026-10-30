@@ -88,7 +88,7 @@ class WorkingManifestTests(unittest.TestCase):
                              workingDigest=self.identity, source=self.source, policy=self.policy,
                              protectionDigest='b'*64, trainingVersion='vendor-history-v1',
                              fullRecordCount=2, activeCount=1, archivedCount=1,
-                             retainedReasonCounts={'recent': 1}, vendorDigest='f'*64,
+                             retainedReasonCounts={'recent': 1}, vendorDigest='f'*64, archiveVendorDigest='f'*64,
                              indexArchive=archive('c'), contextArchive=archive('d'))
 
     def test_identity_changes_with_each_scope_input(self):

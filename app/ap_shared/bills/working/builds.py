@@ -85,8 +85,10 @@ class WorkingBuilder:
                 n, record = item['ordinal'], item['bill']
                 vendor = vendor_key(record['vendor'])
                 reasons = retention_reasons(record, self.policy, protected=self.protections.protects(record))
-                table = 'working_vendors' if reasons else 'archive_vendors'
-                self.db.execute('insert into '+table+' values(?,?,?) on conflict(vendor_key) do update set vendor=excluded.vendor,ordinal=excluded.ordinal', (vendor, record['vendor'], n))
+                # A compact complete directory supports an explicit archived
+                # lookup even when this vendor has no active invoices.
+                for table in (('archive_vendors','working_vendors') if reasons else ('archive_vendors',)):
+                    self.db.execute('insert into '+table+' values(?,?,?) on conflict(vendor_key) do update set vendor=excluded.vendor,ordinal=excluded.ordinal', (vendor, record['vendor'], n))
                 if not reasons:
                     continue
                 record = {**record, 'id': f'{self.source["importId"]}:{n}'}
@@ -128,15 +130,17 @@ class WorkingBuilder:
             self.after_recurrence = self.pending_recurrence; self.pending_recurrence = None
 
     def _finalize(self):
-        hasher = hashlib.sha256(b'[')
-        for n,(vendor,) in enumerate(self.db.execute('select vendor from working_vendors order by ordinal')):
-            if n: hasher.update(b',')
-            hasher.update(encoded(dict(vendor=vendor)).encode('utf8'))
-        hasher.update(b']')
+        def directory_digest(table):
+            hasher=hashlib.sha256(b'[')
+            for n,(vendor,) in enumerate(self.db.execute('select vendor from '+table+' order by ordinal')):
+                if n:hasher.update(b',')
+                hasher.update(encoded(dict(vendor=vendor)).encode('utf8'))
+            hasher.update(b']');return hasher.hexdigest()
         self.summary = dict(format=FORMAT,workingDigest=self.identity,source=self.source,policy=self.policy,
             protectionDigest=self.protections.digest(),trainingVersion=TRAINING_VERSION,
             fullRecordCount=self.source['recordCount'],activeCount=self.active,
-            archivedCount=self.source['recordCount']-self.active,retainedReasonCounts=dict(self.reasons),vendorDigest=hasher.hexdigest())
+            archivedCount=self.source['recordCount']-self.active,retainedReasonCounts=dict(self.reasons),
+            vendorDigest=directory_digest('working_vendors'),archiveVendorDigest=directory_digest('archive_vendors'))
         for db,table in [(self.db,'working_meta'),(self.context_db,'context_meta')]:
             db.execute('insert into '+table+' values(?,?)',('scope',encoded(self.summary)))
             db.execute('pragma user_version=1'); db.commit()

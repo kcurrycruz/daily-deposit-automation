@@ -79,7 +79,17 @@ create trigger ap_duplicate_protection before insert or update or delete on publ
   for each row execute function public.ap_bill_protection_changed();
 
 create function public.ap_revision_working_source() returns trigger language plpgsql set search_path=public,pg_temp as $$
+declare previous ap_statement_revisions%rowtype; scope text;
 begin
+  scope=coalesce(current_setting('ap.revision_working_scope',true),'');
+  if scope<>'' and scope<>'full' then
+    new.working_set_id=scope::uuid;
+  elsif scope<>'full' and new.working_set_id is null then
+    select r.* into previous from ap_statements s join ap_statement_revisions r on r.id=s.current_revision_id
+      where s.workspace_id=new.workspace_id and s.id=new.statement_id;
+    if found and new.import_id is not distinct from previous.import_id and new.results=previous.results and
+      new.mapping_snapshot=previous.mapping_snapshot then new.working_set_id=previous.working_set_id; end if;
+  end if;
   if new.working_set_id is not null and not exists(select 1 from ap_bill_working_sets
     where workspace_id=new.workspace_id and id=new.working_set_id and source_import_id=new.import_id) then
     raise exception 'bill_conflict';
@@ -184,7 +194,7 @@ begin
         select * into source from ap_bill_imports where workspace_id=p_workspace and id=job.source_import_id and state='ready';
         mf=p_data->'manifest';
         if mf->>'format' is distinct from 'ap-bill-working-v1' or mf->>'trainingVersion' is distinct from 'vendor-history-v1' or
-          coalesce(mf->>'workingDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'vendorDigest','') !~ '^[0-9a-f]{64}$' or
+          coalesce(mf->>'workingDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'vendorDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'archiveVendorDigest','') !~ '^[0-9a-f]{64}$' or
           mf->'source'->>'importId' is distinct from source.id::text or mf->'source'->>'sourceDigest' is distinct from source.file_hash or
           (mf->'source'->>'recordCount')::integer is distinct from source.record_count or mf->'policy' is distinct from job.policy or
           mf->>'protectionDigest' is distinct from job.protection_digest or (mf->>'fullRecordCount')::integer is distinct from source.record_count or
@@ -229,4 +239,43 @@ revoke all on function public.ap_bill_working_mutate(text,uuid,uuid,text,jsonb) 
 grant execute on function public.ap_bill_working_mutate(text,uuid,uuid,text,jsonb) to service_role;
 revoke all on function public.ap_working_policy_valid(jsonb),public.ap_bill_working_version(),public.ap_bill_protection_changed(),public.ap_revision_working_source(),public.ap_bill_working_immutable() from public,anon,authenticated;
 grant execute on function public.ap_working_policy_valid(jsonb) to service_role;
+
+-- Keep the existing manual-evidence/time-stamping implementation behind a
+-- source/scope guard. The original request hash still pins the complete payload.
+alter function public.ap_save_revision(uuid,uuid,text,jsonb) rename to ap_save_revision_before_working;
+revoke all on function public.ap_save_revision_before_working(uuid,uuid,text,jsonb) from public,anon,authenticated,service_role;
+create function public.ap_save_revision(p_workspace uuid,p_request_id uuid,p_payload_hash text,p_data jsonb)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare home ap_workspaces%rowtype; previous ap_statement_revisions%rowtype; cached ap_requests%rowtype;
+  scope_id uuid; setting_before text; reply jsonb;
+begin
+  if p_payload_hash is null or p_payload_hash !~ '^[0-9a-f]{64}$' or jsonb_typeof(p_data) is distinct from 'object' then raise exception 'validation'; end if;
+  select * into home from ap_workspaces where id=p_workspace for update;
+  if not found then raise exception 'bill_conflict'; end if;
+  select * into cached from ap_requests where workspace_id=p_workspace and request_id=p_request_id;
+  if found then
+    if cached.payload_hash<>p_payload_hash then raise exception 'request_conflict'; end if;
+    return cached.response;
+  end if;
+  if p_data->'doc'->>'reviewMode'='manual' then
+    select * into previous from ap_statement_revisions where workspace_id=p_workspace and
+      statement_id=(p_data->>'statement_id')::uuid and version=(p_data->>'expected_version')::integer;
+    if not found then raise exception 'bill_conflict'; end if;
+    scope_id=previous.working_set_id;
+    if p_data ? 'working_set_id' and (p_data->>'working_set_id')::uuid is distinct from scope_id then raise exception 'bill_conflict'; end if;
+  else
+    scope_id=(p_data->>'working_set_id')::uuid;
+    if scope_id is not null and (home.active_working_set_id is distinct from scope_id or
+      home.active_import_id is distinct from (p_data->>'import_id')::uuid or
+      home.working_set_version is distinct from (p_data->>'working_version')::bigint or
+      home.working_protection_epoch is distinct from home.bill_protection_epoch) then raise exception 'bill_conflict'; end if;
+  end if;
+  setting_before=coalesce(current_setting('ap.revision_working_scope',true),'');
+  perform set_config('ap.revision_working_scope',coalesce(scope_id::text,'full'),true);
+  reply=ap_save_revision_before_working(p_workspace,p_request_id,p_payload_hash,p_data-'working_set_id'-'working_version');
+  perform set_config('ap.revision_working_scope',setting_before,true);
+  return reply;
+end $$;
+revoke all on function public.ap_save_revision(uuid,uuid,text,jsonb) from public,anon,authenticated;
+grant execute on function public.ap_save_revision(uuid,uuid,text,jsonb) to service_role;
 commit;

@@ -30,6 +30,8 @@ MESSAGES = {
     'bill_conflict': 'The BILL data or update session changed. The previous operation was not overwritten.',
     'bill_invalid_archive': 'The BILL export could not be read or verified. Select the original CSV again.',
     'bill_incomplete': 'The BILL comparison source is incomplete or unavailable. Retry before reviewing.',
+    'bill_range_refresh': 'Saved follow-ups changed. Refresh active BILL coverage before comparing.',
+    'bill_range_loading': 'Preparing the saved active BILL index. Retry loading shortly.',
 }
 
 

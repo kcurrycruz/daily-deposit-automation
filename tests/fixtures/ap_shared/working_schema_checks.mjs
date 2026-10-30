@@ -26,7 +26,7 @@ const manifest=(job,activeCount=1)=>{
  const archive=letter=>({key:`${w}/bill-working/v1/${workingDigest}/${letter.repeat(64)}.sqlite.gz`,hash:letter.repeat(64),bytes:100,expandedHash:'e'.repeat(64),expandedBytes:1000});
  return {format:'ap-bill-working-v1',workingSetId:crypto.randomUUID(),workingDigest,source,policy:job.policy,
  protectionDigest:'b'.repeat(64),trainingVersion:'vendor-history-v1',fullRecordCount:2,activeCount,archivedCount:2-activeCount,
- retainedReasonCounts:activeCount?{recent:activeCount}:{},vendorDigest:'f'.repeat(64),indexArchive:archive('c'),contextArchive:archive('d')};
+ retainedReasonCounts:activeCount?{recent:activeCount}:{},vendorDigest:'f'.repeat(64),archiveVendorDigest:'f'.repeat(64),indexArchive:archive('c'),contextArchive:archive('d')};
 };
 const stage=async(job,mf=manifest(job))=>{
  await call('checkpoint',{...data(job),expected_checkpoint:0,next_checkpoint:1,state:'packaging',progress:{recordsRead:2}});
@@ -67,6 +67,8 @@ try{
  }
  const badSource=structuredClone(emptyManifest);badSource.source.importId=crypto.randomUUID();
  await assert.rejects(call('stage',{...data(empty),expected_checkpoint:1,manifest:badSource}),/bill_incomplete/);
+ const badDirectory=structuredClone(emptyManifest);delete badDirectory.archiveVendorDigest;
+ await assert.rejects(call('stage',{...data(empty),expected_checkpoint:1,manifest:badDirectory}),/bill_incomplete/);
  await call('stage',{...data(empty),expected_checkpoint:1,manifest:emptyManifest});await activate(empty);
  assert.equal((await q('select active_count from ap_bill_working_sets where id=(select active_working_set_id from ap_workspaces where id=$1)',[w])).rows[0].active_count,0);
  const conflict=await begin();await stage(conflict);
@@ -105,12 +107,28 @@ try{
  const restarted=await call('restart',{...data(expired),expected_checkpoint:0});
  assert.notEqual(restarted.generation,expired.generation);assert.equal(restarted.checkpoint,0);assert.deepEqual(restarted.policy,expired.policy);
  await call('cancel',{...data(expired),generation:restarted.generation});
+ // Scoped saves retain their exact evidence through completion and manual reopen.
+ const scopedStatement=crypto.randomUUID(),initialRevision=crypto.randomUUID(),row=crypto.randomUUID();
+ const doc={id:scopedStatement,vendor:'Synthetic',filename:'synthetic.pdf',confirmed:true,pageCount:1,warnings:[],statementDate:'2026-10-30',rows:[{id:row,invoiceNumber:'INV1',type:'invoice',amount:10000,confidence:99,page:1}]};
+ await q("insert into ap_statements(id,workspace_id,filename,version,original_object_key) values($1,$2,'synthetic.pdf',1,'synthetic.pdf')",[scopedStatement,w]);
+ await q("insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,rule_version,import_id) values($1,$2,$3,1,$4,'ap-match-v4',$5)",[initialRevision,w,scopedStatement,JSON.stringify(doc),sourceId]);
+ await q('update ap_statements set current_revision_id=$1 where id=$2',[initialRevision,scopedStatement]);
+ const saveData={statement_id:scopedStatement,expected_version:1,doc,resolutions:{},import_id:sourceId,mapping_snapshot:{},results:[{id:row,status:'matched',candidates:[]}],rule_version:'ap-match-v4',working_set_id:mf.workingSetId,working_version:(await home()).working_set_version};
+ await assert.rejects(q('select ap_save_revision($1,$2,$3,$4)',[w,crypto.randomUUID(),'a'.repeat(64),JSON.stringify(saveData)]),/bill_conflict/);
+ const refresh=await begin();await stage(refresh,mf);await activate(refresh);
+ saveData.working_version=(await home()).working_set_version;
+ const saved=(await q('select ap_save_revision($1,$2,$3,$4) value',[w,crypto.randomUUID(),'a'.repeat(64),JSON.stringify(saveData)])).rows[0].value;
+ assert.equal((await q('select working_set_id from ap_statement_revisions where id=$1',[saved.revision_id])).rows[0].working_set_id,mf.workingSetId);
+ const completed=(await q('select ap_complete_revision($1,$2,$3,$4) value',[w,crypto.randomUUID(),'b'.repeat(64),JSON.stringify({statement_id:scopedStatement,expected_version:2,initials:'KC'})])).rows[0].value;
+ assert.equal((await q('select working_set_id from ap_statement_revisions where id=$1',[completed.revision_id])).rows[0].working_set_id,mf.workingSetId);
+ const reopened=(await q('select ap_reopen_statement($1,$2,$3,$4) value',[w,crypto.randomUUID(),'c'.repeat(64),JSON.stringify({statement_id:scopedStatement,expected_version:3,review_mode:'manual'})])).rows[0].value;
+ assert.equal((await q('select working_set_id from ap_statement_revisions where id=$1',[reopened.revision_id])).rows[0].working_set_id,mf.workingSetId);
  for(const role of ['anon','authenticated']){
   assert.equal((await q("select has_function_privilege($1,'public.ap_bill_working_mutate(text,uuid,uuid,text,jsonb)','execute') ok",[role])).rows[0].ok,false);
   assert.equal((await q("select has_table_privilege($1,'public.ap_bill_working_sets','select') ok",[role])).rows[0].ok,false);
  }
  assert.equal((await q("select has_function_privilege('service_role','public.ap_bill_working_mutate(text,uuid,uuid,text,jsonb)','execute') ok")).rows[0].ok,true);
  assert.equal((await q('select count(*)::int n from ap_bill_working_sets')).rows[0].n,2);
- assert.equal((await q('select count(*)::int n from ap_statement_revisions')).rows[0].n,1);
+ assert.equal((await q('select count(*)::int n from ap_statement_revisions')).rows[0].n,5);
  console.log('Working-set SQL checks passed');
 }finally{await db.close();}

@@ -84,6 +84,15 @@ class ApRepository:
         if row['id']!=import_id: raise ApStoreError()
         return row
 
+    def _working_info(self,workspace_id,set_id,import_id):
+        from .bills.working.contracts import validate_working_manifest
+        self._workspace(workspace_id);require_uuid(set_id)
+        row=self._one(self._table('ap_bill_working_sets').eq('id',set_id))
+        manifest=validate_working_manifest(row['manifest'])
+        if row['id']!=set_id or manifest['workingSetId']!=set_id or manifest['source']['importId']!=import_id:
+            raise ApStoreError('conflict')
+        return manifest
+
     @safe_backend
     def bootstrap(self,workspace_id,cursor=None,limit=50) -> SharedSnapshot:
         self._workspace(workspace_id); self._private_bucket(); integer(limit,minimum=1,maximum=50)
@@ -94,6 +103,9 @@ class ApRepository:
             active['storage_format']=source.get('storage_format','rows-v1')
             if source.get('storage_format')=='snapshot-v2':
                 active['vendorDigest']=source['snapshot_manifest']['vendorDigest']
+            if home.get('active_working_set_id'):
+                active['workingSet']=self._working_info(workspace_id,home['active_working_set_id'],source['id'])
+                active['protectionsCurrent']=home.get('working_protection_epoch')==home.get('bill_protection_epoch')
         query=self._table('ap_statements').eq('archived',False).eq('completed',False).order('id').limit(limit)
         if cursor: query=query.gt('id',require_uuid(cursor))
         items=query.execute().data
@@ -116,7 +128,7 @@ class ApRepository:
         if home.get('rereview_schema_version')==1: capabilities['statementRereview']=1
         if home.get('bill_working_schema_version')==1: capabilities['billWorkingSets']=1
         return {'activeImport':active,'capabilities':capabilities,
-                'importVersion':home.get('import_version'),
+                'importVersion':home.get('import_version'),'workingVersion':home.get('working_set_version',0),
                 'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},
                 'mappingVersions':{r['vendor']:r['version'] for r in mapping_rows},'statements':statements,
                 'nextCursor':items[-1]['id'] if len(items)==limit else None}
@@ -132,7 +144,7 @@ class ApRepository:
         self._workspace(workspace_id);self._private_bucket();require_uuid(statement_id);integer(version,minimum=1)
         row=self._one(self._table('ap_statement_revisions').eq('statement_id',statement_id).eq('version',version))
         return {'doc':row['doc'],'results':row['results'],'resolutions':row['resolutions'],
-                'importId':row['import_id'],'mappingSnapshot':row['mapping_snapshot'],'ruleVersion':row['rule_version']}
+                'importId':row['import_id'],'mappingSnapshot':row['mapping_snapshot'],'ruleVersion':row['rule_version'],'workingSetId':row.get('working_set_id')}
 
     @safe_backend
     def records_page(self,workspace_id,import_id,after_ordinal=-1,limit=PAGE_SIZE):
@@ -156,11 +168,12 @@ class ApRepository:
         query=query.eq('id',require_uuid(revision)) if revision else query.eq('id',item['current_revision_id'])
         data=self._one(query)
         source=self.import_info(workspace_id,data['import_id']) if data['import_id'] else None
+        working=self._working_info(workspace_id,data['working_set_id'],data['import_id']) if data.get('working_set_id') else None
         return {'doc':data['doc'],'version':item['version'],'revisionVersion':data['version'],'revisionId':data['id'],
                 'importLabel':source['metadata'].get('label','') if source else '',
-                'importInfo':({key:source[key] for key in ('id','metadata','record_count','created_at')}|{'storage_format':source.get('storage_format','rows-v1')}) if source else None,
+                'importInfo':({key:source[key] for key in ('id','metadata','record_count','created_at')}|{'storage_format':source.get('storage_format','rows-v1'),'workingSet':working}) if source else None,
                 'resolutions':data['resolutions'],'results':data['results'],'importId':data['import_id'],
-                'mappingSnapshot':data['mapping_snapshot'],'ruleVersion':data['rule_version'],
+                'mappingSnapshot':data['mapping_snapshot'],'ruleVersion':data['rule_version'],'workingSetId':data.get('working_set_id'),
                 'completed':item['completed'],'archived':item['archived'],'originalAvailable':bool(item.get('original_object_key'))}
 
     @safe_backend

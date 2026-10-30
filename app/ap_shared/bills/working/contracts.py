@@ -21,11 +21,12 @@ def working_digest(source: dict, policy: dict, protection_digest: str) -> str:
 
 def validate_working_manifest(value: dict) -> dict:
     fields = ('format workingSetId workingDigest source policy protectionDigest trainingVersion '
-              'fullRecordCount activeCount archivedCount retainedReasonCounts vendorDigest indexArchive contextArchive')
+              'fullRecordCount activeCount archivedCount retainedReasonCounts vendorDigest archiveVendorDigest indexArchive contextArchive')
     out = allowed(value, fields, fields)
     if out['format'] != FORMAT or out['trainingVersion'] != TRAINING_VERSION:
         raise ValueError('Unsupported active BILL artifact.')
     require_uuid(out['workingSetId']); digest(out['workingDigest']); digest(out['vendorDigest'])
+    digest(out['archiveVendorDigest'])
     out['source'] = validate_source(out['source']); out['policy'] = validate_policy(out['policy'])
     if out['workingDigest'] != working_digest(out['source'], out['policy'], out['protectionDigest']):
         raise ValueError('Active BILL identity does not match its source and policy.')

@@ -81,16 +81,19 @@ class WorkingCache:
                 elif item['phase']=='recurrences':
                     rows=context_db.execute('select vendor,amount,day from recurrences where (vendor,amount,day)>(?,?,?) order by vendor,amount,day limit 250',item['recurrence_after']).fetchall()
                     for key in rows:history.recurring(*key);item['recurrence_after']=key
-                    if len(rows)<250:item['phase']='vendors';item['vendor_after']=-1;item['vendor_hash']=hashlib.sha256(b'[');item['vendor_count']=0
+                    if len(rows)<250:item['phase']='vendors';item['vendor_table']='working_vendors';item['vendor_digest']='vendorDigest';item['vendor_after']=-1;item['vendor_hash']=hashlib.sha256(b'[');item['vendor_count']=0
                 elif item['phase']=='vendors':
-                    rows=index.execute('select ordinal,vendor from working_vendors where ordinal>? order by ordinal limit 250',(item['vendor_after'],)).fetchall()
+                    rows=index.execute('select ordinal,vendor from '+item['vendor_table']+' where ordinal>? order by ordinal limit 250',(item['vendor_after'],)).fetchall()
                     for ordinal,vendor in rows:
                         if item['vendor_count']:item['vendor_hash'].update(b',')
                         item['vendor_hash'].update(encoded(dict(vendor=vendor)).encode('utf8'))
                         item['vendor_count']+=1;item['vendor_after']=ordinal
                     if len(rows)<250:
                         item['vendor_hash'].update(b']')
-                        if item['vendor_hash'].hexdigest()!=manifest['vendorDigest']:raise SnapshotError('bill_invalid_archive')
+                        if item['vendor_hash'].hexdigest()!=manifest[item['vendor_digest']]:raise SnapshotError('bill_invalid_archive')
+                        if item['vendor_table']=='working_vendors':
+                            item.update(vendor_table='archive_vendors',vendor_digest='archiveVendorDigest',vendor_after=-1,vendor_hash=hashlib.sha256(b'['),vendor_count=0)
+                            continue
                         item['phase']='done';return True
                 else:return True
         return False

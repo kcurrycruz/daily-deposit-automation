@@ -55,14 +55,15 @@ class ApService:
 
     def _results(self,value):
         if type(value) is not list: raise ApValidationError('Comparison evidence must be a list.')
-        statuses=set('matched missing amount balance scheduled paid ambiguous extraction unverified credit history presence source possible vendor'.split())
+        statuses=set('matched missing amount balance scheduled paid ambiguous extraction unverified credit history presence source possible vendor range'.split())
         output=[]
         for row in value:
-            out=allowed(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod referenceRule statementId vendor simulated','id status candidates')
+            out=allowed(row,'id invoiceNumber kind originalAmount outstanding activity date confidence duplicate page status reason candidates matchMethod referenceRule coverage statementId vendor simulated','id status candidates')
             text(out['id'],maximum=512,blank=False)
             if type(out['status']) is not str or out['status'] not in statuses or out.get('simulated') is True: raise ApValidationError('Invalid comparison evidence.')
             if out.get('matchMethod') not in (None,'reference','amount'): raise ApValidationError('Invalid comparison method.')
             if 'referenceRule' in out and out['referenceRule']!='adventure-trailing-letter-v1': raise ApValidationError('Invalid reference rule.')
+            if 'coverage' in out and out['coverage']!='archived':raise ApValidationError('Invalid comparison coverage.')
             if type(out['candidates']) is not list: raise ApValidationError('Invalid candidates.')
             out['candidates']=[validate_record(candidate) for candidate in out['candidates']]
             if out.get('matchMethod')=='amount' and out['status']=='matched': raise ApValidationError('Amount-only suggestions are not verified matches.')
@@ -85,6 +86,7 @@ class ApService:
         financial=lambda doc:{k:v for k,v in doc.items() if k not in ('notes','assignee','reviewMode')}
         if (prior['doc'].get('reviewMode')!='manual' or financial(prior['doc'])!=financial(data['doc']) or
             prior['results']!=data['results'] or prior['importId']!=data['import_id'] or
+            prior.get('workingSetId')!=data.get('working_set_id') or
             prior['mappingSnapshot']!=data['mapping_snapshot'] or prior['ruleVersion']!=data['rule_version']):
             raise ApValidationError('Manual review must retain its saved comparison evidence. Recheck with latest BILL data before changing financial rows.')
         for row_id,resolution in data['resolutions'].items():
@@ -105,6 +107,9 @@ class ApService:
         require_uuid(request_id); self._check(authorization)
         workspace=self.config.workspace_id
         if action in WORKING_ACTIONS:
+            return self._working_api().handle(action,payload,request_id,authorization)
+        if action in ('bill_candidates_page','bill_vendors_page') and ('working_set_id' in payload or
+            type(payload.get('query')) is dict and 'workingSetId' in payload['query']):
             return self._working_api().handle(action,payload,request_id,authorization)
         if action=='bill_current' and payload.get('include_working') is True:
             allowed(payload,'include_working','include_working')
@@ -226,11 +231,14 @@ class ApService:
             data=allowed(payload,'import_id','import_id'); require_uuid(data['import_id'])
             return self._tx('activate_import',data,request_id,authorization)
         if action=='save_revision':
-            data=allowed(payload,'statement_id expected_version doc resolutions import_id mapping_snapshot results rule_version','statement_id expected_version doc resolutions import_id mapping_snapshot results rule_version')
+            data=allowed(payload,'statement_id expected_version doc resolutions import_id mapping_snapshot results rule_version working_set_id working_version','statement_id expected_version doc resolutions import_id mapping_snapshot results rule_version')
             require_uuid(data['statement_id']); integer(data['expected_version'],minimum=1)
             data['doc']=validate_statement(data['doc'])
             if data['doc']['id']!=data['statement_id']: raise ApValidationError('The statement identifier does not agree.')
             if data['import_id'] is not None: require_uuid(data['import_id'])
+            if data.get('working_set_id') is not None:
+                require_uuid(data['working_set_id'])
+                integer(data.get('working_version'),minimum=0,nullable=data['doc'].get('reviewMode')=='manual')
             if type(data['mapping_snapshot']) is not dict or type(data['resolutions']) is not dict: raise ApValidationError('Invalid mappings or review decisions.')
             for vendor,mapped in data['mapping_snapshot'].items(): text(vendor,maximum=1024); text(mapped,maximum=1024)
             resolutions={}

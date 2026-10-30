@@ -18,9 +18,10 @@ except ImportError:
 
 
 def source_db(rows):
+    from app.ap_shared.bills.normalization import vendor_key,invoice_key
     db = sqlite3.connect(':memory:')
-    db.execute('create table bill_records(ordinal integer primary key,record text)')
-    db.executemany('insert into bill_records values(?,?)', [(n,json.dumps(r)) for n,r in enumerate(rows)])
+    db.execute('create table bill_records(ordinal integer primary key,record text,vendor_key text,reference_key text,kind text,amount integer)')
+    db.executemany('insert into bill_records values(?,?,?,?,?,?)', [(n,json.dumps(r),vendor_key(r['vendor']),invoice_key(r['invoiceNumber']),r.get('kind','invoice'),r['amount']) for n,r in enumerate(rows)])
     db.commit()
     return db
 
@@ -66,6 +67,7 @@ class WorkingBuildTests(unittest.TestCase):
                     found=index.execute('select ordinal,source_ordinal,record from working_records order by ordinal').fetchall()
                     self.assertEqual([(n,o) for n,o,_ in found],[(0,1),(1,2),(2,3)])
                     self.assertEqual([json.loads(r)['id'] for _,_,r in found],[f'{I}:1',f'{I}:2',f'{I}:3'])
+                    self.assertEqual(index.execute('select max(ordinal) from archive_vendors').fetchone()[0],3)
                 repeated=build(db,rows,Path(folder)/'repeat',protections=p)
                 self.assertEqual(result['indexArchive'],repeated['indexArchive'])
                 self.assertEqual(result['contextArchive'],repeated['contextArchive'])

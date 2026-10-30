@@ -3,7 +3,7 @@ from functools import wraps
 import hashlib
 from pathlib import Path
 from ...models import require_uuid, integer
-from .contracts import DuplicateError, MESSAGES, STORAGE_VERSION,WORKING_STORAGE_VERSION,WORKING_RULE_VERSION,canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
+from .contracts import DuplicateError, MESSAGES, STORAGE_VERSION,WORKING_STORAGE_VERSION,WORKING_RULE_VERSION,is_working_rule,NEAR_RULE_VERSION,canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
 
 OPERATIONS = frozenset('ensure claim checkpoint restart publish fail reserve review'.split())
 
@@ -43,7 +43,7 @@ class DuplicateRepository:
             manifest=self.base._working_info(self.config.workspace_id,home['active_working_set_id'],info['id'])
             return working_pin(home,info,manifest)
         return validate_pin(dict(importId=info['id'], importVersion=home['import_version'], sourceDigest=info['file_hash'],
-                                 storageFormat=info.get('storage_format', 'rows-v1'), recordCount=info['record_count']))
+                                 storageFormat=info.get('storage_format', 'rows-v1'), recordCount=info['record_count'],**({'ruleVersion':NEAR_RULE_VERSION} if home.get('duplicate_near_schema_version')==1 else {})))
 
     @private_operation
     def scan(self, scan_id):
@@ -95,7 +95,7 @@ class DuplicateRepository:
         if scan['workspace_id'] != self.config.workspace_id:
             raise PermissionError('AP workspace access denied.')
         info = scan['result_info']
-        namespace=WORKING_STORAGE_VERSION if scan['rule_version']==WORKING_RULE_VERSION else STORAGE_VERSION
+        namespace=WORKING_STORAGE_VERSION if is_working_rule(scan['rule_version']) else STORAGE_VERSION
         key = f'{self.config.workspace_id}/bill-duplicates/{namespace}/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
         manifest = validate_manifest({**info, 'key': key})
         if manifest['importId'] != scan['import_id'] or manifest['sourceDigest'] != scan['source_digest']:

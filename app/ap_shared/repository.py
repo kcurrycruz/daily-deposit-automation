@@ -124,6 +124,7 @@ class ApRepository:
             if len(page)<PAGE_SIZE: break
             offset+=PAGE_SIZE
         capabilities={'billSnapshots':2} if 'import_version' in home else {}
+        if home.get('duplicate_near_schema_version')==1: capabilities['duplicateNearReferences']=1
         if home.get('duplicate_schema_version')==1: capabilities['duplicateBills']=1
         if home.get('rereview_schema_version')==1: capabilities['statementRereview']=1
         if home.get('bill_working_schema_version')==1: capabilities['billWorkingSets']=1

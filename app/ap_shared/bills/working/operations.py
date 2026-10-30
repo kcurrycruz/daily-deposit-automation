@@ -68,7 +68,7 @@ class WorkingOperations:
         self._check(auth)
         return dict(importId=ident,recordCount=source['record_count'],metadata=source['metadata'],storageFormat=source.get('storage_format','rows-v1'),
                     importVersion=home['import_version'],workingVersion=home.get('working_set_version',0),workingSet=working,
-                    protectionsCurrent=not working or home.get('working_protection_epoch')==home.get('bill_protection_epoch'))
+                    duplicateNearReferences=home.get('duplicate_near_schema_version',0),protectionsCurrent=not working or home.get('working_protection_epoch')==home.get('bill_protection_epoch'))
 
     def _protection_snapshot(self,source_id,policy,auth):
         # Both input collection and indexed retention lookup share this budget.

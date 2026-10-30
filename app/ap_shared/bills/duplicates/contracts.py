@@ -15,11 +15,16 @@ STORAGE_VERSION = 'v2'
 WORKING_RULE_VERSION = 'bill-duplicates-v4'
 WORKING_ARTIFACT_FORMAT = 'bill-duplicates-v3'
 WORKING_STORAGE_VERSION = 'v3'
+NEAR_RULE_VERSION = 'bill-duplicates-v5'
+NEAR_WORKING_RULE_VERSION = 'bill-duplicates-v6'
+
+def is_working_rule(rule):return rule in (WORKING_RULE_VERSION,NEAR_WORKING_RULE_VERSION)
+def has_digit_typos(rule):return rule in (NEAR_RULE_VERSION,NEAR_WORKING_RULE_VERSION)
 WORKING_PIN_FIELDS = 'workingSetId workingDigest workingVersion fullSourceDigest fullRecordCount mappingDigest'
 
 
 def rule_for_pin(pin):
-    return WORKING_RULE_VERSION if pin.get('storageFormat')=='working-v1' else RULE_VERSION
+    return pin.get('ruleVersion') or (WORKING_RULE_VERSION if pin.get('storageFormat')=='working-v1' else RULE_VERSION)
 CLASSIFICATIONS = ('exact_pattern','possible_duplicate','amount_difference','export_review','reference_entry_issue','possible_wrong_vendor')
 MAX_RECORDS = 500000
 MAX_FINDINGS = 100000
@@ -157,7 +162,8 @@ def canonical_hash(value):
 def validate_pin(value):
     working=type(value) is dict and value.get('storageFormat')=='working-v1'
     fields='importId importVersion sourceDigest storageFormat recordCount'+(' '+WORKING_PIN_FIELDS if working else '')
-    out = allowed(value,fields,fields)
+    out = allowed(value,fields+' ruleVersion',fields)
+    if 'ruleVersion' in out and out['ruleVersion']!=(NEAR_WORKING_RULE_VERSION if working else NEAR_RULE_VERSION):raise DuplicateError('duplicate_invalid_source')
     require_uuid(out['importId']); integer(out['importVersion'], minimum=0)
     digest(out['sourceDigest'])
     if out['storageFormat'] not in ('snapshot-v2', 'rows-v1','working-v1'):
@@ -176,7 +182,7 @@ def validate_manifest(value,*,historical=False):
     working=type(value) is dict and value.get('format')==WORKING_ARTIFACT_FORMAT
     keys = 'format ruleVersion sourceDigest importId key hash bytes expandedHash expandedBytes findingCount recordCount'+(' '+WORKING_PIN_FIELDS if working else '')
     out = allowed(value, keys, keys)
-    supported=(out['format'],out['ruleVersion']) in [(ARTIFACT_FORMAT,RULE_VERSION),*([('bill-duplicates-v1','bill-duplicates-v1'),('bill-duplicates-v1','bill-duplicates-v2')] if historical else []),(WORKING_ARTIFACT_FORMAT,WORKING_RULE_VERSION)]
+    supported=(out['format'],out['ruleVersion']) in [(ARTIFACT_FORMAT,RULE_VERSION),*([('bill-duplicates-v1','bill-duplicates-v1'),('bill-duplicates-v1','bill-duplicates-v2')] if historical else []),(WORKING_ARTIFACT_FORMAT,WORKING_RULE_VERSION),(ARTIFACT_FORMAT,NEAR_RULE_VERSION),(WORKING_ARTIFACT_FORMAT,NEAR_WORKING_RULE_VERSION)]
     if not supported:
         raise DuplicateError('duplicate_invalid_source')
     for name in ('sourceDigest', 'hash', 'expandedHash'):

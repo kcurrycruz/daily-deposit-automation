@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 from ...models import integer, validate_record
-from .contracts import DuplicateError, validate_pin,canonical_hash,MAX_BYTES
+from .contracts import DuplicateError, validate_pin,canonical_hash,NEAR_RULE_VERSION,MAX_BYTES
 from ..contracts import validate_manifest
 from .preparation import Unpack,connect,stamp,bounded
 
@@ -45,7 +45,7 @@ class DuplicateSource:
                 if not current['protectionsCurrent']:raise DuplicateError('duplicate_conflict')
                 from .scoped import working_pin
                 return working_pin(dict(active_working_set_id=current['workingSet']['workingSetId'],working_protection_epoch=0,bill_protection_epoch=0,
-                    import_version=current['importVersion'],working_set_version=current['workingVersion']),
+                    import_version=current['importVersion'],working_set_version=current['workingVersion'],duplicate_near_schema_version=current.get('duplicateNearReferences',0)),
                     dict(id=current['importId'],file_hash=current['workingSet']['source']['sourceDigest'],record_count=current['recordCount']),current['workingSet'])
         current = self.ops.repository.current()
         if not current['active_import_id']:
@@ -55,7 +55,7 @@ class DuplicateSource:
             raise DuplicateError('duplicate_invalid_source')
         return validate_pin(dict(importId=source['id'], importVersion=current['import_version'],
                                  sourceDigest=source['file_hash'], storageFormat=source.get('storage_format', 'rows-v1'),
-                                 recordCount=source['record_count']))
+                                 recordCount=source['record_count'],**({'ruleVersion':NEAR_RULE_VERSION} if current.get('duplicate_near_schema_version')==1 else {})))
 
     def _check(self, pin, authorization):
         validate_pin(pin)

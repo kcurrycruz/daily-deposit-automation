@@ -11,7 +11,7 @@ import threading
 import time
 from .contracts import (DuplicateError, RULE_VERSION, ARTIFACT_FORMAT,MAX_BYTES, MAX_ARCHIVE_BYTES,
                         canonical_hash, validate_manifest, validate_pin,validate_finding_evidence,
-                        WORKING_RULE_VERSION,WORKING_ARTIFACT_FORMAT,WORKING_PIN_FIELDS,rule_for_pin)
+                        WORKING_RULE_VERSION,WORKING_ARTIFACT_FORMAT,WORKING_PIN_FIELDS,rule_for_pin,is_working_rule)
 from .preparation import Unpack,connect,bounded,stamp
 
 SCHEMA = {
@@ -152,7 +152,7 @@ class DuplicateArtifactCache:
 
     def _open(self, path, manifest, validate=True):
         db = connect(path)
-        working=manifest['ruleVersion']==WORKING_RULE_VERSION
+        working=is_working_rule(manifest['ruleVersion'])
         try:
             db.execute('pragma query_only=ON'); db.execute('pragma trusted_schema=OFF'); db.execute('pragma cache_size=-8192')
             if hasattr(db, 'enable_load_extension'):
@@ -172,6 +172,7 @@ class DuplicateArtifactCache:
                     raise DuplicateError('duplicate_invalid_source')
             meta = {k: json.loads(v) for k, v in db.execute('select key,value from scan_meta')}
             pin = validate_pin(meta['pin']); counts = meta['counts']
+            if manifest['format']!='bill-duplicates-v1' and rule_for_pin(pin)!=manifest['ruleVersion']:raise DuplicateError('duplicate_invalid_source')
             if pin['importId'] != manifest['importId'] or pin['sourceDigest'] != manifest['sourceDigest'] or counts['recordCount'] != manifest['recordCount'] or counts['findingCount'] != manifest['findingCount']:
                 raise DuplicateError('duplicate_invalid_source')
             if working and any(pin[k]!=manifest[k] for k in WORKING_PIN_FIELDS.split()):raise DuplicateError('duplicate_invalid_source')
@@ -306,7 +307,7 @@ class DuplicateArtifactCache:
                             raise DuplicateError('duplicate_invalid_source')
                         if rows:item['member_after']=rows[-1][:2]
                         else:
-                            if manifest['ruleVersion']==WORKING_RULE_VERSION:
+                            if is_working_rule(manifest['ruleVersion']):
                                 if not _member_mapping_valid(db):raise DuplicateError('duplicate_invalid_source')
                                 from ..working.contracts import MappingDigest
                                 item['phase']='mapping';item['mapping']=MappingDigest()

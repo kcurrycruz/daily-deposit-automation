@@ -11,6 +11,7 @@ from .contracts import (DuplicateError, RULE_VERSION, rule_for_pin, RESPONSE_BYT
                         digest, encode_cursor, decode_cursor,CLASSIFICATIONS,validate_finding_evidence)
 from .preparation import bounded
 from .rules import bill_fingerprint
+from .exclusions import ExactReferenceExclusions,POLICY
 
 
 class ReviewProjection:
@@ -45,9 +46,10 @@ class ReviewProjection:
             db.execute('create table findings(' + SCHEMA['findings'] + ')')
             db.execute('create index finding_order on findings(strength desc,latest_date desc,key)')
             db.execute('create table reviews(key text primary key,decision text,review text)')
+            exclusions=ExactReferenceExclusions(self.source,clock=self.clock);exclusions.initialize(db)
             db.commit()
         entry = dict(path=path, phase='findings', after=-1, cursor=None, ready=False, counts=None,
-                     count_after=-1,all_count=0,reviewed=0)
+                     count_after=-1,all_count=0,reviewed=0,excluded=0,exclusions=exclusions)
         self.entries[self._identity(scan, revision)] = entry
         return entry
 
@@ -74,7 +76,14 @@ class ReviewProjection:
                             db.commit()
                             if inserted:entry['after']=inserted[-1]
                         else:
-                            entry['phase'] = 'reviews'
+                            entry['phase'] = 'exclusions'
+                    elif entry['phase'] == 'exclusions':
+                        entry['exclusions'].source=self.source
+                        with self.cache.acquire(scan['workspace_id'],scan['id'],scan['manifest'],authorization,self.source.ops._check,prepared_only=True) as artifact:
+                            bounded(artifact,deadline)
+                            if entry['exclusions'].advance(db,artifact,scan,self.repo.current(),authorization,deadline):
+                                entry['excluded']=db.execute('select count(*) from exact_reference_exclusions').fetchone()[0]
+                                entry['phase']='reviews'
                     elif entry['phase'] == 'reviews':
                         page = self.repo.reviews_page(entry['cursor'], 100)
                         last=entry['cursor'];processed=0
@@ -89,7 +98,7 @@ class ReviewProjection:
                             entry['phase'] = 'counts'
                     else:
                         rows=db.execute('''select f.id,r.decision from findings f left join reviews r on f.key=r.key
-                            where f.id>? order by f.id limit 5000''',(entry['count_after'],)).fetchall()
+                            where f.id>? and not exists(select 1 from exact_reference_exclusions e where e.key=f.key) order by f.id limit 5000''',(entry['count_after'],)).fetchall()
                         entry['all_count']+=len(rows);entry['reviewed']+=sum(d is not None and d!='unreviewed' for _,d in rows)
                         if rows:entry['count_after']=rows[-1][0]
                         else:
@@ -102,7 +111,7 @@ class ReviewProjection:
             if self.repo.review_revision() != revision:
                 self.invalidate(scan['workspace_id']); raise DuplicateError('duplicate_conflict')
             return dict(ready=entry['ready'], reviewRevision=revision,
-                        counts=entry['counts'] if entry['ready'] else None)
+                        counts=entry['counts'] if entry['ready'] else None,excludedExactReferenceCount=entry['excluded'] if entry['ready'] else None)
 
     def _ready(self, scan, auth):
         pin = self._check(scan, auth); revision = self.repo.review_revision()
@@ -121,7 +130,7 @@ class ReviewProjection:
 
     def _binding(self, scan, revision, kind, filters):
         return dict(workspace=scan['workspace_id'], scan=scan['id'], importId=scan['import_id'],
-                    digest=scan['source_digest'], rule=scan['rule_version'], revision=revision, kind=kind, filters=filters)
+                    digest=scan['source_digest'], rule=scan['rule_version'], revision=revision, kind=kind, filters=filters,exclusionPolicy=POLICY)
 
     def _finish(self, scan, auth, revision):
         self._check(scan, auth)
@@ -145,7 +154,7 @@ class ReviewProjection:
             binding = self._binding(scan, revision, 'findings', filters)
             position = decode_cursor(cursor, binding) or dict(offset=0)
             offset = integer(position.get('offset'), minimum=0, maximum=100000)
-            where, params = ['1=1'], []
+            where, params = ['not exists(select 1 from exact_reference_exclusions e where e.key=f.key)'], []
             if filters['classification']:
                 where.append('f.classification=?'); params.append(filters['classification'])
             if filters['search']:
@@ -168,7 +177,7 @@ class ReviewProjection:
                 output.append(finding); used+=size
             after=offset+len(output)
             result=dict(**self._base(scan,revision),findings=output,total=total,
-                        counts=entry['counts'],
+                        counts=entry['counts'],excludedExactReferenceCount=entry['excluded'],
                         nextCursor=encode_cursor(binding,dict(offset=after)) if after<total else None)
             self._finish(scan,authorization,revision)
             return result

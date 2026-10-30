@@ -10,6 +10,7 @@ from uuid import uuid4
 from fixtures.ap_shared.duplicate_cases import PIN, bill
 from test_ap_shared_access import CONFIG
 from app.ap_shared.bills.duplicates.contracts import RULE_VERSION
+from app.ap_shared.bills.duplicates.rules import bill_fingerprint
 
 
 class ProjectionRepository:
@@ -30,7 +31,7 @@ class ProjectionSource:
     def __init__(self, repo): self.repo=repo; self.ops=SimpleNamespace(_check=lambda _:None)
     def members(self, pin, ordinals, auth):
         if pin != self.repo.pin: raise ValueError('stale')
-        return [dict(ordinal=n,bill={**bill(str(n)), 'sourceIssues':'warning '*10000}) for n in ordinals]
+        return [dict(ordinal=n,bill={**bill(str(n)), 'id':f'{pin["importId"]}:{n}', 'sourceIssues':'warning '*10000}) for n in ordinals]
 
 
 class ProjectionCache:
@@ -55,7 +56,7 @@ class DuplicateProjectionTests(unittest.TestCase):
                         10000 if n==619 else 2,'[]', 'é 100%_ "quote"' if n==600 else 'synthetic '+str(n),
                         json.dumps(dict(version=1,dateGapDays=0,referenceReuse=False,profiles=[]))))
             count=10000 if n==619 else 2
-            db.executemany('insert into members values(?,?,?)', ((n,i,'a'*64) for i in range(count)))
+            db.executemany('insert into members values(?,?,?)', ((n,i,bill_fingerprint(bill(str(i)))) for i in range(count)))
         db.commit(); db.close()
         repo=ProjectionRepository(); source=ProjectionSource(repo)
         cache=ProjectionCache(path); scan=dict(id=str(uuid4()),workspace_id=CONFIG.workspace_id,
@@ -75,9 +76,8 @@ class DuplicateProjectionTests(unittest.TestCase):
                 db.execute('insert into source_map values(?,?,?)',(n,n+1,fp))
         db.close()
         p.source.members=lambda pin,ordinals,auth:[dict(ordinal=n,sourceOrdinal=n+2,bill=bill(str(n))) for n in ordinals]
-        self.ready(p,scan)
         with self.assertRaisesRegex(ValueError,'could not be verified'):
-            p.members_page(scan,'0'*64,None,100,None)
+            self.ready(p,scan)
 
     def ready(self,p,scan):
         for _ in range(30):
@@ -143,3 +143,27 @@ class DuplicateProjectionTests(unittest.TestCase):
             cursor=page['nextCursor']
             if cursor is None: break
         self.assertEqual(seen,list(range(10000)))
+
+    def test_exact_groups_are_excluded_from_counts_and_paginated_review_filters(self):
+        p,repo,scan=self.fixture();original=p.source.members
+        special={100:bill('SAME'),101:bill('SAME'),102:bill('SAME',amount=1),103:bill('SAME',amount=2,invoice_date='2025-01-01')}
+        def members(pin,ordinals,auth):
+            values=original(pin,ordinals,auth)
+            for v in values:
+                if v['ordinal'] in special:v['bill']={**special[v['ordinal']],'id':f'{pin["importId"]}:{v["ordinal"]}'}
+            return values
+        p.source.members=members
+        with sqlite3.connect(p.cache.path) as db:
+            for finding,ns in [(0,[100,101]),(1,[102,103])]:
+                db.execute('delete from members where finding_id=?',(finding,))
+                db.executemany('insert into members values(?,?,?)',[(finding,n,bill_fingerprint(special[n])) for n in ns])
+        db.close()
+        self.ready(p,scan)
+        page=p.findings_page(scan,dict(review='all'),None,100,None)
+        self.assertEqual(page['counts'],dict(all=618,reviewed=548,unreviewed=70));self.assertEqual(page['excludedExactReferenceCount'],2)
+        keys={f['key'] for f in page['findings']};self.assertNotIn('0'*64,keys);self.assertNotIn(f'{1:064x}',keys)
+        self.assertEqual(page['total'],618)
+        next_page=p.findings_page(scan,dict(review='all'),page['nextCursor'],100,None)
+        self.assertTrue(keys.isdisjoint(f['key'] for f in next_page['findings']))
+        detail=p.members_page(scan,'0'*64,None,100,None)
+        self.assertEqual(detail['total'],2);self.assertEqual(repo.revision,1)

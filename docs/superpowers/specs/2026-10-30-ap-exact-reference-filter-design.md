@@ -4,7 +4,7 @@
 
 Reduce recurring noise such as Albert's Organics N2609-61636. The user reports that their BILL workflow already catches entering the same invoice number for the same vendor. This is the user's workflow assumption, not an independently verified universal guarantee about BILL.
 
-## Proposed rules — approval pending
+## Approved rules
 
 For the duplicate-alert queue, exclude a finding when every member has the same normalized vendor and exact normalized invoice reference, regardless of invoice date, amount or export-row multiplicity. Preserve leading zeros, punctuation and letter suffixes: do not use fuzzy matching to exclude candidates. Existing normalization ignores case and whitespace.
 
@@ -12,7 +12,7 @@ Do not automatically create a Not a duplicate review or claim that payment uniqu
 
 The user clarified that a core target is a near-identical reference with one wrongly entered digit, for example an 8 changed to a 9. Add a same-vendor, equal-original-amount, one-digit-substitution candidate rule even when both references fit the vendor's normal format. The existing format-outlier rule does not cover ordinary same-format digit substitutions.
 
-Builder proposal, not yet user approved: require matching known invoice dates for this new substitution rule, and suppress known-currency disagreements. This limits routine daily deliveries with sequential numbers and equal totals, as in the earlier Cider Belly case. Unknown dates do not satisfy this new rule. These are Possible duplicate suggestions requiring review, never automatic confirmations.
+Approved by the user on 2026-10-30: require matching known invoice dates for this new substitution rule, and suppress known-currency disagreements. This limits routine daily deliveries with sequential numbers and equal totals, as in the earlier Cider Belly case. Unknown dates do not satisfy this new rule. These are Possible duplicate suggestions requiring review, never automatic confirmations.
 
 Keep existing same-vendor different-reference candidates (including suffixes, digit swaps and corroborated reference-entry errors) and different-vendor candidates visible. A vendor is never globally exempted.
 

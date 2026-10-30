@@ -30,13 +30,22 @@ class WorkingRepository:
     def job(self, job_id):
         return self._row('ap_bill_working_jobs', job_id)
 
+    def find_job(self,job_id):
+        require_uuid(job_id);self.base._private_bucket()
+        rows=self.base._table('ap_bill_working_jobs').eq('id',job_id).limit(1).execute().data
+        if type(rows) is not list:raise SnapshotError('bill_incomplete')
+        if not rows:return None
+        if rows[0]['id']!=job_id or rows[0]['workspace_id']!=self.config.workspace_id:
+            raise PermissionError('AP workspace access denied.')
+        return rows[0]
+
     def working_set(self, set_id):
         row = self._row('ap_bill_working_sets', set_id)
         validate_working_manifest(row['manifest'])
         return row
 
     def rpc(self, operation: str, data: dict, request_id: str) -> dict:
-        if operation not in ('begin', 'checkpoint', 'stage', 'activate', 'cancel', 'reserve'):
+        if operation not in ('begin', 'checkpoint', 'stage', 'activate', 'cancel', 'reserve', 'restart'):
             raise SnapshotError('bill_incomplete')
         require_uuid(request_id); self.base._private_bucket()
         try:
@@ -49,6 +58,15 @@ class WorkingRepository:
         if type(response) is not dict:
             raise SnapshotError('bill_incomplete')
         return response
+
+    def lookup_digest(self, identity):
+        from ..contracts import digest
+        digest(identity); self.base._private_bucket()
+        rows=self.base._table('ap_bill_working_sets').eq('working_digest',identity).limit(1).execute().data
+        if type(rows) is not list:raise SnapshotError('bill_incomplete')
+        if not rows:return None
+        validate_working_manifest(rows[0]['manifest'])
+        return rows[0]
 
     def put_artifact(self, job_id, name, path):
         if name not in ('index', 'context'):

@@ -114,6 +114,7 @@ class ApRepository:
         capabilities={'billSnapshots':2} if 'import_version' in home else {}
         if home.get('duplicate_schema_version')==1: capabilities['duplicateBills']=1
         if home.get('rereview_schema_version')==1: capabilities['statementRereview']=1
+        if home.get('bill_working_schema_version')==1: capabilities['billWorkingSets']=1
         return {'activeImport':active,'capabilities':capabilities,
                 'importVersion':home.get('import_version'),
                 'mappings':{r['vendor']:r['bill_vendor'] for r in mapping_rows},

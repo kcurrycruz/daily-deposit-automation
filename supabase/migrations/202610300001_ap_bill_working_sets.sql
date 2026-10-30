@@ -4,6 +4,7 @@ alter table public.ap_workspaces add column bill_working_schema_version integer 
 alter table public.ap_workspaces add column active_working_set_id uuid;
 alter table public.ap_workspaces add column working_set_version bigint not null default 0;
 alter table public.ap_workspaces add column bill_protection_epoch bigint not null default 0;
+alter table public.ap_workspaces add column working_protection_epoch bigint;
 
 create table public.ap_bill_working_sets (
   id uuid primary key, workspace_id uuid not null references public.ap_workspaces(id), source_import_id uuid not null,
@@ -55,6 +56,7 @@ begin
       where workspace_id=new.id and id=new.active_working_set_id and source_import_id=new.active_import_id) then
     raise exception 'bill_conflict';
   end if;
+  if new.active_working_set_id is null then new.working_protection_epoch=null; end if;
   new.working_set_version=old.working_set_version+case when new.active_working_set_id is distinct from old.active_working_set_id then 1 else 0 end;
   return new;
 end $$;
@@ -164,8 +166,15 @@ begin
       update ap_bill_working_jobs set state='cancelled',reserved_bytes=0 where id=jid;
       result=jsonb_build_object('cancelled',true);
     else
-      if job.state='cancelled' or job.lease_until<=now() then raise exception 'bill_conflict'; end if;
-      if p_operation='checkpoint' then
+      if job.state='cancelled' or (job.lease_until<=now() and p_operation<>'restart') then raise exception 'bill_conflict'; end if;
+      if p_operation='restart' then
+        if job.state='activated' or job.checkpoint is distinct from (p_data->>'expected_checkpoint')::integer or
+          home.import_version<>job.expected_import_version or home.working_set_version<>job.expected_working_version or
+          home.bill_protection_epoch<>job.protection_epoch then raise exception 'bill_conflict'; end if;
+        update ap_bill_working_jobs set generation=gen_random_uuid(),checkpoint=0,state='building',progress='{}',working_set_id=null,
+          lease_until=now()+interval '1 hour' where id=jid returning * into job;
+        result=jsonb_build_object('job_id',job.id,'generation',job.generation,'checkpoint',0,'state',job.state,'policy',job.policy);
+      elsif p_operation='checkpoint' then
         if job.state not in ('building','packaging') or job.checkpoint is distinct from (p_data->>'expected_checkpoint')::integer or
           (p_data->>'next_checkpoint')::integer is distinct from job.checkpoint+1 or coalesce(p_data->>'state','') not in ('building','packaging') then raise exception 'bill_conflict'; end if;
         update ap_bill_working_jobs set checkpoint=checkpoint+1,state=p_data->>'state',progress=coalesce(p_data->'progress','{}'),lease_until=now()+interval '1 hour' where id=jid returning * into job;
@@ -202,7 +211,8 @@ begin
           if job.state<>'prepared' then raise exception 'bill_incomplete'; end if;
           if home.import_version<>job.expected_import_version or home.working_set_version<>job.expected_working_version or
             home.bill_protection_epoch<>job.protection_epoch then raise exception 'bill_conflict'; end if;
-          update ap_workspaces set active_import_id=job.source_import_id,active_working_set_id=job.working_set_id where id=p_workspace returning * into home;
+          update ap_workspaces set active_import_id=job.source_import_id,active_working_set_id=job.working_set_id,
+            working_protection_epoch=home.bill_protection_epoch where id=p_workspace returning * into home;
           update ap_bill_working_jobs set state='activated',reserved_bytes=0 where id=jid;
           if job.upload_job_id is not null then update ap_bill_jobs set state='activated',reserved_bytes=0 where id=job.upload_job_id; end if;
           result=jsonb_build_object('working_set_id',job.working_set_id,'import_id',job.source_import_id,'import_version',home.import_version,'working_version',home.working_set_version);

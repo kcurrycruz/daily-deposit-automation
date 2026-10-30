@@ -22,6 +22,16 @@ test('serial import sends compressed chunks and activates only after preparation
  assert.ok(stages.includes('preparing')&&stages.includes('uploading')&&stages.includes('checking')&&stages.includes('saving'));
  assert.ok(transport.calls.findIndex(c=>c.action==='bill_activate')>transport.calls.findIndex(c=>c.action==='bill_prepare_step'));
 });
+
+test('range handoff prepares a full import without activating it first',async()=>{
+ const {importBillSnapshot}=await api();const transport=client();
+ const prepared=await importBillSnapshot(transport,source(),{workerFactory:await workerFactory(),prepareOnly:true});
+ assert.equal(prepared.state,'prepared');assert.equal(prepared.importId,importId);
+ assert.equal(prepared.job_id,jobId);assert.equal(transport.activated,0);
+ const duplicate=client({bill_upload_finish:()=>({state:'prepared',generation,checkpoint:0,duplicate:true,alreadyCurrent:true,importId,recordCount:1})});
+ const reused=await importBillSnapshot(duplicate,source(),{workerFactory:await workerFactory(),prepareOnly:true});
+ assert.equal(reused.state,'prepared');assert.equal(reused.job_id,jobId);assert.equal(duplicate.activated,0);
+});
 test('a transport retry keeps request identity and does not re-upload acknowledged chunks',async()=>{
  const {importBillSnapshot}=await api();let offline=true;const transport=client({bill_prepare_step:()=>{if(offline)throw Error('offline');return {state:'prepared',generation,checkpoint:1};}});
  let failure;try{await importBillSnapshot(transport,source(),{workerFactory:await workerFactory()});}catch(error){failure=error;}

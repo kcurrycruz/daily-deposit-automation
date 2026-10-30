@@ -28,7 +28,7 @@ export function prepareBillUpload(file,{onProgress=()=>{},signal,workerFactory}=
 }
 function base64(bytes){let value='';for(const byte of bytes)value+=String.fromCharCode(byte);return btoa(value);}
 
-export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal,confirmRestore=async()=>false,confirmRestart=async()=>false,workerFactory}={}){
+export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal,confirmRestore=async()=>false,confirmRestart=async()=>false,workerFactory,prepareOnly=false}={}){
   const steps=new Map();let packed=null,job=null;
   function check(){if(signal?.aborted)throw abortError();}
   async function request(key,action,payload){
@@ -60,7 +60,8 @@ export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal
         onProgress({stage:'uploading',fraction:Math.min(1,(at+CHUNK)/packed.blob.size)});
       }
       let progress=await request('finish','bill_upload_finish',{job_id:job.job_id});
-      if(progress.superseded||(progress.duplicate&&progress.alreadyCurrent))return progress;
+      if(progress.superseded)return progress;
+      if(progress.duplicate&&progress.alreadyCurrent)return prepareOnly?{...progress,state:'prepared',job_id:job.job_id}:progress;
       if(progress.confirmationRequired&&!await confirmRestore(progress))return cancel();
       let restoring=!!progress.confirmationRequired;
       while(progress.state!=='prepared'){
@@ -75,7 +76,8 @@ export function importBillSnapshot(client,file,{asOf='',onProgress=()=>{},signal
           if(progress.state!=='restart_required'&&(progress.generation!==prior.generation||progress.checkpoint<=prior.checkpoint))throw Error('The BILL processing checkpoint did not advance.');
         }
       }
-      check();onProgress({stage:'saving'});
+      check();if(prepareOnly)return {...progress,state:'prepared',job_id:job.job_id};
+      onProgress({stage:'saving'});
       return await request('activate','bill_activate',{job_id:job.job_id,confirm_restore:restoring});
     }catch(error){
       if(error.name==='AbortError'){await cancel();throw error;}

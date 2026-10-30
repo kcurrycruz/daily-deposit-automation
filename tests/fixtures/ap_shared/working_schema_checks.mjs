@@ -54,6 +54,7 @@ try{
  assert.deepEqual(await call('activate',data(first),request),a);
  await assert.rejects(call('cancel',data(first),request),/request_conflict/);
  assert.equal(a.working_set_id,mf.workingSetId);assert.equal((await home()).working_set_version,1);
+ assert.equal((await home()).working_protection_epoch,(await home()).bill_protection_epoch);
  assert.equal((await q('select reserved_bytes from ap_bill_working_jobs where id=$1',[first.job_id])).rows[0].reserved_bytes,0);
  await assert.rejects(q('update ap_bill_working_sets set active_count=2'),/immutable/);
  assert.equal((await q('select count(*)::int n from ap_bill_imports')).rows[0].n,1);
@@ -82,6 +83,7 @@ try{
  const other=crypto.randomUUID();await q("insert into ap_bill_imports(id,workspace_id,file_hash,original_object_key,metadata,record_count,state) values($1,$2,$3,$4,'{}',1,'ready')",[other,w,'c'.repeat(64),w+'/csv/'+'c'.repeat(64)+'.csv']);
  await q('update ap_workspaces set active_import_id=$1 where id=$2',[other,w]);
  assert.equal((await home()).active_working_set_id,null);
+ assert.equal((await home()).working_protection_epoch,null);
  await assert.rejects(begin(),/bill_conflict/);
  // A prepared full import and its range become active together, never in stages.
  const upload=crypto.randomUUID(),beforeNew=await home();
@@ -100,7 +102,9 @@ try{
  await assert.rejects(q("insert into ap_statement_revisions(id,workspace_id,statement_id,version,doc,rule_version,import_id,working_set_id) values($1,$2,$3,2,'{}','ap-match-v4',$4,$5)",[crypto.randomUUID(),w,statement,other,mf.workingSetId]),/bill_conflict/);
  const expired=await begin();await q("update ap_bill_working_jobs set lease_until=now()-interval '1 second' where id=$1",[expired.job_id]);
  await assert.rejects(call('checkpoint',{...data(expired),expected_checkpoint:0,next_checkpoint:1,state:'packaging'}),/bill_conflict/);
- await call('cancel',data(expired));
+ const restarted=await call('restart',{...data(expired),expected_checkpoint:0});
+ assert.notEqual(restarted.generation,expired.generation);assert.equal(restarted.checkpoint,0);assert.deepEqual(restarted.policy,expired.policy);
+ await call('cancel',{...data(expired),generation:restarted.generation});
  for(const role of ['anon','authenticated']){
   assert.equal((await q("select has_function_privilege($1,'public.ap_bill_working_mutate(text,uuid,uuid,text,jsonb)','execute') ok",[role])).rows[0].ok,false);
   assert.equal((await q("select has_table_privilege($1,'public.ap_bill_working_sets','select') ok",[role])).rows[0].ok,false);

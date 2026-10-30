@@ -7,6 +7,7 @@ import * as session from '../app/ap_statements/frontend/session.mjs';
 import * as guide from '../app/ap_statements/frontend/guide.mjs';
 import * as simpleFlow from '../app/ap_statements/frontend/simple-flow.mjs';
 import * as simpleView from '../app/ap_statements/frontend/simple-flow-view.mjs';
+import * as billRange from '../app/ap_statements/frontend/bill-range.mjs';
 import * as billUI from '../app/ap_statements/frontend/bill-update-ui.mjs';
 import * as billWarningsView from '../app/ap_statements/frontend/bill-warnings.mjs';
 const billTutorial=await import('../app/ap_statements/frontend/bill-export-guide.mjs').catch(()=>({}));
@@ -82,7 +83,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,...duplicateBillUI,
+  const context = { ...billRange, ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,...duplicateBillUI,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };

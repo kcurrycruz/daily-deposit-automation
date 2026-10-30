@@ -2,6 +2,7 @@ import {reconcile,groupInvoices,vendorKey,MATCH_RULE_VERSION,comparisonInputKey}
 import {createComparisonSource} from './comparison-source.mjs';
 import {LIMITS} from './shared-client.mjs';
 import {reviewNotesOnly} from './session.mjs';
+import {createBillRangeUI} from './bill-range.mjs';
 import {createDuplicateBills} from './duplicate-bills.mjs';
 const clone=value=>JSON.parse(JSON.stringify(value));
 const unloaded=()=>({loaded:false,simulated:false,records:[],label:'Loading shared BILL records…'});
@@ -12,12 +13,12 @@ export function legacyMigrationPreview(session,mappings={}){
   return {statements:real.map(doc=>({doc:{...clone(doc),confirmed:false},resolutions:reviewNotesOnly(Object.fromEntries(Object.entries(session.resolutions||{}).filter(([id])=>doc.rows.some(row=>row.id===id))))})),
     originalsAvailable:0,importMetadata:session?.provider?.loaded&&!session.provider.simulated?fields(session.provider,'label asOf refreshedAt sourceFormat'):null,mappings:clone(mappings)};
 }
-export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}={}){
+export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},hasUnsaved=()=>false,onRangeProgress=()=>{},confirmRange,confirmRangeRestart,rangeDelay}={}){
   const state={ready:false,provider:unloaded(),importId:null,workingVersion:0,activeImport:null,capabilities:{},statements:[],details:new Map(),mappings:{},mappingVersions:{},resolutions:{}};
   const localFiles=new Map(),preparations=new Map();let disposed=false,loaded=false;
-  let comparison=null,adoption=0,sourceUnavailableError=null;
-  let foreground=0,externalBusy=false;
-  const duplicates=createDuplicateBills(client,{onChange:()=>{
+  let comparison=null,adoption=0,sourceUnavailableError=null;const preservedReviews=new Map();
+  let foreground=0,externalBusy=false,protectionsDirty=false,freshness=null;
+  const duplicates=createDuplicateBills(client,{beforeRequest:()=>protectionsDirty?ensureFresh():null,onReviewSaved:()=>{protectionsDirty=true;},onConflict:action=>action==='duplicate_review_save'?false:ensureFresh(true),onChange:()=>{
     if(!loaded||disposed)return;
     if(duplicates.state.phase==='locked'){dispose();state.accessDenied=true;onState(state);return;}
     onState(state,{reason:'duplicates'});
@@ -25,11 +26,31 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   const updateDuplicateBusy=()=>duplicates.setBusy(foreground>0||externalBusy);
   async function inForeground(work){foreground++;updateDuplicateBusy();try{return await work();}finally{foreground--;updateDuplicateBusy();}}
   function check(){if(disposed)throw Error('AP is locked.');}
-  const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills,workingSetId:state.activeImport?.workingSet?.workingSetId,workingDigest:state.activeImport?.workingSet?.workingDigest,workingVersion:state.workingVersion});onState(state);};
+  const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills,workingSetId:state.activeImport?.workingSet?.workingSetId,workingDigest:state.activeImport?.workingSet?.workingDigest,workingVersion:state.workingVersion,workingSet:state.activeImport?.workingSet});onState(state);};
   const currentPayload=()=>state.capabilities.billWorkingSets===1?{include_working:true}:{};
+  const ranges=createBillRangeUI({client,shared:{get state(){return state;},adoptImport},hasUnsaved,onProgress:onRangeProgress,confirmApply:confirmRange,confirmRestart:confirmRangeRestart,delay:rangeDelay});
+  const currentInfo=current=>current.importId?{id:current.importId,metadata:current.metadata,record_count:current.recordCount,storage_format:current.storageFormat,...(current.workingSet?{workingSet:current.workingSet,protectionsCurrent:current.protectionsCurrent}: {})}:null;
+  async function freshCurrent(current){
+    if(current.workingSet&&current.protectionsCurrent===false)return ranges.refreshProtections({current,adopt:false});
+    return current;
+  }
+  async function ensureFresh(force=false){
+    if(state.capabilities.billWorkingSets!==1||!state.activeImport?.workingSet||!force&&!protectionsDirty)return false;
+    if(freshness)return freshness;
+    const task=(async()=>{
+      const current=await client.request('bill_current',{include_working:true});check();
+      const changed=current.importId!==state.importId||current.workingVersion!==state.workingVersion||current.workingSet?.workingSetId!==state.activeImport?.workingSet?.workingSetId;
+      if((changed||current.protectionsCurrent===false)&&hasUnsaved())throw Error('Save your edits before refreshing active BILL data.');
+      const ready=await freshCurrent(current);check();protectionsDirty=false;
+      if(changed||ready.workingVersion!==state.workingVersion||ready.workingSet?.workingSetId!==state.activeImport?.workingSet?.workingSetId)await adoptImport(ready,{preserveCompatible:current.importId===state.importId&&JSON.stringify(current.workingSet?.policy)===JSON.stringify(state.activeImport?.workingSet?.policy)});
+      return changed||ready.workingVersion!==current.workingVersion;
+    })();freshness=task;
+    try{return await task;}finally{if(freshness===task)freshness=null;}
+  }
   function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=sourceUnavailableError?{...provider,error:sourceUnavailableError}:provider;if(loaded)emit();}}});return source;}
   async function ensureComparisons(doc){
     check();if(doc.reviewMode==='manual')return state.details.get(doc.id)?.results||null;
+    if(protectionsDirty)await ensureFresh();
     if(state.provider.error)throw Error('Current BILL data is unavailable. Retry the comparison before saving or completing.');
     if(!comparison||!state.provider.loaded)return null;
     const detail=state.details.get(doc.id);
@@ -38,12 +59,20 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     if(detail&&(detail.importId!==state.importId||detail.workingSetId!==(info?.workingSet?.workingSetId??undefined)&&!(detail.workingSetId==null&&!info?.workingSet))){
       detail.importId=state.importId;detail.importInfo=info;detail.importLabel=info?.metadata?.label||'';detail.workingSetId=info?.workingSet?.workingSetId||null;
       // Keep human notes, but decisions against superseded evidence need review.
-      for(const row of groupInvoices(doc))if(state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
+      for(const row of groupInvoices(doc))if(state.resolutions[row.id]&&!preservedReviews.has(doc.id))state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
       comparison.invalidate(doc.id);
     }
     const result=await inForeground(()=>comparison.ensure(doc,state.mappings,{importInfo:info}));check();
     const scope=state.provider.scopes?.[doc.id];
     if(info&&(!scope?.complete||scope.importId!==info.id||scope.workingSet?.workingSetId!==info.workingSet?.workingSetId||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
+    const saved=preservedReviews.get(doc.id);
+    if(saved){
+      for(const row of comparisonSnapshot(doc,state.provider,state.mappings)){
+        const before=saved.get(row.id);
+        if(before&&before.evidence!==evidenceKey(row)&&before.review===JSON.stringify(state.resolutions[row.id])&&state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
+      }
+      preservedReviews.delete(doc.id);if(loaded)emit();
+    }
     return result;
   }
   async function prepareStatement(doc){
@@ -53,7 +82,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     const token=Symbol();preparations.set(doc.id,token);let source=comparison;const sourceUnavailable=!!state.provider.error;
     comparison.invalidate(doc.id);
     try{
-      const current=await client.request('bill_current',currentPayload());check();
+      const current=await freshCurrent(await client.request('bill_current',currentPayload()));check();
       if(preparations.get(doc.id)!==token)return null;
       if(sourceUnavailable||state.provider.error||current.importId!==state.importId||current.importVersion!==state.importVersion||(current.workingVersion??0)!==state.workingVersion||current.workingSet?.workingSetId!==state.activeImport?.workingSet?.workingSetId)await adoptImport(current);
       if(preparations.get(doc.id)!==token)return null;
@@ -91,18 +120,23 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       throw error;
     }
   }
-  async function adoptImport(result){
+  const evidenceKey=row=>JSON.stringify(fields(row,'invoiceNumber kind originalAmount outstanding status candidates matchMethod referenceRule coverage'));
+  async function adoptImport(result,{preserveCompatible=false}={}){
     check();const token=++adoption;
-    const current=await client.request('bill_current',currentPayload());check();
+    const current=await freshCurrent(await client.request('bill_current',currentPayload()));check();
     if(token!==adoption||!Number.isSafeInteger(current.importVersion)||current.importVersion<(state.importVersion||0)||current.importVersion===state.importVersion&&(current.workingVersion??0)<state.workingVersion)throw Error('The BILL data changed in a newer update. Retry loading current data.');
-    const info=current.importId?{id:current.importId,metadata:current.metadata,record_count:current.recordCount,storage_format:current.storageFormat,...(current.workingSet?{workingSet:current.workingSet}:{})}:null;
+    const info=currentInfo(current);
     const pending=makeComparison();
     try{const provider=await pending.loadDirectory(info);check();
       const verified=await client.request('bill_current',currentPayload());check();
       if(token!==adoption||verified.importVersion!==current.importVersion||verified.importId!==current.importId||(verified.workingVersion??0)!==(current.workingVersion??0)||verified.workingSet?.workingSetId!==current.workingSet?.workingSetId)throw Error('The BILL data changed in a newer update. Retry loading current data.');
+      if(preserveCompatible)for(const doc of state.statements){
+        const rows=comparisonSnapshot(doc,state.provider,state.mappings);
+        preservedReviews.set(doc.id,new Map(rows.map(row=>[row.id,{evidence:evidenceKey(row),review:JSON.stringify(state.resolutions[row.id])}])));
+      }
       // Do not display previous source scopes while new comparisons are loading.
       provider.scopes={};
-      comparison?.dispose();comparison=pending;sourceUnavailableError=null;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;state.workingVersion=current.workingVersion??0;
+      comparison?.dispose();comparison=pending;sourceUnavailableError=null;state.provider=provider;state.activeImport=info;state.importId=info?.id||null;state.importVersion=current.importVersion;state.workingVersion=current.workingVersion??0;protectionsDirty=false;
       for(const doc of state.statements)ensureComparisons(doc).catch(()=>{});
       emit();return provider;
     }catch(error){pending.dispose();throw error;}
@@ -116,7 +150,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
         if(!steps[current])steps[current]={id:crypto.randomUUID(),identity};
         if(steps[current].identity!==identity)throw Error('Retry payload changed. Reload latest before continuing.');
         if('reply' in steps[current])return clone(steps[current].reply);
-        const reply=await client.request(action,payload,{requestId:steps[current].id});check();steps[current].reply=clone(reply);return reply;
+        const reply=await client.request(action,payload,{requestId:steps[current].id});check();steps[current].reply=clone(reply);if(state.activeImport?.workingSet&&['save_revision','complete_revision','save_mapping','reopen_statement','archive_statement','upload_finish'].includes(action))protectionsDirty=true;return reply;
       };
       try{const result=await inForeground(()=>operation(request));check();onSaveState('saved');return result;}
       catch(error){error.retry=execute;if(!disposed)onSaveState('not_saved',error);throw error;}
@@ -151,6 +185,11 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
         if(page.activeImport?.id!==home.activeImport?.id||(page.workingVersion??0)!==(home.workingVersion??0))throw Error('The shared import changed while loading. Retry.');
         summaries.push(...page.statements);cursor=page.nextCursor;if(cursor&&cursors.has(cursor))throw Error('Shared statement list is incomplete.');cursors.add(cursor);
       }while(cursor);
+      state.capabilities=home.capabilities||{};
+      if(home.activeImport?.workingSet&&home.activeImport.protectionsCurrent===false){
+        const current=await freshCurrent({importId:home.activeImport.id,recordCount:home.activeImport.record_count,metadata:home.activeImport.metadata,storageFormat:home.activeImport.storage_format,workingSet:home.activeImport.workingSet,protectionsCurrent:false,importVersion:home.importVersion,workingVersion:home.workingVersion});
+        home={...home,activeImport:currentInfo(current),importVersion:current.importVersion,workingVersion:current.workingVersion};
+      }
       const snapshotCapable=home.capabilities?.billSnapshots===2;
       pendingComparison=snapshotCapable?makeComparison():null;
       const details=[];for(const summary of summaries)details.push(await client.request('statement',{statement_id:summary.id}));check();
@@ -175,7 +214,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
       return state;
     }catch(error){if(pendingComparison&&pendingComparison!==comparison)pendingComparison.dispose();if(error.code==='denied'){dispose();state.accessDenied=true;onState(state);}else if(!loaded&&!disposed){state.ready=false;state.provider=unloaded();emit();}throw error;}
   }
-  function dispose(){disposed=true;duplicates.dispose();comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.capabilities={};state.activeImport=null;sourceUnavailableError=null;state.provider=unloaded();state.importId=null;state.ready=false;}
+  function dispose(){disposed=true;ranges.dispose();duplicates.dispose();comparison?.dispose();client.dispose();localFiles.clear();state.statements=[];state.details.clear();state.resolutions={};state.mappings={};state.mappingVersions={};state.capabilities={};state.activeImport=null;sourceUnavailableError=null;state.provider=unloaded();state.importId=null;state.ready=false;}
   async function upload(file,kind,request,attachment={}){
     if(!file||!Number.isInteger(file.size)||file.size<1||file.size>LIMITS.file)throw Error('Each PDF or CSV must be at most 20 MiB.');
     const bytes=new Uint8Array(await file.arrayBuffer());check();
@@ -263,12 +302,12 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
     });
   }
   async function originalPdf(statementId){const link=await client.request('pdf_preview',{statement_id:statementId});check();const response=await fetch(link.url,{referrerPolicy:'no-referrer'});if(!response.ok)throw Error('Original preview expired or is unavailable. Reopen to retry.');const bytes=await response.arrayBuffer();check();return new Blob([bytes],{type:'application/pdf'});}
-  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,prepareStatement,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,duplicates,
+  return {state,load,loadProvider,importBills,adoptImport,ensureComparisons,prepareStatement,refreshComparisons,uploadStatement,saveStatement,saveMapping,originalPdf,duplicates,ranges,ensureFresh,
     async lookupArchived(doc,reference,kind='invoice'){check();const detail=state.details.get(doc.id);if(!comparison||detail?.readOnly||detail?.completed||doc.reviewMode==='manual')throw Error('Open a current editable statement before looking up archived BILL data.');await ensureComparisons(doc);return comparison.lookupArchived(doc,state.mappings,reference,kind);},
     setDuplicateBusy(value){externalBusy=!!value;updateDuplicateBusy();},
     attachOriginal(file,id,expectedVersion){return write(async request=>{await upload(file,'pdf',request,{statement_id:id,expected_version:expectedVersion});const detail=await request('statement',{statement_id:id});adopt(detail);emit();return detail;});},
     migrateLegacy(preview,confirmed=false){if(!confirmed)return Promise.resolve({cancelled:true});const items=clone(preview.statements);if(!items.length)return Promise.reject(Error('No real legacy statements to migrate.'));return write(async request=>{const results=[];for(const item of items)results.push(await request('migrate_legacy',{confirmed:true,statements:[item]}));await load({replace:true});return results;});},
-    async completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)throw Error('Open the current editable draft before completing.');const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;await ensureComparisons(doc);const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,mappingSnapshot:snapshot.mapping_snapshot,ruleVersion:snapshot.rule_version,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
+    async completeStatement(payload){const frozen=clone(payload),detail=state.details.get(frozen.statement_id);if(!detail||detail.readOnly)throw Error('Open the current editable draft before completing.');const doc=state.statements.find(doc=>doc.id===frozen.statement_id)||detail.doc;await ensureComparisons(doc);const snapshot=saveData(doc,frozen.expected_version,state.resolutions);return write(async request=>{const saved=await request('save_revision',snapshot);const reply=await request('complete_revision',{...frozen,expected_version:saved.version});Object.assign(detail,{doc:snapshot.doc,results:snapshot.results,resolutions:snapshot.resolutions,importId:snapshot.import_id,workingSetId:snapshot.working_set_id,mappingSnapshot:snapshot.mapping_snapshot,ruleVersion:snapshot.rule_version,completed:true,readOnly:true,version:reply.version});state.statements=state.statements.filter(doc=>doc.id!==frozen.statement_id);emit();return reply;});},
     extractionOnly(){state.provider={loaded:false,simulated:false,records:[],label:'Extraction-only view'};state.importId=null;retainManualReviews();emit();},
     history(filters={},cursor=null){return client.request('history_page',{filters,cursor,limit:50});},
     reopenStatement,

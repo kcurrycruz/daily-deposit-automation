@@ -19,7 +19,7 @@ export function workflowGuide(state) {
   const steps = [
     { id: 'upload', title: 'Upload statements', detail: 'Choose one or more vendor PDFs.', complete: uploaded },
     { id: 'extraction', title: 'Check invoices', detail: 'Verify what was read from each PDF.', complete: extracted },
-    { id: 'source', title: 'Compare with BILL', detail: 'Import invoice records as a CSV.', complete: !!sourceReady },
+    { id: 'source', title: 'Compare with BILL', detail: 'Import the Bills CSV and choose active dates. Archived references remain available.', complete: !!sourceReady },
     { id: 'review', title: 'Review & export', detail: 'Record decisions and keep your report.', complete: false },
   ];
   const copy = {

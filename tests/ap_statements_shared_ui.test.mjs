@@ -100,7 +100,7 @@ test('a frozen history revision uses its own original-PDF availability',()=>{
 
 test('closing a statement cannot destroy unsaved optional notes',()=>{
   const state={selected:'s',selectedRow:'r'},overlay={innerHTML:'unsaved note editor',querySelector:()=>({})};
-  const context={shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state,overlay,dirty:new Set(['s']),toast(){},historicalDetail:null,priorFocus:null,renderToken:0};
+  const context={rangePrompt:null,shared:null,duplicateInput:()=>false,duplicateSourceKey:'',duplicateReturn:null,duplicateDrafts:{clear(){}},...referenceReview,resultBadge:row=>referenceReview.invoiceResult(row).label,state,overlay,dirty:new Set(['s']),toast(){},historicalDetail:null,priorFocus:null,renderToken:0};
   vm.runInNewContext(source.slice(source.indexOf('function closeOverlay('),source.indexOf('function getDoc(')),context);
   context.closeOverlay();assert.equal(overlay.innerHTML,'unsaved note editor');assert.equal(state.selected,'s');
 });

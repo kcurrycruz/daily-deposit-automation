@@ -209,3 +209,25 @@ test('denied background scan locks the entire shared workspace instead of retain
  assert.equal(workspace.state.provider.records.length,0);assert.equal(workspace.state.details.size,0);
  assert.equal(disposed,1);assert.ok(snapshots.some(s=>s.denied&&!s.ready));
 });
+
+
+test('same-import range changes clear completed evidence and pin ensure to working identity',async()=>{
+ const a=crypto.randomUUID(),b=crypto.randomUUID();
+ const h=setup(action=>progress({workingSetId:a,workingDigest:'a'.repeat(64),workingVersion:1,state:'ready',projectionReady:true,reviewRevision:0}));
+ h.controller.adoptSource({...source,workingSetId:a,workingDigest:'a'.repeat(64),workingVersion:1});await h.flush();
+ assert.equal(h.calls[0].payload.working_set_id,a);assert.equal(h.calls[0].payload.expected_working_version,1);
+ assert.ok(h.controller.state.progress);
+ h.controller.adoptSource({...source,workingSetId:b,workingDigest:'b'.repeat(64),workingVersion:2});
+ assert.equal(h.controller.state.progress,null);assert.equal(h.controller.state.page,null);
+ await h.flush();assert.equal(h.controller.state.progress,null);assert.match(h.controller.state.error.message,/source changed/i);
+ h.controller.dispose();
+});
+
+test('scoped reviews submit acknowledged range version with saved member evidence',async()=>{
+ const workingSetId=crypto.randomUUID(),workingDigest='a'.repeat(64);
+ const h=setup(action=>action==='duplicate_ensure'?progress({state:'ready',projectionReady:true,reviewRevision:0,workingSetId,workingDigest,workingVersion:2}):action==='duplicate_review_save'?{review:{decision:'not_duplicate'},reviewRevision:1}:{reviewRevision:0,members:[],finding:{key,review:null},nextCursor:null});
+ h.controller.adoptSource({...source,workingSetId,workingDigest,workingVersion:2});await h.flush();await h.controller.open(key);
+ await h.controller.save({decision:'not_duplicate',initials:'KC',note:'',expectedVersion:0});
+ assert.equal(h.calls.at(-1).payload.working_set_id,workingSetId);assert.equal(h.calls.at(-1).payload.expected_working_version,2);
+ h.controller.dispose();
+});

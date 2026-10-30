@@ -6,7 +6,7 @@ import sqlite3
 from ...models import validate_record
 from ..normalization import vendor_key, invoice_key
 from .contracts import (DuplicateError, RULE_VERSION, MAX_FINDINGS, MAX_BYTES, encoded,
-                        canonical_hash, validate_pin,validate_finding_evidence)
+                        canonical_hash, validate_pin,validate_finding_evidence,rule_for_pin)
 from .rules import eligible, classify, bill_fingerprint, normalized_identity, identity_warnings, invoice_day, currency_key
 from .vendor_patterns import compact_reference,reference_shape
 from .vendor_scan import VendorCandidates
@@ -15,6 +15,8 @@ from .vendor_scan import VendorCandidates
 class DuplicateScan:
     def __init__(self, connection, pin, monotonic):
         self.db, self.pin, self.clock = connection, validate_pin(pin), monotonic
+        self.rule_version=rule_for_pin(self.pin)
+        self.mapping=None
         self.read = self.eligible = self.probes = 0
         self.input_done = self.done = False
         self.after = -1
@@ -36,6 +38,10 @@ class DuplicateScan:
           create table scan_meta(key text primary key,value text not null);
         ''')
         self.vendor_candidates=VendorCandidates(self)
+        if self.pin['storageFormat']=='working-v1':
+            from ..working.contracts import MappingDigest
+            self.mapping=MappingDigest()
+            self.db.execute('create table source_map(ordinal integer primary key,source_ordinal integer unique,fp text not null)')
         self.db.execute('insert into scan_meta values(?,?)', ('pin', encoded(pin)))
         self.db.commit()
 
@@ -51,7 +57,14 @@ class DuplicateScan:
             if self.clock()>=deadline:break
             if type(item['ordinal']) is not int or item['ordinal'] != self.read or self.read >= self.pin['recordCount']:
                 raise DuplicateError('duplicate_invalid_source')
-            value = validate_record(item['bill']); ordinal = self.read; self.read += 1;consumed+=1
+            value = validate_record(item['bill']); ordinal = self.read
+            if self.mapping is not None:
+                original=item.get('sourceOrdinal')
+                if type(original) is not int or not 0<=original<self.pin['fullRecordCount'] or value.get('id')!=f'{self.pin["importId"]}:{original}':
+                    raise DuplicateError('duplicate_invalid_source')
+                fp=bill_fingerprint(value);self.mapping.add(ordinal,original,fp)
+                self.db.execute('insert into source_map values(?,?,?)',(ordinal,original,fp))
+            self.read += 1;consumed+=1
             if not eligible(value):
                 continue
             self.eligible += 1
@@ -74,6 +87,8 @@ class DuplicateScan:
 
     def finish_input(self):
         if self.read != self.pin['recordCount']:
+            raise DuplicateError('duplicate_invalid_source')
+        if self.mapping is not None and self.mapping.hexdigest()!=self.pin['mappingDigest']:
             raise DuplicateError('duplicate_invalid_source')
         self.input_done = True
 
@@ -152,7 +167,7 @@ class DuplicateScan:
         result = self.db.execute('insert into findings values(NULL,NULL,?,?,?,?,?,?,?,?)',
             (evidence['classification'], evidence['strength'], encoded(evidence['reasons']), latest,
              sum(n['n'] for n in nodes), encoded(previews), search,encoded(detail)))
-        hasher = hashlib.sha256(('[1,' + encoded(RULE_VERSION) + ',[').encode())
+        hasher = hashlib.sha256(('[1,' + encoded(self.rule_version) + ',[').encode())
         fps = self.db.execute('select fp,sum(n) from fingerprints where ident in (' + placeholders + ') group by fp order by fp', ids)
         self.pending = dict(ids=ids, placeholders=placeholders, id=result.lastrowid, evidence=evidence,
                             phase='fps', cursor=fps, first=True, hasher=hasher)
@@ -188,6 +203,8 @@ class DuplicateScan:
             self.pending = None
 
     def step(self, deadline, max_probes=10000):
+        if self.mapping is not None and self.vendor_candidates.patterns.context is None:
+            raise DuplicateError('duplicate_invalid_source')
         if not self.input_done or type(max_probes) is not int or not 1 <= max_probes <= 10000:
             raise DuplicateError('duplicate_invalid_source')
         used = 0

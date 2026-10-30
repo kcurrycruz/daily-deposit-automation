@@ -12,12 +12,16 @@ from .preparation import Unpack,connect,stamp,bounded
 
 
 class DuplicateSource:
-    def __init__(self, base_repository, bill_operations,prepared=None):
+    def __init__(self, base_repository, bill_operations,prepared=None,working=None):
         self.base, self.ops = base_repository, bill_operations
         self.prepared=prepared
+        self.working=working
 
     def prepare(self,pin,authorization,deadline):
         self._check(pin,authorization)
+        if pin['storageFormat']=='working-v1':
+            manifest=self.working.repository.working_set(pin['workingSetId'])['manifest']
+            return self.working.cache.prepare(manifest,authorization,self.ops._check,deadline)
         if pin['storageFormat']!='snapshot-v2' or self.prepared is None:return True
         source=self.ops.repository.source(pin['importId'])
         ready=self.prepared.prepare(pin,source['snapshot_manifest'],authorization,self.ops._check,deadline)
@@ -25,13 +29,24 @@ class DuplicateSource:
 
     @contextmanager
     def _index(self,pin,authorization):
-        if self.prepared is None:
+        if pin['storageFormat']=='working-v1':
+            manifest=self.working.repository.working_set(pin['workingSetId'])['manifest']
+            with self.working.cache.acquire(manifest,authorization,self.ops._check) as (db,_):yield db
+        elif self.prepared is None:
             with self.ops._index(pin['importId'],authorization) as (index,_):yield index.db
         else:
             with self.prepared.acquire(pin,authorization,self.ops._check) as db:yield db
 
     def pin(self, authorization):
         self.ops._check(authorization)
+        if self.working is not None:
+            current=self.working.current(authorization)
+            if current.get('workingSet'):
+                if not current['protectionsCurrent']:raise DuplicateError('duplicate_conflict')
+                from .scoped import working_pin
+                return working_pin(dict(active_working_set_id=current['workingSet']['workingSetId'],working_protection_epoch=0,bill_protection_epoch=0,
+                    import_version=current['importVersion'],working_set_version=current['workingVersion']),
+                    dict(id=current['importId'],file_hash=current['workingSet']['source']['sourceDigest'],record_count=current['recordCount']),current['workingSet'])
         current = self.ops.repository.current()
         if not current['active_import_id']:
             return None
@@ -51,6 +66,14 @@ class DuplicateSource:
         self._check(pin, authorization)
         integer(after, minimum=-1, maximum=pin['recordCount'] - 1)
         integer(limit, minimum=1, maximum=5000)
+        if pin['storageFormat']=='working-v1':
+            with self._index(pin,authorization) as db:
+                rows=[(n,validate_record(json.loads(raw)),original) for n,original,raw in db.execute(
+                    'select ordinal,source_ordinal,record from working_records where ordinal>? order by ordinal limit ?',(after,limit))]
+            expected=min(limit,pin['recordCount']-after-1)
+            if len(rows)!=expected or any(n!=after+i+1 for i,(n,_,_) in enumerate(rows)):raise DuplicateError('duplicate_invalid_source')
+            self._check(pin,authorization);last=rows[-1][0] if rows else after
+            return dict(records=[dict(ordinal=n,sourceOrdinal=original,bill=record) for n,record,original in rows],total=pin['recordCount'],nextOrdinal=last if last+1<pin['recordCount'] else None)
         if pin['storageFormat'] == 'snapshot-v2':
             with self._index(pin,authorization) as db:
                 rows = [(n, validate_record(json.loads(raw))) for n, raw in db.execute(
@@ -81,6 +104,12 @@ class DuplicateSource:
             raise DuplicateError('duplicate_invalid_source')
         for n in ordinals:
             integer(n, minimum=0, maximum=pin['recordCount'] - 1)
+        if pin['storageFormat']=='working-v1':
+            with self._index(pin,authorization) as db:
+                found={n:(original,raw) for n,original,raw in db.execute('select ordinal,source_ordinal,record from working_records where ordinal in ('+','.join('?' for _ in ordinals)+')',ordinals)}
+            if len(found)!=len(ordinals):raise DuplicateError('duplicate_invalid_source')
+            self._check(pin,authorization)
+            return [dict(ordinal=n,sourceOrdinal=found[n][0],bill={**validate_record(json.loads(found[n][1])),'id':f'{pin["importId"]}:{found[n][0]}'}) for n in ordinals]
         if pin['storageFormat'] == 'snapshot-v2':
             with self._index(pin,authorization) as db:
                 found = dict(db.execute('select ordinal,record from bill_records where ordinal in (' +
@@ -92,6 +121,15 @@ class DuplicateSource:
             output = [self.read_page(pin, n - 1, 1, authorization)['records'][0] for n in ordinals]
         self._check(pin, authorization)
         return output
+
+    @contextmanager
+    def context(self,pin,authorization):
+        self._check(pin,authorization)
+        if pin['storageFormat']!='working-v1':
+            yield None;return
+        manifest=self.working.repository.working_set(pin['workingSetId'])['manifest']
+        with self.working.cache.acquire(manifest,authorization,self.ops._check) as (_,history):
+            yield history;self._check(pin,authorization)
 
 
 class SourcePreparationCache:

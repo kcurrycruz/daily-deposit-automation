@@ -7,9 +7,10 @@ import tempfile
 import threading
 from ...models import allowed, integer, text
 from .artifacts import SCHEMA
-from .contracts import (DuplicateError, RULE_VERSION, RESPONSE_BYTES, MAX_BYTES, encoded,
+from .contracts import (DuplicateError, RULE_VERSION, rule_for_pin, RESPONSE_BYTES, MAX_BYTES, encoded,
                         digest, encode_cursor, decode_cursor,CLASSIFICATIONS,validate_finding_evidence)
 from .preparation import bounded
+from .rules import bill_fingerprint
 
 
 class ReviewProjection:
@@ -23,12 +24,12 @@ class ReviewProjection:
         pin = self.repo.current()
         if (pin is None or scan['workspace_id'] != self.repo.config.workspace_id or
             pin['importId'] != scan['import_id'] or pin['sourceDigest'] != scan['source_digest'] or
-            scan['rule_version'] != RULE_VERSION):
+            scan['rule_version'] != rule_for_pin(pin)):
             raise DuplicateError('duplicate_conflict')
         return pin
 
     def _identity(self, scan, revision):
-        return (scan['workspace_id'], scan['id'], scan['import_id'], scan['source_digest'], RULE_VERSION, revision)
+        return (scan['workspace_id'], scan['id'], scan['import_id'], scan['source_digest'], scan['rule_version'], revision)
 
     def invalidate(self, workspace_id):
         with self.lock:
@@ -120,7 +121,7 @@ class ReviewProjection:
 
     def _binding(self, scan, revision, kind, filters):
         return dict(workspace=scan['workspace_id'], scan=scan['id'], importId=scan['import_id'],
-                    digest=scan['source_digest'], rule=RULE_VERSION, revision=revision, kind=kind, filters=filters)
+                    digest=scan['source_digest'], rule=scan['rule_version'], revision=revision, kind=kind, filters=filters)
 
     def _finish(self, scan, auth, revision):
         self._check(scan, auth)
@@ -128,14 +129,14 @@ class ReviewProjection:
             raise DuplicateError('duplicate_conflict')
 
     def _base(self, scan, revision):
-        return dict(scanId=scan['id'], importId=scan['import_id'], ruleVersion=RULE_VERSION, reviewRevision=revision)
+        return dict(scanId=scan['id'], importId=scan['import_id'], ruleVersion=scan['rule_version'], reviewRevision=revision)
 
-    def _finding(self, row, import_id):
+    def _finding(self, row, import_id, working_id=None):
         review=json.loads(row[10]) if row[10] else None
         previews=json.loads(row[7])
         return dict(key=row[1], classification=row[2], strength=row[3], reasons=json.loads(row[4]), latestDate=row[5],
                     latestInvoiceDate=row[5],memberCount=row[6],previews=previews,preview=previews,review=review,
-                    priorReview=bool(review and review['reviewedImportId']!=import_id),evidence=validate_finding_evidence(json.loads(row[9]),row[2],previews,row[6]))
+                    priorReview=bool(review and (review['reviewedImportId']!=import_id or review.get('reviewedWorkingSetId')!=working_id)),evidence=validate_finding_evidence(json.loads(row[9]),row[2],previews,row[6]))
 
     def findings_page(self, scan, filters, cursor, limit, authorization):
         integer(limit, minimum=1, maximum=100); filters = self._filters(filters)
@@ -160,7 +161,7 @@ class ReviewProjection:
                                   [*params,limit,offset]).fetchall()
             output=[]; used=0
             for row in rows:
-                finding=self._finding(row,scan['import_id']); size=len(encoded(finding).encode())
+                finding=self._finding(row,scan['import_id'],scan.get('working_set_id')); size=len(encoded(finding).encode())
                 if used+size>RESPONSE_BYTES:
                     if not output: raise DuplicateError('duplicate_limit')
                     break
@@ -188,6 +189,13 @@ class ReviewProjection:
                 ordinals=[r[0] for r in artifact.execute('select ordinal from members where finding_id=? and ordinal>? order by ordinal limit ?',
                                                        (row[0],after,limit+1))]
             values=self.source.members(pin,ordinals[:limit],authorization) if ordinals else []
+            with self.cache.acquire(scan['workspace_id'],scan['id'],scan['manifest'],authorization,self.source.ops._check,prepared_only=True) as artifact:
+                for value in values:
+                    fingerprint=artifact.execute('select fp from members where finding_id=? and ordinal=?',(row[0],value['ordinal'])).fetchone()
+                    if pin['storageFormat']=='working-v1' and (fingerprint is None or fingerprint[0]!=bill_fingerprint(value['bill'])):raise DuplicateError('duplicate_invalid_source')
+                    if pin['storageFormat']=='working-v1':
+                        original=artifact.execute('select source_ordinal,fp from source_map where ordinal=?',(value['ordinal'],)).fetchone()
+                        if original!=(value['sourceOrdinal'],fingerprint[0]):raise DuplicateError('duplicate_invalid_source')
             output=[]; used=0
             for value in values:
                 size=len(encoded(value).encode())
@@ -196,7 +204,7 @@ class ReviewProjection:
                     break
                 used+=size; output.append(value)
             has_more=len(output)<len(ordinals)
-            result=dict(**self._base(scan,revision),finding=self._finding(row,scan['import_id']),members=output,total=row[6],
+            result=dict(**self._base(scan,revision),finding=self._finding(row,scan['import_id'],scan.get('working_set_id')),members=output,total=row[6],
                         nextCursor=encode_cursor(binding,dict(after=output[-1]['ordinal'])) if has_more else None)
             self._finish(scan,authorization,revision)
             return result

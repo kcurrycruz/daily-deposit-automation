@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 from test_ap_shared_access import NOW
 from app.ap_shared.bills.duplicates.repository import DuplicateRepository
-from app.ap_shared.bills.duplicates.contracts import DuplicateError, RULE_VERSION, canonical_hash
+from app.ap_shared.bills.duplicates.contracts import DuplicateError, RULE_VERSION, rule_for_pin, canonical_hash
 
 
 class DuplicateStoreDouble(DuplicateRepository):
@@ -39,7 +39,7 @@ class DuplicateStoreDouble(DuplicateRepository):
                     old.update(state='superseded',lease_until=NOW.isoformat())
             if sid not in self.scans:
                 self.scans[sid]=dict(id=sid,workspace_id=self.config.workspace_id,import_id=pin['importId'],
-                    source_digest=pin['sourceDigest'],rule_version=RULE_VERSION,expected_import_version=pin['importVersion'],
+                    source_digest=pin['sourceDigest'],rule_version=rule_for_pin(pin),expected_import_version=pin['importVersion'],
                     generation=str(uuid4()),checkpoint=0,state='pending',phase='reading',session_nonce=None,
                     progress=dict(recordsRead=0,probes=0),manifest=None,error_code=None,completed_at=None,lease_until=NOW.isoformat())
             result=self.scan(sid)

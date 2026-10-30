@@ -45,7 +45,9 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   });
   return execute();
  }
+ const scopePayload=()=>state.source?.workingSetId?{working_set_id:state.source.workingSetId,expected_working_version:state.source.workingVersion}:{};
  function adoptProgress(p){
+  if(state.source.workingSetId&&(p.workingSetId!==state.source.workingSetId||p.workingDigest!==state.source.workingDigest||p.workingVersion!==state.source.workingVersion))throw Error('Duplicate source changed. Refresh the workspace.');
   if(p.importId&&p.importId!==state.source.importId||p.importVersion!==undefined&&p.importVersion!==state.source.importVersion)throw Error('Duplicate source changed. Refresh the workspace.');
   if(state.reviewRevision!==null&&p.reviewRevision!==null&&p.reviewRevision!==undefined&&state.reviewRevision!==p.reviewRevision){state.page=null;state.detail=null;}
   const signature=value=>JSON.stringify(value&&[value.generation,value.phase,value.checkpoint,value.recordsRead,value.probes,value.projectionReady]);
@@ -61,7 +63,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   if(disposed||busy||pending)return;
   const p=state.progress;
   try{
-   if(!p)await operation('duplicate_ensure',{import_id:state.source.importId,expected_import_version:state.source.importVersion},adoptProgress);
+   if(!p)await operation('duplicate_ensure',{import_id:state.source.importId,expected_import_version:state.source.importVersion,...scopePayload()},adoptProgress);
    else if(p.state==='ready'&&!p.projectionReady||p.canStep===false)await operation('duplicate_status',{scan_id:p.scanId},adoptProgress);
    else if(p.state==='ready'){if(state.selection&&!state.detail)await loadMembers();else await load();}
    else await operation('duplicate_step',{scan_id:p.scanId,generation:p.generation,expected_checkpoint:p.checkpoint,restart:false},adoptProgress);
@@ -69,7 +71,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
  }
  function adoptSource(source){
   if(disposed)return;
-  const next={importId:source.importId||null,importVersion:source.importVersion??0,capability:source.capability};
+  const next={importId:source.importId||null,importVersion:source.importVersion??0,capability:source.capability,...(source.workingSetId?{workingSetId:source.workingSetId,workingDigest:source.workingDigest,workingVersion:source.workingVersion}: {})};
   if(JSON.stringify(next)===JSON.stringify(state.source))return;
   token++;listToken++;selectionToken++;cancel();failed=null;recovery=null;clearEvidence();state.source=next;
   state.phase=next.capability!==1?'disabled':next.importId?'pending':'no_source';emit();plan();
@@ -102,7 +104,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   if(!state.detail||!state.selection)return Promise.reject(Error('Open duplicate evidence before reviewing.'));
   const selected=state.selection;
   const payload={scan_id:state.progress.scanId,import_id:state.source.importId,expected_import_version:state.source.importVersion,
-   finding_key:selected,expected_review_version:expectedVersion,decision,initials,note};
+   ...scopePayload(),finding_key:selected,expected_review_version:expectedVersion,decision,initials,note};
   state.saveState='saving';emit();
   return operation('duplicate_review_save',payload,ack=>{
    state.saveState=state.selection===selected?'saved':'idle';state.reviewRevision=ack.reviewRevision;state.page=null;
@@ -114,7 +116,7 @@ export function createDuplicateBills(client,{onChange=()=>{},schedule=(fn,ms)=>s
   if(state.error?.code==='duplicate_conflict'){
    failed=null;state.error=null;state.page=null;state.detail=null;state.saveState='idle';
    return state.progress?.scanId?operation('duplicate_status',{scan_id:state.progress.scanId},adoptProgress):
-    operation('duplicate_ensure',{import_id:state.source.importId,expected_import_version:state.source.importVersion},adoptProgress);
+    operation('duplicate_ensure',{import_id:state.source.importId,expected_import_version:state.source.importVersion,...scopePayload()},adoptProgress);
   }
   if(failed){state.error=null;return failed();}
   const p=state.progress;

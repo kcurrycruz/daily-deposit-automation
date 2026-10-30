@@ -11,9 +11,9 @@ from ..contracts import MAX_INDEX_BYTES, SnapshotError
 from ..normalization import vendor_key, invoice_key
 from ..parser import encoded
 from ..duplicates.scan import DuplicateScan
-from ..duplicates.rules import eligible, invoice_day
+from ..duplicates.rules import eligible, invoice_day, bill_fingerprint
 from .context import context_keys, HistoryContext
-from .contracts import FORMAT, TRAINING_VERSION, validate_source, working_digest
+from .contracts import FORMAT, TRAINING_VERSION, validate_source, working_digest, MappingDigest
 from .policy import retention_reasons, validate_policy
 
 INDEX_SCHEMA = {
@@ -49,6 +49,7 @@ class WorkingBuilder:
         self.db = self.context_db = self.history_db = None
         self.packers = {}; self.packed = {}; self.closed = False
         self.active = 0; self.reasons = Counter(); self.phase = 'reading'; self.done = False
+        self.mapping=MappingDigest()
         self.after_profile = ('', 0); self.after_recurrence = ('', -1, 0)
         self.pending_profile = self.pending_recurrence = None; self.summary = None
         try:
@@ -94,6 +95,7 @@ class WorkingBuilder:
                 record = {**record, 'id': f'{self.source["importId"]}:{n}'}
                 self.db.execute('insert into working_records values(?,?,?,?,?,?,?,?)',
                     (self.active,n,vendor,invoice_key(record['invoiceNumber']),record.get('kind','invoice'),record['amount'],encoded(record),encoded(reasons)))
+                self.mapping.add(self.active,n,bill_fingerprint(record))
                 self.active += 1; self.reasons.update(reasons)
                 warning = record.get('sourceIssues', '')
                 if 'date_unknown' in reasons:
@@ -140,7 +142,7 @@ class WorkingBuilder:
             protectionDigest=self.protections.digest(),trainingVersion=TRAINING_VERSION,
             fullRecordCount=self.source['recordCount'],activeCount=self.active,
             archivedCount=self.source['recordCount']-self.active,retainedReasonCounts=dict(self.reasons),
-            vendorDigest=directory_digest('working_vendors'),archiveVendorDigest=directory_digest('archive_vendors'))
+            vendorDigest=directory_digest('working_vendors'),archiveVendorDigest=directory_digest('archive_vendors'),mappingDigest=self.mapping.hexdigest())
         for db,table in [(self.db,'working_meta'),(self.context_db,'context_meta')]:
             db.execute('insert into '+table+' values(?,?)',('scope',encoded(self.summary)))
             db.execute('pragma user_version=1'); db.commit()

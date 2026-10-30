@@ -3,7 +3,7 @@ from functools import wraps
 import hashlib
 from pathlib import Path
 from ...models import require_uuid, integer
-from .contracts import DuplicateError, MESSAGES, STORAGE_VERSION,canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
+from .contracts import DuplicateError, MESSAGES, STORAGE_VERSION,WORKING_STORAGE_VERSION,WORKING_RULE_VERSION,canonical_hash, digest, validate_pin, validate_manifest, MAX_ARCHIVE_BYTES
 
 OPERATIONS = frozenset('ensure claim checkpoint restart publish fail reserve review'.split())
 
@@ -38,6 +38,10 @@ class DuplicateRepository:
         info = self.base.import_info(self.config.workspace_id, home['active_import_id'])
         if info['state'] != 'ready':
             raise DuplicateError('duplicate_invalid_source')
+        if home.get('active_working_set_id'):
+            from .scoped import working_pin
+            manifest=self.base._working_info(self.config.workspace_id,home['active_working_set_id'],info['id'])
+            return working_pin(home,info,manifest)
         return validate_pin(dict(importId=info['id'], importVersion=home['import_version'], sourceDigest=info['file_hash'],
                                  storageFormat=info.get('storage_format', 'rows-v1'), recordCount=info['record_count']))
 
@@ -82,7 +86,7 @@ class DuplicateRepository:
                 raise DuplicateError('duplicate_invalid_source')
             previous = key
             output.append(dict(key=key, decision=row['decision'], initials=row['initials'], note=row['note'],
-                               version=row['version'], at=row['at'], reviewedImportId=row['reviewed_import_id']))
+                               version=row['version'], at=row['at'], reviewedImportId=row['reviewed_import_id'],reviewedWorkingSetId=row.get('reviewed_working_set_id')))
         return dict(reviews=output, nextCursor=output[-1]['key'] if len(rows) > limit else None)
 
     @private_operation
@@ -91,7 +95,8 @@ class DuplicateRepository:
         if scan['workspace_id'] != self.config.workspace_id:
             raise PermissionError('AP workspace access denied.')
         info = scan['result_info']
-        key = f'{self.config.workspace_id}/bill-duplicates/{STORAGE_VERSION}/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
+        namespace=WORKING_STORAGE_VERSION if scan['rule_version']==WORKING_RULE_VERSION else STORAGE_VERSION
+        key = f'{self.config.workspace_id}/bill-duplicates/{namespace}/{scan["import_id"]}/{scan["rule_version"]}/{info["hash"]}.sqlite.gz'
         manifest = validate_manifest({**info, 'key': key})
         if manifest['importId'] != scan['import_id'] or manifest['sourceDigest'] != scan['source_digest']:
             raise DuplicateError('duplicate_invalid_source')
@@ -103,8 +108,8 @@ class DuplicateRepository:
         return manifest
 
     @private_operation
-    def read_result(self, manifest, target):
-        manifest = validate_manifest(manifest)
+    def read_result(self, manifest, target,*,historical=False):
+        manifest = validate_manifest(manifest,historical=historical)
         if not manifest['key'].startswith(self.config.workspace_id + '/'):
             raise PermissionError('AP workspace access denied.')
         data = self.base.read_bytes(self.config.workspace_id, manifest['key'])

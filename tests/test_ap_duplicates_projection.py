@@ -62,6 +62,23 @@ class DuplicateProjectionTests(unittest.TestCase):
             import_id=PIN['importId'],source_digest=PIN['sourceDigest'],rule_version=RULE_VERSION,manifest={})
         projection=ReviewProjection(repo,cache,source,time.monotonic); self.addCleanup(projection.close)
         return projection,repo,scan
+    def test_scoped_projection_rejects_swapped_original_ordinal(self):
+        from app.ap_shared.bills.duplicates.rules import bill_fingerprint
+        p,repo,scan=self.fixture()
+        repo.pin={**repo.pin,'storageFormat':'working-v1','workingSetId':str(uuid4()),'workingDigest':repo.pin['sourceDigest'],'workingVersion':1,'fullSourceDigest':'f'*64,'fullRecordCount':10001,'mappingDigest':'d'*64}
+        scan['rule_version']='bill-duplicates-v4';scan['working_set_id']=repo.pin['workingSetId']
+        with sqlite3.connect(p.cache.path) as db:
+            db.execute('create table source_map(ordinal integer primary key,source_ordinal integer,fp text)')
+            for n in range(2):
+                value=bill(str(n));fp=bill_fingerprint(value)
+                db.execute('update members set fp=? where finding_id=0 and ordinal=?',(fp,n))
+                db.execute('insert into source_map values(?,?,?)',(n,n+1,fp))
+        db.close()
+        p.source.members=lambda pin,ordinals,auth:[dict(ordinal=n,sourceOrdinal=n+2,bill=bill(str(n))) for n in ordinals]
+        self.ready(p,scan)
+        with self.assertRaisesRegex(ValueError,'could not be verified'):
+            p.members_page(scan,'0'*64,None,100,None)
+
     def ready(self,p,scan):
         for _ in range(30):
             result=p.prepare(scan,None,time.monotonic()+5)

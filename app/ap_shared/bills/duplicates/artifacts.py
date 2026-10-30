@@ -10,7 +10,8 @@ import tempfile
 import threading
 import time
 from .contracts import (DuplicateError, RULE_VERSION, ARTIFACT_FORMAT,MAX_BYTES, MAX_ARCHIVE_BYTES,
-                        canonical_hash, validate_manifest, validate_pin,validate_finding_evidence)
+                        canonical_hash, validate_manifest, validate_pin,validate_finding_evidence,
+                        WORKING_RULE_VERSION,WORKING_ARTIFACT_FORMAT,WORKING_PIN_FIELDS,rule_for_pin)
 from .preparation import Unpack,connect,bounded,stamp
 
 SCHEMA = {
@@ -18,6 +19,17 @@ SCHEMA = {
     'members': 'finding_id integer,ordinal integer,fp text,primary key(finding_id,ordinal)',
     'scan_meta': 'key text primary key,value text not null',
 }
+WORKING_SCHEMA={**SCHEMA,'source_map':'ordinal integer primary key,source_ordinal integer unique,fp text not null'}
+
+
+def _mapping_add(hasher,ordinal,original,fp,total):
+    if type(original) is not int or not 0<=original<total:raise DuplicateError('duplicate_invalid_source')
+    try:hasher.add(ordinal,original,fp)
+    except ValueError:raise DuplicateError('duplicate_invalid_source') from None
+
+
+def _member_mapping_valid(db):
+    return not db.execute('select 1 from members m left join source_map s on s.ordinal=m.ordinal where s.ordinal is null or s.fp<>m.fp limit 1').fetchone()
 
 
 def _finding_evidence(db,ident,kind,raw,previews,count):
@@ -35,13 +47,19 @@ class DuplicateArtifactWriter:
         # cooperative request on a different script thread.
         self.source = sqlite3.connect(self.source_path.resolve().as_uri() + '?mode=ro', uri=True, check_same_thread=False)
         self.source.execute('pragma query_only=ON')
+        self.pin=validate_pin(json.loads(self.source.execute("select value from scan_meta where key='pin'").fetchone()[0]))
+        self.working=self.pin['storageFormat']=='working-v1';self.schema=WORKING_SCHEMA if self.working else SCHEMA
+        self.mapping=None
+        if self.working:
+            from ..working.contracts import MappingDigest
+            self.mapping=MappingDigest()
         self.db = sqlite3.connect(self.final, check_same_thread=False)
         self.db.execute('pragma cache_size=-8192')
         self.db.execute('pragma journal_mode=MEMORY');self.db.execute('pragma synchronous=OFF')
-        for name, definition in SCHEMA.items():
+        for name, definition in self.schema.items():
             self.db.execute('create table ' + name + '(' + definition + ')')
         self.db.execute('create index finding_order on findings(strength desc,latest_date desc,key)')
-        self.tables, self.table, self.after = list(SCHEMA), 0, -1
+        self.tables, self.table, self.after = list(self.schema), 0, -1
         self.phase, self.done, self.info = 'copy', False, None
         self.input = self.output = self.compressor = None
         self.expanded_hash = hashlib.sha256()
@@ -62,12 +80,15 @@ class DuplicateArtifactWriter:
                 for row in rows:
                     if time.monotonic()>=deadline:break
                     if name=='findings':_finding_evidence(self.source,row[1],row[3],row[10],row[8],row[7])
+                    if name=='source_map':_mapping_add(self.mapping,row[1],row[2],row[3],self.pin['fullRecordCount'])
                     self.db.execute('insert into '+name+' values('+marks+')',row[1:]);self.after=row[0]
             else:
                 self.table += 1; self.after = -1
             self.db.commit(); self._bounded()
             if self.table == len(self.tables):
-                self.db.execute('pragma user_version=2')
+                if self.working and (self.mapping.count!=self.pin['recordCount'] or self.mapping.hexdigest()!=self.pin['mappingDigest'] or not _member_mapping_valid(self.db)):
+                    raise DuplicateError('duplicate_invalid_source')
+                self.db.execute('pragma user_version='+('3' if self.working else '2'))
                 self.db.commit(); self.db.close(); self.db = None; self.source.close(); self.source = None
                 self._bounded()
                 self.input = open(self.final, 'rb'); self.output = open(self.target, 'wb')
@@ -85,11 +106,12 @@ class DuplicateArtifactWriter:
                         raise DuplicateError('duplicate_limit')
                     with closing(sqlite3.connect(self.final.resolve().as_uri() + '?mode=ro', uri=True)) as db:
                         meta = {k: json.loads(v) for k, v in db.execute('select key,value from scan_meta')}
-                    self.info = dict(format=ARTIFACT_FORMAT, ruleVersion=RULE_VERSION,
+                    self.info = dict(format=WORKING_ARTIFACT_FORMAT if self.working else ARTIFACT_FORMAT, ruleVersion=rule_for_pin(meta['pin']),
                         sourceDigest=meta['pin']['sourceDigest'], importId=meta['pin']['importId'],
                         hash=hashlib.sha256(data).hexdigest(), bytes=len(data),
                         expandedHash=self.expanded_hash.hexdigest(), expandedBytes=self.final.stat().st_size,
                         findingCount=meta['counts']['findingCount'], recordCount=meta['counts']['recordCount'])
+                    if self.working:self.info.update({k:meta['pin'][k] for k in WORKING_PIN_FIELDS.split()})
                     self.done = True
                     break
                 self.expanded_hash.update(chunk); self.compressor.write(chunk); processed += len(chunk)
@@ -130,19 +152,21 @@ class DuplicateArtifactCache:
 
     def _open(self, path, manifest, validate=True):
         db = connect(path)
+        working=manifest['ruleVersion']==WORKING_RULE_VERSION
         try:
             db.execute('pragma query_only=ON'); db.execute('pragma trusted_schema=OFF'); db.execute('pragma cache_size=-8192')
             if hasattr(db, 'enable_load_extension'):
                 db.enable_load_extension(False)
-            if db.execute('pragma user_version').fetchone()[0] != 2 or validate and db.execute('pragma quick_check').fetchone()[0] != 'ok':
+            if db.execute('pragma user_version').fetchone()[0] != (3 if working else 2) or validate and db.execute('pragma quick_check').fetchone()[0] != 'ok':
                 raise DuplicateError('duplicate_invalid_source')
             tables = {r[0] for r in db.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'")}
-            if tables != set(SCHEMA):
+            if tables != set(WORKING_SCHEMA if working else SCHEMA):
                 raise DuplicateError('duplicate_invalid_source')
             if db.execute("select 1 from sqlite_master where type in ('view','trigger') limit 1").fetchone():
                 raise DuplicateError('duplicate_invalid_source')
             columns = {'findings': 'id key classification strength reasons latest_date member_count preview search evidence',
                        'members': 'finding_id ordinal fp', 'scan_meta': 'key value'}
+            if working:columns['source_map']='ordinal source_ordinal fp'
             for table, names in columns.items():
                 if [r[1] for r in db.execute('pragma table_info(' + table + ')')] != names.split():
                     raise DuplicateError('duplicate_invalid_source')
@@ -150,6 +174,7 @@ class DuplicateArtifactCache:
             pin = validate_pin(meta['pin']); counts = meta['counts']
             if pin['importId'] != manifest['importId'] or pin['sourceDigest'] != manifest['sourceDigest'] or counts['recordCount'] != manifest['recordCount'] or counts['findingCount'] != manifest['findingCount']:
                 raise DuplicateError('duplicate_invalid_source')
+            if working and any(pin[k]!=manifest[k] for k in WORKING_PIN_FIELDS.split()):raise DuplicateError('duplicate_invalid_source')
             if not validate:return db
             if db.execute('select count(*) from findings').fetchone()[0] != manifest['findingCount']:
                 raise DuplicateError('duplicate_invalid_source')
@@ -161,6 +186,12 @@ class DuplicateArtifactCache:
                 raise DuplicateError('duplicate_invalid_source')
             for ident,kind,raw,previews,count in db.execute('select id,classification,evidence,preview,member_count from findings'):
                 _finding_evidence(db,ident,kind,raw,previews,count)
+            if working:
+                from ..working.contracts import MappingDigest
+                mapping=MappingDigest()
+                for n,original,fp in db.execute('select ordinal,source_ordinal,fp from source_map order by ordinal'):
+                    _mapping_add(mapping,n,original,fp,manifest['fullRecordCount'])
+                if mapping.count!=manifest['recordCount'] or mapping.hexdigest()!=manifest['mappingDigest'] or not _member_mapping_valid(db):raise DuplicateError('duplicate_invalid_source')
             return db
         except Exception:
             db.close(); raise
@@ -248,7 +279,7 @@ class DuplicateArtifactCache:
             if key not in self.pending:
                 self._evict(manifest['expandedBytes']+sum(p['size'] for p in self.pending.values()))
                 unpack=Unpack(self.root.name,lambda p:self.repository.read_result(manifest,p),manifest)
-                self.pending[key]=dict(unpack=unpack,size=manifest['expandedBytes'],phase='findings',after=-1,n=0,member_after=(-1,-1),group=None)
+                self.pending[key]=dict(unpack=unpack,size=manifest['expandedBytes'],phase='findings',after=-1,n=0,member_after=(-1,-1),group=None,mapping=None,map_after=-1)
             item=self.pending[key];unpack=item['unpack']
             try:
                 if not unpack.step(deadline):authorize(authorization);return False
@@ -267,7 +298,7 @@ class DuplicateArtifactCache:
                         else:
                             if item['n']!=manifest['findingCount']:raise DuplicateError('duplicate_invalid_source')
                             item['phase']='members'
-                    else:
+                    elif item['phase']=='members':
                         if db.execute('select 1 from members where finding_id<0 limit 1').fetchone():raise DuplicateError('duplicate_invalid_source')
                         rows=db.execute('''select m.finding_id,m.ordinal,f.id from members m left join findings f on f.id=m.finding_id
                             where (m.finding_id,m.ordinal)>(?,?) order by m.finding_id,m.ordinal limit 5000''',item['member_after']).fetchall()
@@ -275,6 +306,20 @@ class DuplicateArtifactCache:
                             raise DuplicateError('duplicate_invalid_source')
                         if rows:item['member_after']=rows[-1][:2]
                         else:
+                            if manifest['ruleVersion']==WORKING_RULE_VERSION:
+                                if not _member_mapping_valid(db):raise DuplicateError('duplicate_invalid_source')
+                                from ..working.contracts import MappingDigest
+                                item['phase']='mapping';item['mapping']=MappingDigest()
+                                authorize(authorization);return False
+                            authorize(authorization)
+                            self.entries[key]=dict(directory=unpack.directory,path=unpack.path,size=unpack.size,refs=0,last=self.clock(),stamp=stamp(unpack.path))
+                            del self.pending[key];return True
+                    else:
+                        rows=db.execute('select ordinal,source_ordinal,fp from source_map where ordinal>? order by ordinal limit 250',(item['map_after'],)).fetchall()
+                        for ordinal,original,fp in rows:_mapping_add(item['mapping'],ordinal,original,fp,manifest['fullRecordCount'])
+                        if rows:item['map_after']=rows[-1][0]
+                        else:
+                            if item['mapping'].count!=manifest['recordCount'] or item['mapping'].hexdigest()!=manifest['mappingDigest']:raise DuplicateError('duplicate_invalid_source')
                             authorize(authorization)
                             self.entries[key]=dict(directory=unpack.directory,path=unpack.path,size=unpack.size,refs=0,last=self.clock(),stamp=stamp(unpack.path))
                             del self.pending[key];return True

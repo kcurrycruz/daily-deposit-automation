@@ -26,7 +26,7 @@ const manifest=(job,activeCount=1)=>{
  const archive=letter=>({key:`${w}/bill-working/v1/${workingDigest}/${letter.repeat(64)}.sqlite.gz`,hash:letter.repeat(64),bytes:100,expandedHash:'e'.repeat(64),expandedBytes:1000});
  return {format:'ap-bill-working-v1',workingSetId:crypto.randomUUID(),workingDigest,source,policy:job.policy,
  protectionDigest:'b'.repeat(64),trainingVersion:'vendor-history-v1',fullRecordCount:2,activeCount,archivedCount:2-activeCount,
- retainedReasonCounts:activeCount?{recent:activeCount}:{},vendorDigest:'f'.repeat(64),archiveVendorDigest:'f'.repeat(64),indexArchive:archive('c'),contextArchive:archive('d')};
+ retainedReasonCounts:activeCount?{recent:activeCount}:{},vendorDigest:'f'.repeat(64),archiveVendorDigest:'f'.repeat(64),mappingDigest:'9'.repeat(64),indexArchive:archive('c'),contextArchive:archive('d')};
 };
 const stage=async(job,mf=manifest(job))=>{
  await call('checkpoint',{...data(job),expected_checkpoint:0,next_checkpoint:1,state:'packaging',progress:{recordsRead:2}});

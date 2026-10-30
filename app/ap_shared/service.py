@@ -120,7 +120,7 @@ class ApService:
                 from .bills.duplicates.operations import create_duplicate_operations
                 if self.bill_operations is None:
                     self.bill_operations=create_bill_operations(self.repository,self.config,self.clock,self.revalidate)
-                self.duplicate_operations=create_duplicate_operations(self.repository,self.bill_operations,self.config,self.clock,self.revalidate)
+                self.duplicate_operations=create_duplicate_operations(self.repository,self.bill_operations,self.config,self.clock,self.revalidate,self._working_api())
             return self.duplicate_operations.handle(action,payload,request_id,authorization)
         if action in BILL_ACTIONS:
             if self.bill_operations is None:

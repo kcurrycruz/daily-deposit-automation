@@ -10,7 +10,7 @@ from uuid import UUID, uuid5
 from ...access import require_access
 from ...models import allowed, integer, require_uuid
 from .artifacts import DuplicateArtifactCache, DuplicateArtifactWriter
-from .contracts import DuplicateError, RULE_VERSION, canonical_hash, validate_review_payload
+from .contracts import DuplicateError, RULE_VERSION, rule_for_pin, canonical_hash, validate_review_payload
 from .projection import ReviewProjection
 from .repository import DuplicateRepository
 from .scan import DuplicateScan
@@ -81,7 +81,12 @@ class DuplicateScanRegistry:
                 if engine.read==h['pin']['recordCount']:
                     engine.finish_input(); h['phase']='candidates'
             elif h['phase']=='candidates':
-                result=engine.step(deadline)
+                if h['pin']['storageFormat']=='working-v1':
+                    with scan['source_reader'].context(h['pin'],authorization) as context:
+                        engine.vendor_candidates.patterns.context=context
+                        try:result=engine.step(deadline)
+                        finally:engine.vendor_candidates.patterns.context=None
+                else:result=engine.step(deadline)
                 if result['done']:
                     engine.finish(); h['phase']='packaging'
                     h['writer']=DuplicateArtifactWriter(Path(h['folder'].name)/'working.sqlite',Path(h['folder'].name)/'result.gz')
@@ -113,9 +118,9 @@ _registry=None
 _runtimes={}
 
 
-def create_duplicate_operations(base_repository, bill_operations, config, clock, revalidate):
+def create_duplicate_operations(base_repository, bill_operations, config, clock, revalidate,working_operations=None):
     global _registry
-    repository=DuplicateRepository(base_repository); source=DuplicateSource(base_repository,bill_operations)
+    repository=DuplicateRepository(base_repository); source=DuplicateSource(base_repository,bill_operations,working=working_operations)
     key=canonical_hash([config.supabase_url,config.workspace_id,config.bucket,config.supabase_secret_key])
     with _lock:
         if _registry is None:
@@ -149,10 +154,17 @@ class DuplicateOperations:
     def _scan(self, scan_id, auth):
         self._check(auth); scan=self.repository.scan(require_uuid(scan_id)); pin=self.repository.current()
         if (pin is None or scan['workspace_id']!=self.config.workspace_id or scan['import_id']!=pin['importId'] or
-            scan['source_digest']!=pin['sourceDigest'] or scan['rule_version']!=RULE_VERSION):
+            scan['source_digest']!=pin['sourceDigest'] or scan['rule_version']!=rule_for_pin(pin)):
             raise DuplicateError('duplicate_conflict')
         scan['source_pin']=pin; scan['source_reader']=self.source
         return scan
+
+    def _scope_payload(self,data,pin):
+        if pin['storageFormat']=='working-v1':
+            if data.get('working_set_id')!=pin['workingSetId'] or type(data.get('expected_working_version')) is not int or data['expected_working_version']!=pin['workingVersion']:
+                raise DuplicateError('duplicate_conflict')
+        elif 'working_set_id' in data or 'expected_working_version' in data:
+            raise DuplicateError('duplicate_conflict')
 
     def _progress(self, scan, auth):
         self._check(auth); current=self._scan(scan['id'],auth); prepared=dict(ready=False,reviewRevision=None,counts=None)
@@ -166,7 +178,9 @@ class DuplicateOperations:
         restart=current['state']=='superseded' or current['state']=='running' and (
             current['expected_import_version']!=current['source_pin']['importVersion'] or expired)
         return dict(scanId=current['id'],importId=current['import_id'],importVersion=current['source_pin']['importVersion'],
-            ruleVersion=RULE_VERSION,state='restart_required' if restart else current['state'],phase=current['phase'],generation=current['generation'],
+            ruleVersion=current['rule_version'],workingSetId=current['source_pin'].get('workingSetId'),
+            workingDigest=current['source_pin'].get('workingDigest'),workingVersion=current['source_pin'].get('workingVersion'),
+            fullRecordCount=current['source_pin'].get('fullRecordCount',current['source_pin']['recordCount']),state='restart_required' if restart else current['state'],phase=current['phase'],generation=current['generation'],
             checkpoint=current['checkpoint'],recordsRead=current['progress']['recordsRead'],probes=current['progress']['probes'],
             totalRecords=current['source_pin']['recordCount'],projectionReady=prepared['ready'],
             findingCount=current['manifest']['findingCount'] if current['state']=='ready' else None,
@@ -245,15 +259,18 @@ class DuplicateOperations:
 
     def _handle(self, action, payload, request_id, auth):
         if action=='duplicate_ensure':
-            data=allowed(payload,'import_id expected_import_version','import_id expected_import_version')
+            data=allowed(payload,'import_id expected_import_version working_set_id expected_working_version','import_id expected_import_version')
             require_uuid(data['import_id']); integer(data['expected_import_version'],minimum=0)
             pin=self.repository.current()
             if pin is None: return dict(state='no_source',counts=None,projectionReady=False)
             if pin['importId']!=data['import_id'] or pin['importVersion']!=data['expected_import_version']:
                 raise DuplicateError('duplicate_conflict')
+            self._scope_payload(data,pin)
             self.registry.release_obsolete(self.config.workspace_id,pin)
-            sid=str(uuid5(UUID(self.config.workspace_id),pin['importId']+':'+RULE_VERSION))
-            scan=self._rpc('ensure',dict(scan_id=sid,**data,source_digest=pin['sourceDigest'],rule_version=RULE_VERSION),request_id,auth,'ensure')
+            rule=rule_for_pin(pin)
+            identity=pin['importId']+':'+rule+(':'+pin['workingDigest'] if pin['storageFormat']=='working-v1' else '')
+            sid=str(uuid5(UUID(self.config.workspace_id),identity))
+            scan=self._rpc('ensure',dict(scan_id=sid,**data,source_digest=pin['sourceDigest'],rule_version=rule),request_id,auth,'ensure')
             if scan['state']=='pending':
                 scan=self._rpc('claim',dict(scan_id=sid,session_nonce=auth.session_nonce),request_id,auth,'claim')
                 scan=self._scan(sid,auth); scan['fresh']=True
@@ -263,6 +280,7 @@ class DuplicateOperations:
             return self._progress(scan,auth)
         if action=='duplicate_review_save':
             data=validate_review_payload(payload); scan=self._scan(data['scan_id'],auth)
+            self._scope_payload(data,scan['source_pin'])
             if data['import_id']!=scan['import_id'] or data['expected_import_version']!=scan['source_pin']['importVersion'] or scan['state']!='ready':
                 raise DuplicateError('duplicate_conflict')
             with self.cache.acquire(self.config.workspace_id,scan['id'],scan['manifest'],auth,self._check,prepared_only=True) as artifact:

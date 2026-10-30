@@ -72,7 +72,7 @@ def reference_variants(reference,shapes):
 
 class VendorPatterns:
     def __init__(self,db):
-        self.db=db;self.job=None;self.recurring=None
+        self.db=db;self.job=None;self.recurring=None;self.context=None
         db.executescript('''
           create index if not exists node_vendor_day on nodes(vendor,day,ordinal) where day is not null;
           create index if not exists node_vendor_amount_day on nodes(vendor,amount,day,ordinal) where day is not null;
@@ -84,6 +84,7 @@ class VendorPatterns:
         ''')
 
     def advance(self,vendor,cutoff):
+        if self.context is not None:return self.context.profile(vendor,cutoff)
         cached=self.db.execute('select value from vendor_pattern_cache where vendor=? and month=?',(vendor,cutoff)).fetchone()
         if cached:return json.loads(cached[0])
         if month_start(cutoff)!=cutoff:raise DuplicateError('duplicate_invalid_source')
@@ -116,6 +117,7 @@ class VendorPatterns:
         return profile
 
     def recurrence(self,vendor,amount,day):
+        if self.context is not None:return self.context.recurring(vendor,amount,day)
         key=(vendor,amount,day)
         cached=self.db.execute('select value from vendor_recurrence_cache where vendor=? and amount=? and day=?',key).fetchone()
         if cached:return bool(cached[0])

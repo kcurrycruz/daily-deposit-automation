@@ -25,6 +25,13 @@ def create_working_operations(base,bill_ops,config,clock,revalidate,duplicate_me
             registry=WorkingRegistry(bill_ops,SourcePreparationCache(bill_ops.repository));cache=WorkingCache(repository)
             atexit.register(registry.close);atexit.register(cache.close);_runtimes[key]=(registry,cache)
         registry,cache=_runtimes[key]
+        if duplicate_members_reader is None:
+            from .protection_evidence import FrozenDuplicateEvidence
+            from ..duplicates.repository import DuplicateRepository
+            if not hasattr(registry,'saved_duplicate_evidence'):
+                registry.saved_duplicate_evidence=FrozenDuplicateEvidence(DuplicateRepository(base),source_prepared=registry.source_prepared)
+                atexit.register(registry.saved_duplicate_evidence.close)
+            duplicate_members_reader=lambda review,auth:registry.saved_duplicate_evidence(review,auth,bill_ops)
     protections=ProtectionRepository(base,bill_ops._check,duplicate_members_reader)
     return WorkingOperations(repository,bill_ops,clock,protections,registry,cache)
 

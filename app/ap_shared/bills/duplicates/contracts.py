@@ -12,6 +12,14 @@ from ...models import allowed, integer, text, require_uuid, normalize_initials, 
 RULE_VERSION = 'bill-duplicates-v3'
 ARTIFACT_FORMAT = 'bill-duplicates-v2'
 STORAGE_VERSION = 'v2'
+WORKING_RULE_VERSION = 'bill-duplicates-v4'
+WORKING_ARTIFACT_FORMAT = 'bill-duplicates-v3'
+WORKING_STORAGE_VERSION = 'v3'
+WORKING_PIN_FIELDS = 'workingSetId workingDigest workingVersion fullSourceDigest fullRecordCount mappingDigest'
+
+
+def rule_for_pin(pin):
+    return WORKING_RULE_VERSION if pin.get('storageFormat')=='working-v1' else RULE_VERSION
 CLASSIFICATIONS = ('exact_pattern','possible_duplicate','amount_difference','export_review','reference_entry_issue','possible_wrong_vendor')
 MAX_RECORDS = 500000
 MAX_FINDINGS = 100000
@@ -147,20 +155,29 @@ def canonical_hash(value):
 
 
 def validate_pin(value):
-    out = allowed(value, 'importId importVersion sourceDigest storageFormat recordCount',
-                  'importId importVersion sourceDigest storageFormat recordCount')
+    working=type(value) is dict and value.get('storageFormat')=='working-v1'
+    fields='importId importVersion sourceDigest storageFormat recordCount'+(' '+WORKING_PIN_FIELDS if working else '')
+    out = allowed(value,fields,fields)
     require_uuid(out['importId']); integer(out['importVersion'], minimum=0)
     digest(out['sourceDigest'])
-    if out['storageFormat'] not in ('snapshot-v2', 'rows-v1'):
+    if out['storageFormat'] not in ('snapshot-v2', 'rows-v1','working-v1'):
         raise DuplicateError('duplicate_invalid_source')
-    integer(out['recordCount'], minimum=1, maximum=MAX_RECORDS if out['storageFormat'] == 'snapshot-v2' else 100000)
+    integer(out['recordCount'], minimum=0 if working else 1, maximum=100000 if out['storageFormat']=='rows-v1' else MAX_RECORDS)
+    if working:
+        require_uuid(out['workingSetId']);integer(out['workingVersion'],minimum=0)
+        for name in ('workingDigest','fullSourceDigest','mappingDigest'):digest(out[name])
+        integer(out['fullRecordCount'],minimum=1,maximum=MAX_RECORDS)
+        if out['sourceDigest']!=out['workingDigest'] or out['recordCount']>out['fullRecordCount']:
+            raise DuplicateError('duplicate_invalid_source')
     return out
 
 
-def validate_manifest(value):
-    keys = 'format ruleVersion sourceDigest importId key hash bytes expandedHash expandedBytes findingCount recordCount'
+def validate_manifest(value,*,historical=False):
+    working=type(value) is dict and value.get('format')==WORKING_ARTIFACT_FORMAT
+    keys = 'format ruleVersion sourceDigest importId key hash bytes expandedHash expandedBytes findingCount recordCount'+(' '+WORKING_PIN_FIELDS if working else '')
     out = allowed(value, keys, keys)
-    if out['format'] != ARTIFACT_FORMAT or out['ruleVersion'] != RULE_VERSION:
+    supported=(out['format'],out['ruleVersion']) in [(ARTIFACT_FORMAT,RULE_VERSION),*([('bill-duplicates-v1','bill-duplicates-v1'),('bill-duplicates-v1','bill-duplicates-v2')] if historical else []),(WORKING_ARTIFACT_FORMAT,WORKING_RULE_VERSION)]
+    if not supported:
         raise DuplicateError('duplicate_invalid_source')
     for name in ('sourceDigest', 'hash', 'expandedHash'):
         digest(out[name])
@@ -168,9 +185,12 @@ def validate_manifest(value):
     integer(out['bytes'], minimum=1, maximum=MAX_ARCHIVE_BYTES)
     integer(out['expandedBytes'], minimum=1, maximum=MAX_BYTES)
     integer(out['findingCount'], minimum=0, maximum=MAX_FINDINGS)
-    integer(out['recordCount'], minimum=1, maximum=MAX_RECORDS)
+    integer(out['recordCount'], minimum=0 if working else 1, maximum=MAX_RECORDS)
+    if working:
+        validate_pin({k:out[k] for k in ('importId','sourceDigest','recordCount',*WORKING_PIN_FIELDS.split())}|dict(importVersion=0,storageFormat='working-v1'))
     parts = text(out['key'], maximum=1024).split('/')
-    if len(parts) != 6 or parts[1:3] != ['bill-duplicates', STORAGE_VERSION] or parts[3] != out['importId'] or parts[4] != RULE_VERSION or parts[5] != out['hash'] + '.sqlite.gz':
+    version=WORKING_STORAGE_VERSION if working else STORAGE_VERSION if out['format']==ARTIFACT_FORMAT else 'v1'
+    if len(parts) != 6 or parts[1:3] != ['bill-duplicates',version] or parts[3] != out['importId'] or parts[4] != out['ruleVersion'] or parts[5] != out['hash'] + '.sqlite.gz':
         raise DuplicateError('duplicate_invalid_source')
     require_uuid(parts[0])
     return out
@@ -258,7 +278,9 @@ def validate_finding_evidence(value,classification,previews,member_count,member_
 
 def validate_review_payload(value):
     keys = 'scan_id import_id expected_import_version finding_key expected_review_version decision initials note'
-    out = allowed(value, keys, keys)
+    out = allowed(value, keys+' working_set_id expected_working_version', keys)
+    if 'working_set_id' in out or 'expected_working_version' in out:
+        require_uuid(out.get('working_set_id'));integer(out.get('expected_working_version'),minimum=0)
     require_uuid(out['scan_id']); require_uuid(out['import_id']); digest(out['finding_key'])
     integer(out['expected_import_version'], minimum=0); integer(out['expected_review_version'], minimum=0)
     if out['decision'] not in ('confirmed_duplicate', 'not_duplicate', 'unreviewed'):

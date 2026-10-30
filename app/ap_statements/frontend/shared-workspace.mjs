@@ -25,7 +25,7 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{}}
   const updateDuplicateBusy=()=>duplicates.setBusy(foreground>0||externalBusy);
   async function inForeground(work){foreground++;updateDuplicateBusy();try{return await work();}finally{foreground--;updateDuplicateBusy();}}
   function check(){if(disposed)throw Error('AP is locked.');}
-  const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills});onState(state);};
+  const emit=()=>{check();if(state.ready&&loaded)duplicates.adoptSource({importId:state.importId,importVersion:state.importVersion,capability:state.capabilities.duplicateBills,workingSetId:state.activeImport?.workingSet?.workingSetId,workingDigest:state.activeImport?.workingSet?.workingDigest,workingVersion:state.workingVersion});onState(state);};
   const currentPayload=()=>state.capabilities.billWorkingSets===1?{include_working:true}:{};
   function makeComparison(){const source=createComparisonSource(client,{onChange:provider=>{if(comparison===source&&!disposed){state.provider=sourceUnavailableError?{...provider,error:sourceUnavailableError}:provider;if(loaded)emit();}}});return source;}
   async function ensureComparisons(doc){

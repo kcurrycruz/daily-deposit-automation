@@ -1,10 +1,28 @@
 """Strict working-set identities and artifact contracts, separate from full imports."""
+import hashlib
 from ...models import allowed, integer, require_uuid
 from ..contracts import canonical_hash, digest, MAX_RECORDS, MAX_INDEX_BYTES, MAX_ARCHIVE_BYTES
 from .policy import validate_policy, REASONS
 
 FORMAT = 'ap-bill-working-v1'
 TRAINING_VERSION = 'vendor-history-v1'
+
+
+class MappingDigest:
+    """Canonical streaming commitment to active/original bill identity."""
+    def __init__(self):
+        self.hash=hashlib.sha256(b'[');self.count=0;self.previous=-1
+
+    def add(self,ordinal,original,fingerprint):
+        import json
+        integer(ordinal,minimum=0,maximum=MAX_RECORDS-1);integer(original,minimum=0,maximum=MAX_RECORDS-1);digest(fingerprint)
+        if ordinal!=self.count or original<=self.previous:raise ValueError('Invalid original BILL record mapping.')
+        if self.count:self.hash.update(b',')
+        self.hash.update(json.dumps([ordinal,original,fingerprint],separators=(',',':')).encode('utf8'))
+        self.count+=1;self.previous=original
+
+    def hexdigest(self):
+        value=self.hash.copy();value.update(b']');return value.hexdigest()
 
 
 def validate_source(value):
@@ -21,12 +39,13 @@ def working_digest(source: dict, policy: dict, protection_digest: str) -> str:
 
 def validate_working_manifest(value: dict) -> dict:
     fields = ('format workingSetId workingDigest source policy protectionDigest trainingVersion '
-              'fullRecordCount activeCount archivedCount retainedReasonCounts vendorDigest archiveVendorDigest indexArchive contextArchive')
+              'fullRecordCount activeCount archivedCount retainedReasonCounts vendorDigest archiveVendorDigest mappingDigest indexArchive contextArchive')
     out = allowed(value, fields, fields)
     if out['format'] != FORMAT or out['trainingVersion'] != TRAINING_VERSION:
         raise ValueError('Unsupported active BILL artifact.')
     require_uuid(out['workingSetId']); digest(out['workingDigest']); digest(out['vendorDigest'])
     digest(out['archiveVendorDigest'])
+    digest(out['mappingDigest'])
     out['source'] = validate_source(out['source']); out['policy'] = validate_policy(out['policy'])
     if out['workingDigest'] != working_digest(out['source'], out['policy'], out['protectionDigest']):
         raise ValueError('Active BILL identity does not match its source and policy.')

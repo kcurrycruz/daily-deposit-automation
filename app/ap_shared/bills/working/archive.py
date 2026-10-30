@@ -1,5 +1,5 @@
 """Bounded immutable active/context cache. Never fall back to a full import."""
-from collections import OrderedDict
+from collections import OrderedDict,Counter
 from contextlib import contextmanager, closing
 import hashlib
 import json
@@ -11,11 +11,11 @@ from ...models import validate_record
 from ..contracts import MAX_INDEX_BYTES, SnapshotError
 from ..parser import encoded
 from ..normalization import vendor_key, invoice_key
-from ..duplicates.rules import eligible, invoice_day
+from ..duplicates.rules import eligible, invoice_day, bill_fingerprint
 from ..duplicates.preparation import Unpack, connect, stamp
 from ..duplicates.contracts import DuplicateError
 from .builds import INDEX_SCHEMA, CONTEXT_SCHEMA
-from .contracts import validate_working_manifest
+from .contracts import validate_working_manifest,MappingDigest
 from .policy import retention_reasons
 from .context import HistoryContext, context_keys
 
@@ -59,8 +59,9 @@ class WorkingCache:
                 for args in profiles:history.profile(*args)
                 for args in recurrences:history.recurring(*args)
             item['count']+=1;item['after']=ordinal;item['original']=original
+            item['mapping'].add(ordinal,original,bill_fingerprint(record));item['reasons'].update(reasons)
         if len(rows)<250:
-            if item['count']!=manifest['activeCount']:
+            if item['count']!=manifest['activeCount'] or item['mapping'].hexdigest()!=manifest['mappingDigest'] or dict(item['reasons'])!=manifest['retainedReasonCounts']:
                 raise SnapshotError('bill_invalid_archive')
             item['phase']='profiles';item['profile_after']=('',0)
 
@@ -116,7 +117,7 @@ class WorkingCache:
                 if sum(e['size'] for e in self.entries.values())+size>MAX_INDEX_BYTES:
                     raise SnapshotError('bill_limit')
                 item=dict(manifest=manifest,unpack={},size=size,refs=0,last=time.monotonic(),ready=False,
-                          phase='schema',after=-1,original=-1,count=0)
+                          phase='schema',after=-1,original=-1,count=0,mapping=MappingDigest(),reasons=Counter())
                 self.entries[key]=item
                 for name in ('index','context'):
                     item['unpack'][name]=Unpack(self.root.name,

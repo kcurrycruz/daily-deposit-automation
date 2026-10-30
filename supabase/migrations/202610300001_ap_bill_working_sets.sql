@@ -194,7 +194,7 @@ begin
         select * into source from ap_bill_imports where workspace_id=p_workspace and id=job.source_import_id and state='ready';
         mf=p_data->'manifest';
         if mf->>'format' is distinct from 'ap-bill-working-v1' or mf->>'trainingVersion' is distinct from 'vendor-history-v1' or
-          coalesce(mf->>'workingDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'vendorDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'archiveVendorDigest','') !~ '^[0-9a-f]{64}$' or
+          coalesce(mf->>'workingDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'vendorDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'archiveVendorDigest','') !~ '^[0-9a-f]{64}$' or coalesce(mf->>'mappingDigest','') !~ '^[0-9a-f]{64}$' or
           mf->'source'->>'importId' is distinct from source.id::text or mf->'source'->>'sourceDigest' is distinct from source.file_hash or
           (mf->'source'->>'recordCount')::integer is distinct from source.record_count or mf->'policy' is distinct from job.policy or
           mf->>'protectionDigest' is distinct from job.protection_digest or (mf->>'fullRecordCount')::integer is distinct from source.record_count or

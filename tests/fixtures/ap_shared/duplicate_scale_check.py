@@ -44,8 +44,9 @@ def source_index(source, path):
         return index.finish()['counts']
 
 
-def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
-    maximum_records=maximum_probes=0;max_seconds=0
+def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False,progress=False):
+    maximum_records=maximum_probes=0;max_seconds=0;max_phase=''
+    scan_started=time.monotonic();reported_phase=None;next_report=0
     workspace='00000000-0000-4000-8000-000000000099';config=SimpleNamespace(workspace_id=workspace)
     with closing(sqlite3.connect(index_path.resolve().as_uri()+'?mode=ro',uri=True)) as db:
         vendor_digest=json.loads(db.execute("select value from bill_meta where key='vendorDigest'").fetchone()[0])
@@ -84,9 +85,13 @@ def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
     try:
         registry.claim(scan,auth);engine=registry.handles[scan['id']]['engine']
         while True:
-            started=time.monotonic();before_read,before_probe=engine.read,engine.probes
+            started=time.monotonic();before_read,before_probe=engine.read,engine.probes;phase_before=registry.handles[scan['id']]['phase']
             reply=registry.step(scan,auth,lambda _:None);scan['checkpoint']=reply['checkpoint']
-            max_seconds=max(max_seconds,time.monotonic()-started)
+            if progress and (reply['phase']!=reported_phase or engine.read>=next_report):
+                print(json.dumps(dict(repeat=weekly,phase=reply['phase'],recordsRead=engine.read,seconds=round(time.monotonic()-scan_started,3))),file=sys.stderr,flush=True)
+                reported_phase=reply['phase'];next_report=(engine.read//100000+1)*100000
+            duration=time.monotonic()-started
+            if duration>max_seconds:max_seconds=duration;max_phase=phase_before
             maximum_records=max(maximum_records,engine.read-before_read);maximum_probes=max(maximum_probes,engine.probes-before_probe)
             if reply['artifact']:break
         counts=engine.finish();db=registry.handles[scan['id']]['db'];keys=hashlib.sha256()
@@ -106,16 +111,17 @@ def run_scan(index_path, packed_index, source_counts, pin, *, weekly=False):
             ready=cache.prepare(workspace,scan['id'],result_manifest,auth,lambda _:None,deadline)
             if ready:
                 projected=projection.prepare(ready_scan,auth,deadline);ready=projected['ready']
-            max_seconds=max(max_seconds,time.monotonic()-started)
+            duration=time.monotonic()-started
+            if duration>max_seconds:max_seconds=duration;max_phase='review_preparation'
             if ready:break
-        return counts,keys.hexdigest(),patterns,maximum_records,maximum_probes,max_seconds,{**artifact,'visibleFindingCount':projected['counts']['all'],'excludedExactReferenceCount':projected['excludedExactReferenceCount']}
+        return counts,keys.hexdigest(),patterns,maximum_records,maximum_probes,max_seconds,{**artifact,'maxStepPhase':max_phase,'visibleFindingCount':projected['counts']['all'],'excludedExactReferenceCount':projected['excludedExactReferenceCount']}
     finally:
         if projection:projection.close()
         if cache:cache.close()
         registry.close();source_cache.close()
 
 
-def check(records, source=None,near=False):
+def check(records, source=None,near=False,progress=False):
     started=time.monotonic();baseline=peak_rss()
     with tempfile.TemporaryDirectory(prefix='hwfc-duplicate-release-') as folder:
         root=Path(folder);source=Path(source) if source else root/'synthetic.csv'
@@ -153,9 +159,9 @@ def check(records, source=None,near=False):
             while not packer.step()['done']:pass
         finally:packer.close()
         pin=dict(importId='00000000-0000-4000-8000-000000000001',importVersion=1,sourceDigest=hasher.hexdigest(),storageFormat='snapshot-v2',recordCount=source_counts['recordCount'],**({'ruleVersion':NEAR_RULE_VERSION} if near else {}))
-        counts,keys,patterns,max_records,max_probes,max_seconds,artifact=run_scan(index,packed_index,source_counts,pin)
-        repeat,repeat_keys,_,more_records,more_probes,more_seconds,_=run_scan(index,packed_index,source_counts,
-            {**pin,'importId':'00000000-0000-4000-8000-000000000002','importVersion':2,'sourceDigest':'b'*64},weekly=True)
+        counts,keys,patterns,max_records,max_probes,max_seconds,artifact=run_scan(index,packed_index,source_counts,pin,progress=progress)
+        repeat,repeat_keys,_,more_records,more_probes,more_seconds,repeat_artifact=run_scan(index,packed_index,source_counts,
+            {**pin,'importId':'00000000-0000-4000-8000-000000000002','importVersion':2,'sourceDigest':'b'*64},weekly=True,progress=progress)
         after_stat=source.stat()
         if before_stat.st_size!=after_stat.st_size or before_stat.st_mtime_ns!=after_stat.st_mtime_ns:
             raise RuntimeError('Source was modified')
@@ -163,6 +169,7 @@ def check(records, source=None,near=False):
             peakRssIncreaseBytes=max(0,peak_rss()-baseline),maxRecordsPerStep=max(max_records,more_records),
             maxProbesPerStep=max(max_probes,more_probes),expandedBytes=artifact['expandedBytes'],compressedBytes=artifact['bytes'],
             elapsedSeconds=round(time.monotonic()-started,3),maxStepSeconds=round(max(max_seconds,more_seconds),3),
+            maxStepPhase=artifact['maxStepPhase'] if max_seconds>=more_seconds else repeat_artifact['maxStepPhase'],
             repeatKeysStable=keys==repeat_keys and counts['findingCount']==repeat['findingCount'],
             sourceBytes=source.stat().st_size,sourceRows=source_counts['sourceRowCount'],eligibleRecords=counts['eligibleRecords'],
             excludedRecords=counts['excludedRecords'],patterns=patterns)
@@ -170,5 +177,5 @@ def check(records, source=None,near=False):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--records',type=int,choices=(223425,500000),default=223425)
-    parser.add_argument('--source');parser.add_argument('--near',action='store_true');args=parser.parse_args()
-    print(json.dumps(check(args.records,args.source,args.near),sort_keys=True))
+    parser.add_argument('--source');parser.add_argument('--near',action='store_true');parser.add_argument('--progress',action='store_true');args=parser.parse_args()
+    print(json.dumps(check(args.records,args.source,args.near,args.progress),sort_keys=True))

@@ -161,6 +161,22 @@ class ApRepository:
         return {'records':records,'nextCursor':last if last+1<total else None,'recordCount':total,'importId':import_id}
 
     @safe_backend
+    def records_members(self,workspace_id,import_id,ordinals):
+        self._workspace(workspace_id);require_uuid(import_id)
+        if type(ordinals) is not list or not 1<=len(ordinals)<=100 or len(set(ordinals))!=len(ordinals):raise ApStoreError()
+        for n in ordinals:integer(n,minimum=0,maximum=99999)
+        info=self.import_info(workspace_id,import_id);total=integer(info['record_count'],minimum=1,maximum=100000)
+        if info['state']!='ready' or any(n>=total for n in ordinals):raise ApStoreError()
+        rows=self._table('ap_bill_records').eq('import_id',import_id).in_('ordinal',ordinals).order('ordinal').limit(len(ordinals)).execute().data
+        if type(rows) is not list or len(rows)!=len(ordinals):raise ApStoreError()
+        found={}
+        for row in rows:
+            n=row['ordinal'];integer(n,minimum=0,maximum=total-1)
+            if n not in ordinals or n in found:raise ApStoreError()
+            found[n]={**validate_record(row['record']),'id':f'{import_id}:{n}'}
+        return dict(importId=import_id,recordCount=total,records=[found[n] for n in ordinals])
+
+    @safe_backend
     def statement(self,workspace_id,statement_id,revision=None):
         self._workspace(workspace_id); self._private_bucket(); require_uuid(statement_id)
         item=self._one(self._table('ap_statements').eq('id',statement_id))

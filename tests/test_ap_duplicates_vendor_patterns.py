@@ -5,12 +5,12 @@ from datetime import date, timedelta
 
 
 class VendorPatternTests(unittest.TestCase):
-    def store(self, rows):
+    def store(self, rows,*,hot_cache=False):
         from app.ap_shared.bills.duplicates.vendor_patterns import VendorPatterns
         db=sqlite3.connect(':memory:');self.addCleanup(db.close)
         db.execute('create table nodes(ordinal integer primary key,vendor text,ref text,shape text,day integer,amount integer,warning integer,n integer)')
         db.executemany('insert into nodes values(?,?,?,?,?,?,?,?)',[(i,*r) for i,r in enumerate(rows)])
-        return VendorPatterns(db)
+        return VendorPatterns(db,hot_cache=hot_cache)
 
     def history(self,n=20,day='2026-09-15',vendor='a',prefix='INV',amount=100):
         return [(vendor,f'{prefix}{i:05d}',prefix+'#####',date.fromisoformat(day).toordinal(),amount,0,1) for i in range(n)]
@@ -61,6 +61,18 @@ class VendorPatternTests(unittest.TestCase):
         p=self.profile(self.store([]),month='0001-01-01')
         self.assertFalse(p['established'])
         self.assertEqual(p['distinctReferences'],0)
+
+    def test_hot_profiles_are_bounded_and_never_override_scoped_context(self):
+        from types import SimpleNamespace
+        patterns=self.store(self.history(),hot_cache=True)
+        expected=self.profile(patterns)
+        for n in range(140):self.profile(patterns,vendor=f'other-{n}')
+        self.assertLessEqual(len(patterns.hot),128)
+        self.assertEqual(self.profile(patterns),expected)
+        patterns.context=SimpleNamespace(profile=lambda *_:dict(scoped=True))
+        self.assertEqual(self.profile(patterns),dict(scoped=True))
+        patterns.context=None
+        self.assertEqual(self.profile(patterns),expected)
 
     def test_recurrence_requires_both_thresholds_and_excludes_candidate_day(self):
         day=date(2026,10,1).toordinal()

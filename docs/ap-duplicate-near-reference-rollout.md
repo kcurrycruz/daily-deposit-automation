@@ -1,6 +1,6 @@
 # AP exact-reference exclusions and digit-typo rollout
 
-Status: local implementation is under release verification. No production migration, activation, merge, push or reboot has been performed for this change.
+Status: local implementation, independent-review fixes and local release checks are complete. Both numeric release sizes passed their original limits. No production migration, activation, merge, push or reboot has been performed for this change. See the [verification record](superpowers/verification/2026-10-30-ap-exact-reference-filter.md) for the exact evidence and remaining rollout gates.
 
 ## Approved behavior
 

@@ -118,7 +118,12 @@ class DuplicateSource:
                 raise DuplicateError('duplicate_invalid_source')
             output = [dict(ordinal=n, bill={**validate_record(json.loads(found[n])), 'id': f'{pin["importId"]}:{n}'}) for n in ordinals]
         else:
-            output = [self.read_page(pin, n - 1, 1, authorization)['records'][0] for n in ordinals]
+            page=self.base.records_members(self.base.config.workspace_id,pin['importId'],ordinals)
+            if page.get('importId')!=pin['importId'] or page.get('recordCount')!=pin['recordCount'] or type(page.get('records')) is not list or len(page['records'])!=len(ordinals):raise DuplicateError('duplicate_invalid_source')
+            output=[]
+            for n,raw in zip(ordinals,page['records']):
+                if raw.get('id')!=f'{pin["importId"]}:{n}':raise DuplicateError('duplicate_invalid_source')
+                output.append(dict(ordinal=n,bill=validate_record(raw)))
         self._check(pin, authorization)
         return output
 

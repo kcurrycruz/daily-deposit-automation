@@ -7,7 +7,7 @@ from .rules import classify
 
 class VendorCandidates:
     def __init__(self,scan):
-        self.scan=scan;self.db=scan.db;self.patterns=VendorPatterns(self.db)
+        self.scan=scan;self.db=scan.db;self.patterns=VendorPatterns(self.db,hot_cache=scan.compact)
         self.db.executescript('''
           create index node_vendor_compact on nodes(vendor,amount,compact,day,ordinal) where day is not null;
           create index node_cross_compact on nodes(compact,amount,day,ordinal) where day is not null;

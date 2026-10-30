@@ -16,17 +16,19 @@ class DuplicateScan:
     def __init__(self, connection, pin, monotonic):
         self.db, self.pin, self.clock = connection, validate_pin(pin), monotonic
         self.rule_version=rule_for_pin(self.pin)
+        self.compact=has_digit_typos(self.rule_version)
         self.mapping=None
         self.read = self.eligible = self.probes = 0
         self.input_done = self.done = False
         self.after = -1
         self.current = self.pending = None
-        self.db.executescript('''
+        node_keys='ident blob unique,ordinal integer primary key' if self.compact else 'ident text primary key,ordinal integer unique'
+        self.db.executescript(f'''
           pragma cache_size=-8192; pragma temp_store=FILE;
           pragma journal_mode=MEMORY; pragma synchronous=OFF;
           create table scan_records(ordinal integer primary key,ident text,fp text,warn text,raw_ref text);
           create index scan_identity on scan_records(ident,ordinal);
-          create table nodes(ident text primary key,ordinal integer unique,n integer,
+          create table nodes({node_keys},n integer,
             vendor text,ref text,amount integer,currency text,stem text,day integer,warning integer,preview text,compact text,shape text);
           create index node_ref on nodes(vendor,ref,ordinal);
           create index node_stem on nodes(vendor,amount,stem,ordinal);
@@ -69,6 +71,7 @@ class DuplicateScan:
                 continue
             self.eligible += 1
             ident = canonical_hash(normalized_identity(value)); fp = bill_fingerprint(value)
+            if self.compact:ident=bytes.fromhex(ident);fp=bytes.fromhex(fp)
             issues = identity_warnings(value); warn = canonical_hash(issues) if issues else ''
             vk, ref = vendor_key(value['vendor']), invoice_key(value['invoiceNumber'])
             stem = re.fullmatch(r'([0-9]{4,})[A-Z]?', ref)
@@ -113,12 +116,11 @@ class DuplicateScan:
                     if ref[i] != ref[i + 1] and ref[i] in '0123456789' and ref[i + 1] in '0123456789':
                         variants.add(ref[:i] + ref[i + 1] + ref[i] + ref[i + 2:])
             modes.extend(('swap', ref) for ref in sorted(variants))
-            if has_digit_typos(self.rule_version) and len(node['ref'])>=4:
-                batch=[]
-                for ref in digit_variants(node['ref']):
-                    batch.append(ref)
-                    if len(batch)==100:modes.append(('digit',tuple(batch)));batch=[]
-                if batch:modes.append(('digit',tuple(batch)))
+            if self.compact:
+                variants={compact_reference(ref) for ref in variants}
+                if len(node['ref'])>=4:variants.update(digit_variants(node['compact']))
+                keys=tuple(sorted(variants))
+                modes=[('lookup',(keys[at:at+100],at==0)) for at in range(0,max(len(keys),1),100)]
         self.current = dict(node=node, modes=modes, mode=0, after=node['ordinal'])
         if node['n'] > 1:
             evidence = classify(json.loads(node['preview']), json.loads(node['preview']),rule_version=self.rule_version)
@@ -128,13 +130,21 @@ class DuplicateScan:
         cur = self.current; node = cur['node']
         while cur['mode'] < len(cur['modes']):
             mode, key = cur['modes'][cur['mode']]
-            if mode == 'stem':
+            if mode=='lookup':
+                references,first=key;branches=[];params=[]
+                def add(query,values):
+                    branches.append('select ordinal from ('+query+' order by ordinal limit 1)');params.extend(values)
+                if first:
+                    add('select ordinal from nodes indexed by node_ref where vendor=? and ref=? and ordinal>?',(node['vendor'],node['ref'],cur['after']))
+                    if node['stem']:
+                        add('select ordinal from nodes indexed by node_stem where vendor=? and amount=? and stem=? and ordinal>? and ref<>? and day between ? and ?',(node['vendor'],node['amount'],node['stem'],cur['after'],node['ref'],node['day']-30,node['day']+30))
+                if references:add('select ordinal from nodes indexed by node_vendor_compact where vendor=? and amount=? and compact in ('+','.join('?' for _ in references)+') and day=? and ordinal>?',(node['vendor'],node['amount'],*references,node['day'],cur['after']))
+                # Each indexed branch contributes at most its next candidate.
+                sql='select * from nodes where ordinal=(select min(ordinal) from ('+' union all '.join(branches)+'))'
+            elif mode == 'stem':
                 sql = '''select * from nodes indexed by node_stem where vendor=? and amount=? and stem=?
                          and ordinal>? and ref<>? and day between ? and ? order by ordinal limit 1'''
                 params = (node['vendor'], node['amount'], key, cur['after'], node['ref'], node['day'] - 30, node['day'] + 30)
-            elif mode=='digit':
-                sql='select * from nodes indexed by node_ref where vendor=? and ref in ('+','.join('?' for _ in key)+') and amount=? and day=? and ordinal>? order by ordinal limit 1'
-                params=(node['vendor'],*key,node['amount'],node['day'],cur['after'])
             elif mode == 'swap':
                 sql = '''select * from nodes indexed by node_ref where vendor=? and ref=?
                          and amount=? and day=? and ordinal>? order by ordinal limit 1'''
@@ -187,10 +197,11 @@ class DuplicateScan:
             if p['phase'] in ('fps', 'warnings'):
                 if not p['first']:
                     p['hasher'].update(b',')
-                p['hasher'].update(encoded(list(row) if p['phase'] == 'fps' else row[0]).encode())
+                value=[row[0].hex() if isinstance(row[0],bytes) else row[0],row[1]] if p['phase']=='fps' else row[0]
+                p['hasher'].update(encoded(value).encode())
                 p['first'] = False
             else:
-                self.db.execute('insert into members values(?,?,?)', (p['id'], row[0], row[1]))
+                self.db.execute('insert into members values(?,?,?)', (p['id'], row[0], row[1].hex() if isinstance(row[1],bytes) else row[1]))
             return
         if p['phase'] == 'fps':
             p['hasher'].update(('],' + encoded(p['evidence']['classification']) + ',[').encode())

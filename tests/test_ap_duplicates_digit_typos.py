@@ -61,4 +61,57 @@ class DigitTypoTests(unittest.TestCase):
     self.assertEqual(engine.finish()['findingCount'],1)
     self.assertEqual(db.execute('select source_ordinal from source_map order by ordinal').fetchall(),[(0,),(1,)])
     self.assertIn('single_digit_substitution',json.loads(db.execute('select reasons from findings').fetchone()[0]))
+    from app.ap_shared.bills.duplicates.artifacts import DuplicateArtifactWriter,DuplicateArtifactCache
+    backup=sqlite3.connect(Path(folder)/'scan.sqlite');db.backup(backup);backup.close()
+    writer=DuplicateArtifactWriter(Path(folder)/'scan.sqlite',Path(folder)/'scope.gz')
+    try:
+     while not writer.step()['done']:pass
+     info=writer.info
+    finally:writer.close()
+    manifest={**info,'key':f'{f.W}/bill-duplicates/v3/{pin["importId"]}/bill-duplicates-v6/{info["hash"]}.sqlite.gz'}
+    cache=DuplicateArtifactCache(None)
+    try:
+     checked=cache._open(Path(folder)/'scope.sqlite',manifest)
+     try:self.assertTrue(all(isinstance(fp,str) and len(fp)==64 for fp, in checked.execute('select fp from members')))
+     finally:checked.close()
+    finally:cache.close()
    finally:db.close();context_db.close()
+
+ def test_numeric_lookup_work_grows_linearly_with_input(self):
+  class WorkConnection(sqlite3.Connection):
+   work=0
+   def set_progress_handler(self,callback,count):
+    if callback is None:return super().set_progress_handler(None,0)
+    def measured():self.work+=100;return callback()
+    return super().set_progress_handler(measured,100)
+  def measure(size):
+   db=sqlite3.connect(':memory:',factory=WorkConnection);self.addCleanup(db.close)
+   rows=[bill(f'INV{n:08}',amount=10000+n%17,vendor=f'Synthetic {n%64:02}') for n in range(size)]
+   e=DuplicateScan(db,{**PIN,'recordCount':len(rows),'ruleVersion':'bill-duplicates-v5'},time.monotonic)
+   e.ingest([dict(ordinal=n,bill=r) for n,r in enumerate(rows)]);e.finish_input()
+   while not e.step(time.monotonic()+5)['done']:pass
+   self.assertEqual(e.finish()['findingCount'],0);return db.work
+  small=measure(1000);large=measure(2000)
+  self.assertLess(large,small*2.3)
+ def test_numeric_candidate_queries_are_batched_and_reuse_verified_profiles(self):
+  class Counted(sqlite3.Connection):
+   calls=0
+   def execute(self,*args,**kw):self.calls+=1;return super().execute(*args,**kw)
+  db=sqlite3.connect(':memory:',factory=Counted);self.addCleanup(db.close)
+  rows=[bill(f'INV{n:08}',amount=10000+n%17,vendor=f'Synthetic {n%64:02}') for n in range(1000)]
+  e=DuplicateScan(db,{**PIN,'recordCount':len(rows),'ruleVersion':'bill-duplicates-v5'},time.monotonic)
+  e.ingest([dict(ordinal=n,bill=r) for n,r in enumerate(rows)]);e.finish_input();db.calls=0
+  while not e.step(time.monotonic()+5)['done']:pass
+  self.assertEqual(e.finish()['findingCount'],0);self.assertLess(db.calls,4500)
+ def test_batched_candidates_keep_all_existing_and_new_pair_rules(self):
+  rows=[bill('261398'),bill('261399'),bill('261389'),bill('261398X'),bill('261398',amount=222),bill('261398',invoice_date='2026-05-02'),bill('261398',invoice_date=''),bill('261398',currency='EUR'),bill('26-1398'),bill('26-1399')]
+  expected={tuple([a,b]) for a in range(len(rows)) for b in range(a+1,len(rows)) if classify(rows[a],rows[b],rule_version='bill-duplicates-v5') is not None}
+  db,_=self.scan(rows)
+  actual={tuple(n for n, in db.execute('select ordinal from members where finding_id=? order by ordinal',(ident,))) for ident, in db.execute('select id from findings')}
+  self.assertEqual(actual,expected)
+ def test_finding_key_keeps_full_fingerprints_and_unrelated_refs_do_not_match(self):
+  from app.ap_shared.bills.duplicates.rules import bill_fingerprint,finding_key
+  rows=[bill('261398'),bill('261399'),bill('UNRELATED'),bill('OTHER')]
+  db,summary=self.scan(rows);self.assertEqual(summary['findingCount'],1)
+  expected=finding_key([[bill_fingerprint(r),1] for r in rows[:2]],'possible_duplicate',[],rule_version='bill-duplicates-v5')
+  self.assertEqual(db.execute('select key from findings').fetchone()[0],expected)

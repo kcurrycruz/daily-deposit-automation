@@ -24,7 +24,9 @@ class SourceTests(unittest.TestCase):
                     db.execute('select ordinal,record from bill_records where ordinal>? order by ordinal limit ?', (after, limit))]
             last = after + len(page)
             return dict(records=page, recordCount=3, importId=import_id, nextCursor=last if last < 2 else None)
-        base = SimpleNamespace(records_page=records, config=SimpleNamespace(workspace_id=PIN['importId']))
+        def members(workspace,ident,ordinals):
+            return dict(importId=ident,recordCount=3,records=[{**json.loads(db.execute('select record from bill_records where ordinal=?',(n,)).fetchone()[0]),'id':f'{ident}:{n}'} for n in ordinals])
+        base = SimpleNamespace(records_members=members,records_page=records, config=SimpleNamespace(workspace_id=PIN['importId']))
         repo = SimpleNamespace(current=lambda: current, source=lambda _: source)
         ops = SimpleNamespace(_check=lambda _: None, repository=repo, _index=index)
         return DuplicateSource(base, ops), current, db, base

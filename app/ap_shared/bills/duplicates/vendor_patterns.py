@@ -1,5 +1,6 @@
 """Bounded historical vendor profiles. A format supports a warning, never a verdict."""
 from datetime import date
+from collections import OrderedDict
 import json
 import re
 from .contracts import encoded, DuplicateError
@@ -71,8 +72,9 @@ def reference_variants(reference,shapes):
 
 
 class VendorPatterns:
-    def __init__(self,db):
+    def __init__(self,db,*,hot_cache=False):
         self.db=db;self.job=None;self.recurring=None;self.context=None
+        self.hot=OrderedDict() if hot_cache else None
         db.executescript('''
           create index if not exists node_vendor_day on nodes(vendor,day,ordinal) where day is not null;
           create index if not exists node_vendor_amount_day on nodes(vendor,amount,day,ordinal) where day is not null;
@@ -85,8 +87,11 @@ class VendorPatterns:
 
     def advance(self,vendor,cutoff):
         if self.context is not None:return self.context.profile(vendor,cutoff)
+        key=(vendor,cutoff)
+        if self.hot is not None and key in self.hot:
+            self.hot.move_to_end(key);return self.hot[key]
         cached=self.db.execute('select value from vendor_pattern_cache where vendor=? and month=?',(vendor,cutoff)).fetchone()
-        if cached:return json.loads(cached[0])
+        if cached:return self._remember(key,json.loads(cached[0]))
         if month_start(cutoff)!=cutoff:raise DuplicateError('duplicate_invalid_source')
         if self.job is None:
             self.db.execute('delete from vendor_pattern_refs');self.db.execute('delete from vendor_pattern_shapes')
@@ -114,6 +119,12 @@ class VendorPatterns:
                      established=job['n']>=20 and sum(n for _,n in top)*10>=job['n']*9)
         self.db.execute('insert into vendor_pattern_cache values(?,?,?)',(vendor,cutoff,encoded(profile)))
         self.job=None
+        return self._remember(key,profile)
+
+    def _remember(self,key,profile):
+        if self.hot is not None:
+            self.hot[key]=profile;self.hot.move_to_end(key)
+            if len(self.hot)>128:self.hot.popitem(last=False)
         return profile
 
     def recurrence(self,vendor,amount,day):

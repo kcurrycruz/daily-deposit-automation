@@ -97,6 +97,28 @@ export function createComparisonSource(client,{onChange=()=>{},wait=ms=>new Prom
       throw error;
     });current.promise=promise;return promise;
   }
+  function retainReviewed(doc,mappings,rows){
+    check();const info=activeInfo,scope=provider.scopes[doc.id];
+    if(!info?.workingSet||!scope?.complete||scope.importId!==info.id||scope.workingSet?.workingSetId!==info.workingSet.workingSetId||scope.inputKey!==comparisonInputKey(doc,mappings))throw fail();
+    const current=new Map(groupInvoices(doc).map(row=>[row.id,row])),merged=new Map((scope.archivedRecords||[]).map(record=>[record.id,record]));
+    const active=new Set(scope.records.map(record=>record.id)),retained=new Set(scope.retainedReviewIds||[]),archived=new Set(scope.archivedIds||[]);
+    for(const previous of rows){
+      const row=current.get(previous.id);
+      if(!row||['invoiceNumber','kind','originalAmount','outstanding'].some(key=>row[key]!==previous[key]))continue;
+      for(const record of previous.candidates||[]){
+        const raw=typeof record.id==='string'&&record.id.startsWith(info.id+':')?record.id.slice(info.id.length+1):'';
+        if(!/^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw))||Number(raw)>=info.record_count)throw fail();
+        if(active.has(record.id))continue;
+        merged.set(record.id,record);retained.add(record.id);archived.add(record.id);
+      }
+    }
+    // These candidates came from the authoritative saved revision in this same
+    // immutable export. Do not pretend a complete archive lookup just ran.
+    scope.archivedRecords=[...merged.values()];scope.archivedIds=[...archived];scope.retainedReviewIds=[...retained];
+    const directory=new Map(scope.vendorDirectory.map(item=>[vendorKey(item.vendor),item]));
+    for(const record of merged.values())if(vendorKey(record.vendor))directory.set(vendorKey(record.vendor),{vendor:record.vendor});
+    scope.vendorDirectory=[...directory.values()];notify();return scope;
+  }
   async function lookupArchived(doc,mappings,reference,kind='invoice'){
     check();const info=activeInfo;if(!info?.workingSet)throw fail();
     const scope=await ensure(doc,mappings);check();
@@ -123,5 +145,5 @@ export function createComparisonSource(client,{onChange=()=>{},wait=ms=>new Prom
     const merged=new Map((scope.archivedRecords||[]).map(r=>[r.id,r]));for(const [id,record] of found)merged.set(id,record);
     scope.vendorDirectory=archiveDirectory.vendors;scope.archivedRecords=[...merged.values()];scope.archivedIds=[...new Set([...(scope.archivedIds||[]),...archived])];notify();return scope;
   }
-  return {loadDirectory,ensure,invalidate,lookupArchived,get provider(){return provider;},dispose(){disposed=true;latest.clear();directories.clear();for(const item of queue.splice(0))item.reject(Error('AP is locked.'));provider.scopes={};}};
+  return {loadDirectory,ensure,invalidate,retainReviewed,lookupArchived,get provider(){return provider;},dispose(){disposed=true;latest.clear();directories.clear();for(const item of queue.splice(0))item.reject(Error('AP is locked.'));provider.scopes={};}};
 }

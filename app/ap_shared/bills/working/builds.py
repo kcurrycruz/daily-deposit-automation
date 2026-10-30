@@ -10,7 +10,7 @@ from ..archive import IndexArchiveWriter
 from ..contracts import MAX_INDEX_BYTES, SnapshotError
 from ..normalization import vendor_key, invoice_key
 from ..parser import encoded
-from ..duplicates.scan import DuplicateScan
+from .history import TrainingHistory
 from ..duplicates.rules import eligible, invoice_day, bill_fingerprint
 from .context import context_keys, HistoryContext
 from .contracts import FORMAT, TRAINING_VERSION, validate_source, working_digest, MappingDigest
@@ -57,10 +57,8 @@ class WorkingBuilder:
             self.context_db = _create(self.context_path, CONTEXT_SCHEMA)
             self.context_db.executescript('create table wanted_profiles(vendor text,month integer,primary key(vendor,month));create table wanted_recurrences(vendor text,amount integer,day integer,primary key(vendor,amount,day));')
             self.history_db = sqlite3.connect(Path(self.scratch.name)/'history.sqlite', check_same_thread=False)
-            pin = dict(importId=source['importId'], importVersion=0, sourceDigest=source['sourceDigest'],
-                       storageFormat='snapshot-v2', recordCount=source['recordCount'])
-            self.history = DuplicateScan(self.history_db, pin, monotonic)
-            self.patterns = self.history.vendor_candidates.patterns
+            self.history=TrainingHistory(self.history_db,source['recordCount'],monotonic)
+            self.patterns=self.history.patterns
         except Exception:
             self.close(); raise
 

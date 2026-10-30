@@ -33,7 +33,7 @@ export function createBillRangeUI({client,shared,hasUnsaved=()=>false,onProgress
   async function cancel(){
    if(job?.job_id)await client.request('bill_range_cancel',{job_id:job.job_id},{requestId:crypto.randomUUID()});
    if(uploaded?.job_id)await client.request('bill_cancel',{job_id:uploaded.job_id},{requestId:crypto.randomUUID()}).catch(()=>{});
-   return {cancelled:true};
+   progress({stage:'cancelled'});return {cancelled:true};
   }
   async function execute(){
    guard();if(active&&active!==controller)throw Error('A BILL range update is already in progress.');active=controller;

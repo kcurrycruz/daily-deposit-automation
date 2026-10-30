@@ -23,9 +23,9 @@ class FrozenDuplicateEvidence:
         self.root=tempfile.TemporaryDirectory(prefix='hwfc-saved-duplicate-evidence-')
         self.entries=OrderedDict();self.lock=threading.RLock()
 
-    def __call__(self,review,auth,bill_ops=None):
+    def __call__(self,review,auth,bill_ops=None,*,deadline=None,after=-1):
         ops=bill_ops or self.bill_ops
-        ops._check(auth);deadline=time.monotonic()+5
+        ops._check(auth);deadline=min(time.monotonic()+5,deadline if deadline is not None else float('inf'))
         scan=self.repo.scan(require_uuid(review['scan_id']))
         mf=validate_manifest(scan['manifest'],historical=True)
         if (scan['state']!='ready' or scan['workspace_id']!=self.repo.config.workspace_id or
@@ -57,8 +57,10 @@ class FrozenDuplicateEvidence:
                 if pin['importId']!=mf['importId'] or pin['sourceDigest']!=mf['sourceDigest'] or pin['recordCount']!=mf['recordCount']:raise SnapshotError('bill_incomplete')
                 row=result.execute('select id,member_count from findings where key=?',(review['key'],)).fetchone()
                 if row is None or not 2<=row[1]<=500000:raise SnapshotError('bill_incomplete')
-                selected=result.execute('select ordinal,fp from members where finding_id=? order by ordinal',(row[0],)).fetchall()
-                if len(selected)!=row[1] or len({n for n,_ in selected})!=row[1]:raise SnapshotError('bill_incomplete')
+                if result.execute('select count(*) from members where finding_id=?',(row[0],)).fetchone()[0]!=row[1]:raise SnapshotError('bill_incomplete')
+                selected=result.execute('select ordinal,fp from members where finding_id=? and ordinal>? order by ordinal limit 251',(row[0],after)).fetchall()
+                more=len(selected)>250;selected=selected[:250]
+                if not selected:raise SnapshotError('bill_incomplete')
                 mapped=[]
                 for n,fp in selected:
                     if type(n) is not int or not 0<=n<mf['recordCount']:raise SnapshotError('bill_incomplete')
@@ -85,7 +87,7 @@ class FrozenDuplicateEvidence:
                     bill=validate_record(json.loads(raw[0]))
                     if bill_fingerprint(bill)!=fp:raise SnapshotError('bill_incomplete')
                     output.append(dict(ordinal=n,sourceOrdinal=original,bill={**bill,'id':f'{mf["importId"]}:{original}'}))
-            ops._check(auth);return dict(memberCount=row[1],members=output)
+            ops._check(auth);return dict(memberCount=row[1],members=output,nextCursor=output[-1]['ordinal'] if more else None)
 
     def close(self):
         with self.lock:

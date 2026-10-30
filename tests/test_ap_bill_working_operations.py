@@ -149,6 +149,17 @@ class WorkingOperationsTests(unittest.TestCase):
         self.assertEqual(first['workingSet']['workingDigest'],second['workingSet']['workingDigest'])
         self.assertEqual(self.source_reads,reads)
 
+    def test_recent_followup_reuses_active_index_and_historical_context(self):
+        from unittest.mock import patch
+        job=self.begin();self.prepare(job);first=self.activate(job)
+        self.protected._candidate(self.rows[1]);self.repo._home['bill_protection_epoch']+=1
+        refresh=self.begin(refresh=True)
+        with patch('app.ap_shared.bills.working.registry.WorkingBuilder',side_effect=AssertionError('Recent follow-up rebuilt the complete export')):
+            self.prepare(refresh)
+        result=self.activate(refresh)
+        self.assertEqual(result['workingSet']['workingDigest'],first['workingSet']['workingDigest'])
+        self.assertTrue(result['protectionsCurrent'])
+
     def test_protection_refresh_keeps_acknowledged_cutoff_and_retains_new_followup(self):
         job=self.begin();self.prepare(job);first=self.activate(job)
         self.now[0]=datetime(2026,11,1,16,tzinfo=timezone.utc)

@@ -56,10 +56,13 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
     const detail=state.details.get(doc.id);
     if(detail?.completed||detail?.readOnly)return null;
     const info=state.activeImport;
+    if(detail&&!preservedReviews.has(doc.id)&&detail.importId===state.importId&&detail.importInfo?.workingSet&&info?.workingSet&&JSON.stringify(detail.importInfo.workingSet.policy)===JSON.stringify(info.workingSet.policy)&&JSON.stringify(detail.mappingSnapshot||{})===JSON.stringify(state.mappings)&&Array.isArray(detail.results)&&detail.results.length){
+      rememberReviews(doc,detail.results);
+    }
     if(detail&&(detail.importId!==state.importId||detail.workingSetId!==(info?.workingSet?.workingSetId??undefined)&&!(detail.workingSetId==null&&!info?.workingSet))){
       detail.importId=state.importId;detail.importInfo=info;detail.importLabel=info?.metadata?.label||'';detail.workingSetId=info?.workingSet?.workingSetId||null;
       // Keep human notes, but decisions against superseded evidence need review.
-      for(const row of groupInvoices(doc))if(state.resolutions[row.id]&&!preservedReviews.has(doc.id))state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
+      for(const row of groupInvoices(doc))if(state.resolutions[row.id]&&!preservedReviews.get(doc.id)?.has(row.id))state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
       comparison.invalidate(doc.id);
     }
     const result=await inForeground(()=>comparison.ensure(doc,state.mappings,{importInfo:info}));check();
@@ -67,6 +70,8 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
     if(info&&(!scope?.complete||scope.importId!==info.id||scope.workingSet?.workingSetId!==info.workingSet?.workingSetId||scope.inputKey!==comparisonInputKey(doc,state.mappings)))throw Error('The BILL comparison changed or is unavailable. Retry before saving.');
     const saved=preservedReviews.get(doc.id);
     if(saved){
+      const retained=[...saved.values()].filter(before=>before.retained&&before.review===JSON.stringify(state.resolutions[before.retained.id])).map(before=>before.retained);
+      if(retained.length)comparison.retainReviewed(doc,state.mappings,retained);
       for(const row of comparisonSnapshot(doc,state.provider,state.mappings)){
         const before=saved.get(row.id);
         if(before&&before.evidence!==evidenceKey(row)&&before.review===JSON.stringify(state.resolutions[row.id])&&state.resolutions[row.id])state.resolutions[row.id]={note:state.resolutions[row.id].note||''};
@@ -120,7 +125,10 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
       throw error;
     }
   }
-  const evidenceKey=row=>JSON.stringify(fields(row,'invoiceNumber kind originalAmount outstanding status candidates matchMethod referenceRule coverage'));
+  const evidenceKey=row=>JSON.stringify(fields(row,'invoiceNumber kind originalAmount outstanding status candidates matchMethod referenceRule'));
+  function rememberReviews(doc,rows){
+    preservedReviews.set(doc.id,new Map(rows.map(row=>[row.id,{evidence:evidenceKey(row),review:JSON.stringify(state.resolutions[row.id]),...(state.resolutions[row.id]?.decision==='Reviewed — no action needed'&&row.candidates?.length?{retained:clone(row)}:{})}])));
+  }
   async function adoptImport(result,{preserveCompatible=false}={}){
     check();const token=++adoption;
     const current=await freshCurrent(await client.request('bill_current',currentPayload()));check();
@@ -130,9 +138,11 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
     try{const provider=await pending.loadDirectory(info);check();
       const verified=await client.request('bill_current',currentPayload());check();
       if(token!==adoption||verified.importVersion!==current.importVersion||verified.importId!==current.importId||(verified.workingVersion??0)!==(current.workingVersion??0)||verified.workingSet?.workingSetId!==current.workingSet?.workingSetId)throw Error('The BILL data changed in a newer update. Retry loading current data.');
-      if(preserveCompatible)for(const doc of state.statements){
+      const compatible=preserveCompatible&&info?.id===state.importId&&JSON.stringify(info?.workingSet?.policy)===JSON.stringify(state.activeImport?.workingSet?.policy);
+      if(!compatible)preservedReviews.clear();
+      if(compatible)for(const doc of state.statements){
         const rows=comparisonSnapshot(doc,state.provider,state.mappings);
-        preservedReviews.set(doc.id,new Map(rows.map(row=>[row.id,{evidence:evidenceKey(row),review:JSON.stringify(state.resolutions[row.id])}])));
+        rememberReviews(doc,rows);
       }
       // Do not display previous source scopes while new comparisons are loading.
       provider.scopes={};

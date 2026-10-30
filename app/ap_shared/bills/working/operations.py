@@ -11,6 +11,7 @@ from .repository import WorkingRepository
 from .protections import ProtectionRepository
 from .policy import make_policy
 from .contracts import validate_working_manifest,working_digest
+from .effective_protections import EffectiveProtections
 
 _runtimes={}
 _lock=threading.RLock()
@@ -31,8 +32,9 @@ def create_working_operations(base,bill_ops,config,clock,revalidate,duplicate_me
             if not hasattr(registry,'saved_duplicate_evidence'):
                 registry.saved_duplicate_evidence=FrozenDuplicateEvidence(DuplicateRepository(base),source_prepared=registry.source_prepared)
                 atexit.register(registry.saved_duplicate_evidence.close)
-            duplicate_members_reader=lambda review,auth:registry.saved_duplicate_evidence(review,auth,bill_ops)
-    protections=ProtectionRepository(base,bill_ops._check,duplicate_members_reader)
+            duplicate_members_reader=lambda review,auth,**kwargs:registry.saved_duplicate_evidence(review,auth,bill_ops,**kwargs)
+    if not hasattr(registry,'protection_inputs'):registry.protection_inputs={}
+    protections=ProtectionRepository(base,bill_ops._check,duplicate_members_reader,state=registry.protection_inputs)
     return WorkingOperations(repository,bill_ops,clock,protections,registry,cache)
 
 
@@ -40,6 +42,7 @@ class WorkingOperations:
     def __init__(self,repository,bill_operations,clock,protections,registry,cache):
         self.repository,self.bill_ops,self.clock=repository,bill_operations,clock
         self.protections,self.registry,self.cache=protections,registry,cache
+        if not hasattr(registry,'effective_protections'):registry.effective_protections=EffectiveProtections(registry.source_prepared)
 
     def _check(self,auth):self.bill_ops._check(auth)
 
@@ -67,6 +70,14 @@ class WorkingOperations:
                     importVersion=home['import_version'],workingVersion=home.get('working_set_version',0),workingSet=working,
                     protectionsCurrent=not working or home.get('working_protection_epoch')==home.get('bill_protection_epoch'))
 
+    def _protection_snapshot(self,source_id,policy,auth):
+        # Both input collection and indexed retention lookup share this budget.
+        deadline=time.monotonic()+5
+        if isinstance(self.protections,ProtectionRepository):snapshot=self.protections.snapshot(source_id,auth,deadline=deadline)
+        else:snapshot=self.protections.snapshot(source_id,auth)
+        source=self.repository.source(source_id)
+        return self.registry.effective_protections.derive(snapshot,source,policy,self.bill_ops,auth,deadline)
+
     def _prepared(self,job,auth):
         self._check(auth);manifest=self.repository.working_set(job['working_set_id'])['manifest']
         return dict(job_id=job['id'],state='prepared',generation=job['generation'],checkpoint=job['checkpoint'],policy=job['policy'],manifest=manifest)
@@ -88,7 +99,7 @@ class WorkingOperations:
             if not current['workingSet'] or current['importId']!=data['source_import_id'] or current['workingSet']['policy']['mode']!=data['mode']:
                 raise SnapshotError('bill_conflict')
             policy=current['workingSet']['policy']
-        snapshot=dict(epoch=previous['protection_epoch'],digest=previous['protection_digest']) if previous else self.protections.snapshot(data['source_import_id'],auth)
+        snapshot=dict(epoch=previous['protection_epoch'],digest=previous['protection_digest']) if previous else self._protection_snapshot(data['source_import_id'],policy,auth)
         result=self._rpc('begin',dict(job_id=ident,source_import_id=data['source_import_id'],
             expected_import_version=data['expected_import_version'],expected_working_version=data['expected_working_version'],
             protection_epoch=snapshot['epoch'],protection_digest=snapshot['digest'],policy=policy,
@@ -113,7 +124,7 @@ class WorkingOperations:
         except SnapshotError:
             if job['checkpoint']!=0:
                 return dict(job_id=job['id'],state='restart_required',generation=job['generation'],checkpoint=job['checkpoint'],policy=job['policy'])
-            snapshot=self.protections.snapshot(job['source_import_id'],auth)
+            snapshot=self._protection_snapshot(job['source_import_id'],job['policy'],auth)
             if snapshot['epoch']!=job['protection_epoch'] or snapshot['digest']!=job['protection_digest']:
                 raise SnapshotError('bill_conflict')
             source=self.repository.source(job['source_import_id'])

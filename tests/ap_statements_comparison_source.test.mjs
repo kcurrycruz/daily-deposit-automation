@@ -58,3 +58,16 @@ test('BILL summary and vendor confirmation use the directory rather than the can
  await confirmVendor(statement,'Other',{state:{provider}},async()=>{saved=true;});
  assert.equal(saved,true);assert.equal(statement.vendor,'Other');
 });
+
+
+test('retained reviewed evidence is bound to the immutable import and unchanged statement row',async()=>{
+ const {source,digest}=await fixture({bill_candidates_page:()=>({importId,workingSetId:'working',workingDigest:'b'.repeat(64),queryDigest:'a'.repeat(64),total:0,afterOrdinal:-1,records:[],nextCursor:null}),bill_vendors_page:async()=>({importId,workingSetId:'working',workingDigest:'b'.repeat(64),vendors,total:2,nextCursor:null,vendorDigest:await hash(vendors)})});
+ const scoped={...info,workingSet:{workingSetId:'working',workingDigest:'b'.repeat(64),vendorDigest:digest,activeCount:0,policy:{mode:'last_12_months',cutoffDate:'2025-10-30'}}};
+ const provider=await source.loadDirectory(scoped),statement=doc();await source.ensure(statement,{});
+ const prior={...reconcile(statement,provider,{})[0],candidates:records};
+ assert.throws(()=>source.retainReviewed(statement,{},[{...prior,candidates:[{...records[0],id:'foreign:0'}]}]),/incomplete|unavailable/);
+ source.retainReviewed(statement,{},[{...prior,originalAmount:1}]);assert.equal(reconcile(statement,provider,{})[0].status,'range');
+ source.retainReviewed(statement,{},[prior]);const found=reconcile(statement,provider,{})[0];assert.equal(found.status,'presence');assert.equal(found.coverage,'archived');assert.equal(found.priorReviewEvidence,true);
+ statement.rows[0].invoiceNumber='EDITED';assert.throws(()=>source.retainReviewed(statement,{},[prior]),/incomplete|unavailable/);assert.equal(reconcile(statement,provider,{})[0].status,'unverified');
+ source.dispose();
+});

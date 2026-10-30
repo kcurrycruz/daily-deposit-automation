@@ -1,5 +1,8 @@
 """Semantic protections derived only from authoritative current saved evidence."""
 import re
+from collections import OrderedDict
+import threading
+import time
 from ...models import DECISIONS, validate_record, require_uuid, integer
 from ..contracts import canonical_hash, MAX_RECORDS, SnapshotError
 from ..normalization import vendor_key, invoice_key
@@ -125,59 +128,97 @@ class ProtectionSet:
 
 
 class ProtectionRepository:
-    def __init__(self, base, authorize, duplicate_members_reader=None):
-        self.base, self.authorize = base, authorize
-        self.duplicate_members_reader = duplicate_members_reader
+    """Resume private evidence collection; reuse immutable revision derivations."""
+    def __init__(self, base, authorize, duplicate_members_reader=None,*,state=None,monotonic=time.monotonic):
+        self.base,self.authorize,self.duplicate_members_reader=base,authorize,duplicate_members_reader
+        self.state=state if state is not None else {};self.clock=monotonic
+        self.lock=self.state.setdefault('lock',threading.RLock())
+        self.entries=self.state.setdefault('entries',OrderedDict())
+        self.revisions=self.state.setdefault('revisions',OrderedDict())
 
-    def _epoch(self, auth):
-        self.authorize(auth); self.base._private_bucket()
-        home = self.base._one(self.base.client.table('ap_workspaces').select('bill_protection_epoch').eq('id', self.base.config.workspace_id))
-        return integer(home['bill_protection_epoch'], minimum=0)
+    def _epoch(self,auth):
+        self.authorize(auth);self.base._private_bucket()
+        home=self.base._one(self.base.client.table('ap_workspaces').select('bill_protection_epoch').eq('id',self.base.config.workspace_id))
+        return integer(home['bill_protection_epoch'],minimum=0)
 
-    def _pages(self, table, key, auth):
-        after = None; count = 0
-        while True:
-            self.authorize(auth); self.base._private_bucket()
-            query = self.base._table(table).order(key).limit(500)
-            if after is not None:
-                query = query.gt(key, after)
-            rows = query.execute().data
-            if type(rows) is not list or len(rows) > 500:
-                raise SnapshotError('bill_incomplete')
-            for row in rows:
-                value = row.get(key)
-                if type(value) is not str or (after is not None and value <= after):
-                    raise SnapshotError('bill_incomplete')
-                after = value; count += 1
-                if count > MAX_RECORDS:
-                    raise SnapshotError('bill_limit')
-                yield row
-            if len(rows) < 500:
-                return
+    def _peek(self,entry,table,key,auth):
+        if entry['pending']:return entry['pending'][0]
+        if entry['ended']:return None
+        self.authorize(auth);self.base._private_bucket()
+        query=self.base._table(table).order(key).limit(500)
+        if entry['after'] is not None:query=query.gt(key,entry['after'])
+        rows=query.execute().data;entry['requests']+=1
+        if type(rows) is not list or len(rows)>500:raise SnapshotError('bill_incomplete')
+        previous=entry['after']
+        for row in rows:
+            value=row.get(key)
+            if type(value) is not str or previous is not None and value<=previous:raise SnapshotError('bill_incomplete')
+            previous=value
+        entry['pending']=rows;entry['ended']=len(rows)<500
+        return rows[0] if rows else None
 
-    def snapshot(self, source_import_id: str, auth) -> dict:
-        require_uuid(source_import_id)
-        before = self._epoch(auth)
-        source = self.base.import_info(self.base.config.workspace_id, source_import_id)
-        if source['state'] != 'ready':
-            raise SnapshotError('bill_incomplete')
-        mappings = {r['vendor']: r['bill_vendor'] for r in self._pages('ap_vendor_mappings', 'vendor', auth)}
-        protections = ProtectionSet()
-        for statement in self._pages('ap_statements', 'id', auth):
-            self.authorize(auth)
-            revision = self.base._one(self.base._table('ap_statement_revisions').eq('id', require_uuid(statement['current_revision_id'])))
-            if revision['statement_id'] != statement['id']:
-                raise SnapshotError('bill_incomplete')
-            protections.add_statement(statement, revision, mappings)
-        for review in self._pages('ap_duplicate_reviews', 'key', auth):
-            if review['decision'] == 'not_duplicate':
-                continue
-            if self.duplicate_members_reader is None:
-                raise SnapshotError('bill_incomplete')
-            self.authorize(auth)
-            evidence = self.duplicate_members_reader(review, auth)
-            protections.add_duplicate({**review, 'memberCount': evidence['memberCount']}, evidence['members'])
-        after = self._epoch(auth)
-        if before != after:
-            raise SnapshotError('bill_conflict')
-        return dict(epoch=after, digest=protections.digest(), protections=protections)
+    def _advance(self,entry,key):
+        row=entry['pending'].pop(0);entry['after']=row[key];entry['count']+=1
+        if entry['count']>MAX_RECORDS:raise SnapshotError('bill_limit')
+
+    def _next_phase(self,entry):
+        entry.update(phase={'mappings':'statements','statements':'reviews','reviews':'done'}[entry['phase']],pending=[],ended=False,after=None,count=0)
+
+    def snapshot(self,source_import_id,auth,*,deadline=None):
+        require_uuid(source_import_id);deadline=min(self.clock()+5,deadline if deadline is not None else float('inf'))
+        with self.lock:
+            before=self._epoch(auth);nonce=getattr(auth,'session_nonce','local')
+            key=(source_import_id,before,nonce)
+            for old,item in list(self.entries.items()):
+                if self.clock()-item['last']>=3600 or old[0]==source_import_id and old[1]!=before:del self.entries[old]
+            entry=self.entries.get(key)
+            if entry is None:
+                if self.base.import_info(self.base.config.workspace_id,source_import_id)['state']!='ready':raise SnapshotError('bill_incomplete')
+                while len(self.entries)>=2:self.entries.popitem(last=False)
+                entry=dict(phase='mappings',pending=[],ended=False,after=None,count=0,requests=0,last=self.clock(),mappings={},protections=ProtectionSet(),member_after=-1,member_count=0,member_total=None)
+                self.entries[key]=entry
+            self.entries.move_to_end(key);entry['last']=self.clock();entry['requests']=0
+            try:
+                while entry['phase']!='done' and self.clock()<deadline and entry['requests']<8:
+                    phase=entry['phase'];table,field={'mappings':('ap_vendor_mappings','vendor'),'statements':('ap_statements','id'),'reviews':('ap_duplicate_reviews','key')}[phase]
+                    row=self._peek(entry,table,field,auth)
+                    if row is None:self._next_phase(entry);continue
+                    if self.clock()>=deadline:break
+                    self.authorize(auth)
+                    if phase=='mappings':entry['mappings'][row['vendor']]=row['bill_vendor'];self._advance(entry,field)
+                    elif phase=='statements':
+                        rid=require_uuid(row['current_revision_id']);ident=require_uuid(row['id'])
+                        cached_key=(rid,ident,canonical_hash(entry['mappings']),bool(row.get('completed')))
+                        if cached_key not in self.revisions:
+                            revision=self.base._one(self.base._table('ap_statement_revisions').eq('id',rid));entry['requests']+=1
+                            if revision['statement_id']!=ident:raise SnapshotError('bill_incomplete')
+                            derived=ProtectionSet();derived.add_statement(row,revision,entry['mappings'])
+                            while self.revisions and (len(self.revisions)>=2000 or sum(len(keys) for keys in self.revisions.values())+len(derived.keys)>MAX_RECORDS):self.revisions.popitem(last=False)
+                            self.revisions[cached_key]=frozenset(derived.keys)
+                        self.revisions.move_to_end(cached_key);entry['protections'].keys.update(self.revisions[cached_key]);self._advance(entry,field)
+                    else:
+                        if row['decision']=='not_duplicate':self._advance(entry,field);continue
+                        if row['decision'] not in ('confirmed_duplicate','unreviewed') or self.duplicate_members_reader is None:raise SnapshotError('bill_incomplete')
+                        evidence=self.duplicate_members_reader(row,auth,deadline=deadline,after=entry['member_after'])
+                        total=integer(evidence['memberCount'],minimum=2,maximum=MAX_RECORDS)
+                        if entry['member_total'] is not None and entry['member_total']!=total:raise SnapshotError('bill_incomplete')
+                        members=evidence['members']
+                        if type(members) is not list or not members or len(members)>250:raise SnapshotError('bill_incomplete')
+                        for member in members:
+                            n=integer(member['ordinal'],minimum=entry['member_after']+1,maximum=MAX_RECORDS-1)
+                            entry['protections']._candidate(member['bill']);entry['member_after']=n;entry['member_count']+=1
+                        entry['member_total']=total
+                        if evidence.get('nextCursor') is None:
+                            if entry['member_count']!=total:raise SnapshotError('bill_incomplete')
+                            self._advance(entry,field);entry.update(member_after=-1,member_count=0,member_total=None)
+                        elif evidence['nextCursor']!=entry['member_after'] or entry['member_count']>=total:raise SnapshotError('bill_incomplete')
+                    if len(entry['protections'].keys)>MAX_RECORDS:raise SnapshotError('bill_limit')
+                after=self._epoch(auth)
+                if before!=after:raise SnapshotError('bill_conflict')
+                if entry['phase']!='done':raise SnapshotError('bill_range_loading')
+                return dict(epoch=after,digest=entry['protections'].digest(),protections=entry['protections'])
+            except SnapshotError as error:
+                if error.code!='bill_range_loading':self.entries.pop(key,None)
+                raise
+            except Exception:
+                self.entries.pop(key,None);raise

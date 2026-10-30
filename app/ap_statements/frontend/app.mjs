@@ -454,7 +454,7 @@ function renderDrawer() {
   if(doc.reviewMode==='manual'&&!detail?.readOnly&&body){body.insertAdjacentHTML('afterbegin',manualReviewBannerHTML(detail));overlay.querySelector('[data-action="manual-recheck"]')?.setAttribute('aria-label','Recheck this statement with latest BILL data');}
   if(state.drawerTab==='review'&&row&&!confirmedInvoiceCandidate(row,reviewDecision(row.id)))overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend',referenceReviewHTML(doc,row,!!detail?.readOnly));
   if(row?.status==='range'&&!detail?.readOnly&&doc.reviewMode!=='manual')overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend','<button class="button" data-action="bill-archive-check">Check archived BILL data for this reference</button>');
-  if(row?.coverage==='archived')overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend','<p class="notice blue">Matched using archived BILL data · complete saved export checked for this reference.</p>');
+  if(row?.coverage==='archived')overlay.querySelector('#invoice-reference-review')?.insertAdjacentHTML('beforeend',row.priorReviewEvidence?'<p class="notice blue">Previously reviewed in this same saved export · retained evidence from your saved review.</p>':'<p class="notice blue">Matched using evidence from the complete saved BILL export, including data outside the active range.</p>');
   if(detail?.readOnly){body.insertAdjacentHTML('afterbegin',`<div class="notice blue"><div><strong>Saved revision · read-only</strong><p>${esc(historySelection?.initials||'')} · ${esc(nyTimestamp(historySelection?.completedAt))} · ${esc(detail.ruleVersion)} · Import ${esc(detail.importId||'none')}</p><p>These are the original saved comparisons, not results recalculated against the latest import.</p><button class="button" data-action="reopen-statement">Reopen current statement as a draft</button> <button class="button" data-action="export">Export saved evidence</button></div></div>`);overlay.querySelectorAll('input,textarea,select,[data-action="save-extraction"],[data-action="confirm-extraction"],[data-action="save-notes"],[data-action="resolve"],[data-action="adventure-follow-up"],[data-action="reopen"],[data-action="add-row"],[data-action="delete-row"],[data-action="remove-doc"]').forEach(el=>{if(!['page-select','row-select'].includes(el.id))el.disabled=true;});}
   else if(body){if(doc.reviewMode!=='manual')body.insertAdjacentHTML('afterbegin',draftSourceHTML(docDetail(doc.id),shared?.state.importId,state.provider.scopes?.[doc.id]));body.insertAdjacentHTML('beforeend','<div class="action-row statement-completion"><button class="button primary" data-action="complete-dialog">Mark statement reviewed</button><small>Reviewer initials required · notes optional</small></div>');}
   if(rereviewBusy)overlay.querySelectorAll('input,textarea,select,button:not(.close)').forEach(el=>{el.disabled=true;});
@@ -656,7 +656,7 @@ document.addEventListener('click', async e => {
       const ack=await shared.duplicates.save({decision:draft.decision,initials:draft.initials,note:draft.note,expectedVersion:draft.expectedVersion});
       acknowledgeDuplicate(ack);return;
     }
-    if(billUpdating&&!['back-to-programs','confirm-back-to-programs','close'].includes(action))throw Error('Please wait for the BILL update to finish.');
+    if(billUpdating&&!['bill-range-confirm','back-to-programs','confirm-back-to-programs','close'].includes(action))throw Error('Please wait for the BILL update to finish.');
     if(saveState==='saving'&&!['close','confirm-back-to-programs'].includes(action))throw Error('Please wait for the current save to finish.');
     if(action==='statement-date-sort'){
       if(target.dataset.list==='history'){historyDateSort=historyDateSort==='desc'?'asc':'desc';closeQuickPreview();}
@@ -731,7 +731,7 @@ document.addEventListener('click', async e => {
       finally{rereviewBusy=false;render();renderDrawer();}
     }
     if(action==='bill-range-confirm'){const resolve=rangePrompt;rangePrompt=null;closeOverlay();resolve?.(true);}
-    if(action==='bill-range-apply'){await runBillUpdate(()=>shared.ranges.applySaved(billRangeMode));toast('Active BILL range updated.');}
+    if(action==='bill-range-apply'){const result=await runBillUpdate(()=>shared.ranges.applySaved(billRangeMode));toast(result.cancelled?'BILL range update cancelled.':result.superseded?'A newer BILL update is current.':'Active BILL range updated.');}
     if(action==='bill-archive-check'){const doc=getDoc();if(dirty.size||duplicateDrafts.hasAnyUnsaved())throw Error('Save your edits before checking archived BILL data.');const row=comparisonsFor(doc).find(item=>item.id===state.selectedRow);await shared.lookupArchived(doc,row.invoiceNumber,row.kind);renderDrawer();}
     if(action==='bill-warnings'||action==='bill-warnings-more')await loadBillWarnings(action==='bill-warnings-more');
     if(action==='bill-cancel-update'){if(sharedError?.cancel)await sharedError.cancel();sharedError=null;retryOperation=null;render();toast('Update cancelled. You can select another BILL export.');}

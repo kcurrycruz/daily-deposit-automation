@@ -260,7 +260,7 @@ export function reconcile(statement, provider, mappings = {}) {
   const sourceAsOf=scope?.metadata?.asOf??provider.asOf;
   return groupInvoices(statement).map(row => {
     let matchMethod = null,referenceRule=null;
-    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),...(candidates.some(c=>scope?.archivedIds?.includes(c.id))?{coverage:'archived'}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
+    const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),...(candidates.some(c=>scope?.archivedIds?.includes(c.id))?{coverage:'archived'}:{}),...(candidates.some(c=>scope?.retainedReviewIds?.includes(c.id))?{priorReviewEvidence:true}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
     if (row.kind === 'opening') return result('history', 'Carried-forward balance: older invoice detail is needed. It is not a new invoice.');
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
     if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');

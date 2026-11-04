@@ -172,3 +172,19 @@ html body{background:#fff}.main{background:#fff}
 @media(max-width:760px){.duplicate-evidence-grid{grid-template-columns:1fr;padding:14px}.duplicate-review-form{grid-template-columns:1fr;padding:18px}.duplicate-review-form>*{grid-column:1!important}.duplicate-list .toolbar{align-items:stretch;gap:12px;flex-wrap:wrap}.duplicate-list .search{width:100%}.duplicate-detail-top{align-items:flex-start;flex-wrap:wrap}.duplicate-scope .mini-link{margin-left:0}}
 
 .bill-range-controls{display:grid;gap:8px;max-width:520px;margin:20px 0}.bill-range-controls label{font-weight:600}.bill-range-controls select{width:100%;padding:10px;border:1px solid #d8dfcf;border-radius:6px;background:white;color:inherit}.bill-range-controls small,.bill-range-summary small{line-height:1.6;color:#65765d}.bill-range-summary{padding:16px;background:#f4f7ef;border:1px solid #dbe3d4;border-radius:8px;margin:12px 0}.bill-range-summary ul{display:flex;flex-wrap:wrap;gap:8px 24px;padding-left:18px}.duplicate-scope small{display:block;margin-top:6px}
+/* Email status updates stay inside their own regions; review canvases are retained. */
+.mail-summary{display:flex;align-items:center;gap:16px;padding:16px 20px;margin-bottom:20px;flex-wrap:wrap}
+.mail-summary>button{margin-left:auto}
+.mail-imports>[data-mail-status],.mail-history,.mail-limitation{padding:20px}
+.mail-imports [data-mail-rows]>p{padding:0 20px}
+.mail-status-line{display:flex;justify-content:space-between;gap:16px;align-items:center}
+.mail-imports small{display:block;color:var(--muted,#697663);line-height:1.7}
+.mail-receipt{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;padding:20px;border-top:1px solid #e2e7dc;overflow-wrap:anywhere}
+.mail-receipt>.action-row{grid-column:1/-1;flex-wrap:wrap}
+.mail-warning{color:#8b6124!important}
+.mail-history form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:16px}
+.mail-history input{min-width:0;width:100%}
+.mail-preview{width:min(1100px,94vw);height:92vh;border:1px solid #d9e1d2;border-radius:10px;padding:16px}
+.mail-preview::backdrop{background:#15291c66}
+.mail-preview iframe{width:100%;height:calc(100% - 50px);border:0;margin-top:12px}
+@media(max-width:640px){.mail-receipt,.mail-history form{grid-template-columns:minmax(0,1fr)}.mail-status-line{align-items:flex-start;flex-wrap:wrap}.mail-summary>button{margin-left:0}}

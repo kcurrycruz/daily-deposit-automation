@@ -172,6 +172,17 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
     if(!detail.completed&&!detail.archived){const i=state.statements.findIndex(d=>d.id===detail.doc.id);if(i<0)state.statements.push(detail.doc);else state.statements[i]=detail.doc;}
     Object.assign(state.resolutions,detail.resolutions||{});return detail;
   }
+  async function adoptMailStatements(ids){
+    check();let changed=false;
+    for(const id of [...new Set(ids)].slice(0,50)){
+      if(state.details.has(id))continue;
+      const detail=await client.request('statement',{statement_id:id});check();
+      if(state.details.has(id)||detail.completed||detail.archived||detail.doc?.id!==id)continue;
+      adopt(detail);changed=true;
+    }
+    if(changed){protectionsDirty=true;onState(state,{reason:'mail_imported'});}
+    return changed;
+  }
   async function loadProvider(importId,metadata={}){
     check();const records=[];let after=-1,total=null;const seen=new Set();
     do{
@@ -323,6 +334,6 @@ export function createSharedWorkspace(client,{onState=()=>{},onSaveState=()=>{},
     reopenStatement,
     archiveStatement(id,expectedVersion){return write(async request=>{const reply=await request('archive_statement',{statement_id:id,expected_version:expectedVersion});state.statements=state.statements.filter(doc=>doc.id!==id);emit();return reply;});},
     async statement(id,revisionId){check();const detail=await client.request('statement',{statement_id:id,...(revisionId?{revision_id:revisionId}:{})});check();return {...detail,readOnly:!!revisionId||detail.completed};},
-    write,adopt,
+    write,adopt,adoptMailStatements,
     dispose};
 }

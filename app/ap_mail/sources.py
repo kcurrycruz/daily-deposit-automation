@@ -61,6 +61,7 @@ class MailSources:
             read=lambda action,payload:self._page(pin,claim,action,payload),heartbeat=lambda:self._check(claim))
         self.assert_current(pin,claim)
         result['evidence']['rangeRefreshPending']=bool(info and info.get('rangeRefreshPending'))
+        result['evidence']['waitingForBill']=pin.import_id is None
         freshness={'uploadedAt':None,'daysOld':None,'stale':None}
         if info and info.get('created_at'):
             try:

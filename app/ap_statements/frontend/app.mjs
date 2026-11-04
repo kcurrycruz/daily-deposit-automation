@@ -18,6 +18,8 @@ import {providerVendors} from './vendor-identity.mjs';
 import {bindStatementDropzone} from './statement-dropzone.mjs';
 import {referenceReviewHTML,confirmReferenceReview,confirmInvoiceCandidate,confirmedInvoiceCandidate,candidateConfirmationHTML,invoiceResult,adventureDiscrepancyHTML,adventureFollowUp,reviewDecisionOptions} from './reference-review.mjs';
 import {duplicateSidebarHTML,duplicateViewHTML,createDuplicateReviewDrafts} from './duplicate-bills-ui.mjs';
+import {createMailImports} from './mail-imports.mjs';
+import {mailImportsHTML,patchMailImports} from './mail-imports-ui.mjs';
 import {createManualCheck,manualCheckFor,rereviewChoiceHTML,manualReviewBannerHTML,manualCheckHTML,manualExtractionHTML,manualReviewReport,assertManualFinancialAction} from './manual-review.mjs';
 
 const icons = {
@@ -65,6 +67,22 @@ let billUpdater=null,billUpdating=false,billUpdateProgress=null,billRangeMode='l
 let billWarnings=null;
 const duplicateDrafts=createDuplicateReviewDrafts();
 let duplicateReturn=null,duplicateSourceKey='',duplicateSearchTimer=null,duplicateSearchQuery=null,duplicateSaveAttempt=null;
+const mailImports=createMailImports({request:(...args)=>window.hwfcSharedClient.request(...args)},{
+  hasUnsaved:()=>dirty.size>0||duplicateDrafts.hasAnyUnsaved(),onImported:ids=>shared?.adoptMailStatements(ids),onChange:s=>{
+    if(s.locked&&shared){shared.dispose();shared.state.accessDenied=true;receiveShared(shared.state);return;}
+    patchMailImports(document.querySelector('#mail-imports-summary'),s,{compact:true});
+    patchMailImports(document.querySelector('#mail-imports-region'),s);
+  }});
+function receiveWorkspace(snapshot,change={}){
+  if(snapshot.accessDenied)mailImports.dispose();else mailImports.setCapability(snapshot.ready?snapshot.capabilities?.mailIntake:0);
+  receiveShared(snapshot,change);
+  if(snapshot.ready)mailImports.load();
+}
+function renderMailStatementsUpdate(){
+  const region=document.querySelector('#mail-statements-region');
+  if(!region||state.selected||dirty.size||region.contains(document.activeElement))return;
+  const data=stats();region.innerHTML=state.statements.length?`${metrics(data)}<section class="panel">${statementPanel(data)}</section>`:'';
+}
 function acknowledgeDuplicate(ack){
   if(!ack?.review||duplicateSaveAttempt?.key!==ack.review.key)return;
   const {key,submitted}=duplicateSaveAttempt,current=duplicateDrafts.get(key);
@@ -117,6 +135,7 @@ function receiveShared(snapshot,change={}){
   const duplicateOnly=change.reason==='duplicates'&&!snapshot.accessDenied&&shared?.state?.ready&&sourceKey===duplicateSourceKey&&shared?.duplicates?.state.phase!=='locked';
   if(snapshot.accessDenied||sourceKey!==duplicateSourceKey||shared?.duplicates?.state.phase==='locked'){duplicateDrafts.clear();duplicateReturn=null;duplicateSaveAttempt=null;clearTimeout(duplicateSearchTimer);duplicateSearchTimer=null;duplicateSearchQuery=null;duplicateSourceKey=sourceKey;}
   state.provider=snapshot.provider;state.statements=snapshot.statements;state.mappings=snapshot.mappings;state.resolutions=snapshot.resolutions;
+  if(change.reason==='mail_imported'&&!snapshot.accessDenied){renderMailStatementsUpdate();return;}
   if(duplicateOnly){renderDuplicateUpdate();return;}
   render();
   const drawer=overlay.querySelector('.drawer');
@@ -132,10 +151,12 @@ function receiveShared(snapshot,change={}){
     }
   }
 }
-async function startShared(){if(shared||!window.hwfcSharedClient)return;shared=createSharedWorkspace(window.hwfcSharedClient,{onState:receiveShared,onSaveState:sharedStatus,hasUnsaved:()=>dirty.size>0||duplicateDrafts.hasAnyUnsaved(),onRangeProgress:progress=>showBillProgress(progress),confirmRange:manifest=>confirmRangeApply(manifest),confirmRangeRestart:async()=>window.confirm("Range preparation was interrupted. Restart from the saved upload?")});try{await retrySharedLoad();}catch{}}
+async function startShared(){if(shared||!window.hwfcSharedClient)return;shared=createSharedWorkspace(window.hwfcSharedClient,{onState:receiveWorkspace,onSaveState:sharedStatus,hasUnsaved:()=>dirty.size>0||duplicateDrafts.hasAnyUnsaved(),onRangeProgress:progress=>showBillProgress(progress),confirmRange:manifest=>confirmRangeApply(manifest),confirmRangeRestart:async()=>window.confirm("Range preparation was interrupted. Restart from the saved upload?")});try{await retrySharedLoad();}catch{}}
 async function retrySharedLoad(){sharedStatus('loading');render();try{await shared.load();sharedStatus('saved');render();}catch(error){error.retry=retrySharedLoad;sharedStatus('not_saved',error);render();throw error;}}
 window.addEventListener('hwfc:shared-ready',startShared);
-window.addEventListener('pagehide',()=>{clearTimeout(previewTimer);historyLoadToken++;historyPreview?.dispose();document.querySelector('#history-preview-root')?.remove();billUpdater?.dispose();billWarnings?.dispose();shared?.dispose();files.clear();historyPage.items=[];state.statements=[];state.resolutions={};state.provider=emptyWorkspace().provider;overlay.innerHTML='';app.innerHTML='';},{once:true});
+document.addEventListener('visibilitychange',()=>mailImports.visibilityChanged());
+document.addEventListener('submit',e=>{if(e.target.id==='mail-history-form'){e.preventDefault();e.target.querySelector('[data-action="mail-history"]')?.click();}});
+window.addEventListener('pagehide',()=>{mailImports.dispose();document.querySelector('#mail-private-preview')?.remove();clearTimeout(previewTimer);historyLoadToken++;historyPreview?.dispose();document.querySelector('#history-preview-root')?.remove();billUpdater?.dispose();billWarnings?.dispose();shared?.dispose();files.clear();historyPage.items=[];state.statements=[];state.resolutions={};state.provider=emptyWorkspace().provider;overlay.innerHTML='';app.innerHTML='';},{once:true});
 function confirmRangeApply(manifest){
   return new Promise(resolve=>{rangePrompt=resolve;modal('Apply active BILL range?',rangeSummaryHTML(manifest),'bill-range-confirm','Apply range');});
 }
@@ -169,6 +190,7 @@ function markDirty(){if(saveState==='saving')return;if(state.selected){dirty.add
 function decorateSharedUi(){
   if(billUpdateProgress)showBillProgress(billUpdateProgress);
   const nav=document.querySelector('.nav');
+  if(nav&&mailImports.state.enabled&&!nav.querySelector('[data-action="mail-open"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="mail-open" class="${state.view==='email'?'active':''}" ${state.view==='email'?'aria-current="page"':''}>${icon('folder')}Email imports</button>`);
   if(nav&&!nav.querySelector('[data-action="vendor-history-view"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="vendor-history-view" class="${state.view==='vendor-history'?'active':''}" ${state.view==='vendor-history'?'aria-current="page"':''}>${icon('users')}Vendor</button>`);
   if(nav&&!nav.querySelector('[data-action="history-view"]'))nav.insertAdjacentHTML('beforeend',`<button data-action="history-view" class="${state.view==='history'?'active':''}">${icon('clock')}Previous Statements</button>`);
   const note=document.querySelector('.local-note');if(note)note.innerHTML=`${icon('shield')}<strong>Private shared workspace</strong>Original PDFs, BILL imports and acknowledged saves are kept for your team. Initials are self-reported. Unsaved edits remain in this tab.`;
@@ -274,9 +296,9 @@ function render() {
   const duplicateFocus=focused?.id?.startsWith('duplicate-')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const scrollTop = priorMain?.dataset.workspaceView === state.view ? priorMain.scrollTop : 0;
   const data = stats();
-  const title = { duplicates:'Duplicate bills', statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
-  const subtitle = { duplicates:'Review possible duplicate bills in your current saved export. Nothing is changed in BILL.', statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}${duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'})}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${state.view==='duplicates'?duplicateViewHTML(duplicateStateForView()):billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : ''}</div></main></div>`;
+  const title = { email:'Email imports', duplicates:'Duplicate bills', statements: 'Your statement workspace', exceptions: 'Focus on what needs attention', vendors: 'Keep your vendors connected', 'vendor-history':vendorHistorySelection||'Vendors', connection: 'Your saved BILL data' }[state.view];
+  const subtitle = { email:'Statements forwarded to your Gmail label appear here for preliminary checks and review.', duplicates:'Review possible duplicate bills in your current saved export. Nothing is changed in BILL.', statements: 'Upload arriving statements, check the results, and finish with your initials.', exceptions: 'Every difference has a reason. Review the evidence, then record your decision.', vendors: 'Map statement names to the vendor names used in BILL.', 'vendor-history':'Find a vendor and open the statements your team has already reviewed.', connection: 'Use a CSV export to compare invoices. No API access is needed for this step.' }[state.view];
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon">${icon('ledger')}</span>Statement Desk</div>${backButtonHtml()}<div class="nav-label">Workspace</div><nav class="nav" aria-label="Workspace navigation">${[['statements','folder','Statements',state.statements.length],['exceptions','flag','Needs attention',data.attention],['connection','plug','BILL data','']].map(([view, glyph, label, count]) => `<button data-action="view" data-view="${view}" class="${state.view === view ? 'active' : ''}" ${state.view === view ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}${label}${count !== '' ? `<span class="count">${count}</span>` : ''}</button>`).join('')}${duplicateSidebarHTML(shared?.duplicates?.state,{active:state.view==='duplicates'})}</nav><div class="sidebar-bottom"><div class="local-note">${icon('shield')}<strong>Your files stay with you</strong>PDFs are read in this browser. Save session keeps extracted rows and notes, not originals. Select PDFs again after leaving. Saved financial metadata is visible to anyone using this browser profile.</div><div class="profile"><div class="avatar">AP</div><div>Accounts payable<small>Prototype workspace</small></div></div></div></aside><main class="main" data-workspace-view="${esc(state.view)}"><header class="topbar"><div class="breadcrumb">AP workspace <span>/</span><strong>${state.view === 'connection' ? 'BILL connection' : state.view[0].toUpperCase() + state.view.slice(1)}</strong></div><div class="top-actions"><button class="button small subtle" data-action="save-session">${icon('save')}Save session</button><span class="connection-pill"><span class="dot"></span>${sourcePill()}</span></div></header><div class="content"><div class="heading"><div><div class="eyebrow">A clearer month-end</div><h1>${title}</h1><p>${subtitle}</p></div><div class="action-row">${(state.view === 'statements' && state.statements.length) || state.view === 'exceptions' ? `<button class="button" data-action="export">${icon('down')}Export report</button><button class="button primary" data-action="upload" ${state.busy ? 'disabled' : ''}>${icon('plus')}Upload statements</button>` : ''}</div></div>${restoredNotice ? `<div class="notice blue">${esc(restoredNotice)}</div>` : ''}${state.view==='duplicates'?duplicateViewHTML(duplicateStateForView()):state.view==='email'?'':billDataHTML(state.provider)}${state.view === 'statements' || state.view === 'exceptions' ? `${workflowBody(data)}` : state.view === 'vendors' ? vendorsPanel() : state.view === 'connection' ? connectionPanel() : state.view==='email'?`<div id="mail-imports-region">${mailImportsHTML(mailImports.state)}</div>`:''}</div></main></div>`;
   const duplicateNav=app.querySelector('[data-action="duplicate-view"]');
   if(duplicateNav){duplicateNav.insertAdjacentHTML('beforebegin','<div id="duplicate-nav-slot" style="display:contents"></div>');document.querySelector('#duplicate-nav-slot').append(duplicateNav);}
   const duplicateView=app.querySelector('.duplicate-workspace');
@@ -289,9 +311,9 @@ function render() {
 }
 function guidePanel() { return uploadReviewHTML(state); }
 function workflowBody(data) {
-  const upload=state.view==='statements'?guidePanel():'';
-  if(!state.statements.length&&state.view==='statements')return upload;
-  return `${upload}${metrics(data)}<section class="panel">${state.view==='statements'?statementPanel(data):exceptionPanel(data)}</section>`;
+  const upload=state.view==='statements'?`<div id="mail-imports-summary">${mailImportsHTML(mailImports.state,{compact:true})}</div>${guidePanel()}`:'';
+  if(!state.statements.length&&state.view==='statements')return upload+'<div id="mail-statements-region"></div>';
+  return `${upload}<div id="mail-statements-region">${metrics(data)}<section class="panel">${state.view==='statements'?statementPanel(data):exceptionPanel(data)}</section></div>`;
 }
 function goToGuideStep(step) {
   if (step === 'upload') document.querySelector('#pdf-input').click();
@@ -410,7 +432,7 @@ async function beginRereview(id){
   pendingRereview={id,version:latest.version};
   modal('Re-review statement',rereviewChoiceHTML(latest.doc.vendor),'start-rereview','Open re-review');
 }
-function closeOverlay() {if(rangePrompt){const resolve=rangePrompt;rangePrompt=null;resolve(false);} if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}pendingRereview=null;if(duplicatePrompt){duplicatePrompt('cancel');duplicatePrompt=null;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++; }
+function closeOverlay() {if(rangePrompt){const resolve=rangePrompt;rangePrompt=null;resolve(false);} if(overlay.querySelector('.drawer')&&dirty.has(state.selected)){toast('Save your edits before closing this statement.',true);return;}pendingRereview=null;if(duplicatePrompt){duplicatePrompt('cancel');duplicatePrompt=null;}overlay.innerHTML = ''; state.selected = null; state.selectedRow = null;historicalDetail=null; priorFocus?.focus?.(); renderToken++;renderMailStatementsUpdate(); }
 function getDoc() { return historicalDetail?.doc.id===state.selected?historicalDetail.doc:(state.statements.find(d => d.id === state.selected)||shared?.state.details.get(state.selected)?.doc); }
 function openDoc(id,row=null,{historical=false,tab=null}={}) {
   if(!historical)historicalDetail=null;priorFocus=document.activeElement;state.selected=id;state.selectedRow=row;
@@ -629,6 +651,46 @@ document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const action = target.dataset.action;
   try {
+    if(action.startsWith('mail-')){
+      const row=mailImports.state.items.find(item=>item.id===target.dataset.id);
+      if(action==='mail-open'){state.view='email';render();await mailImports.load();}
+      if(action==='mail-refresh')await mailImports.load();
+      if(action==='mail-pause')await mailImports.pause(!mailImports.state.connection.paused);
+      if(action==='mail-retry-last')await mailImports.retryLast();
+      if(action==='mail-retry')await mailImports.retry(row);
+      if(action==='mail-more')await mailImports.more('receipts');
+      if(action==='mail-message-more')await mailImports.more('messages');
+      if(['mail-use-existing','mail-import-separate','mail-skip'].includes(action))await mailImports.resolveSimilar(row,{'mail-use-existing':'existing','mail-import-separate':'continue','mail-skip':'skip'}[action]);
+      if(action==='mail-message-retry'||action==='mail-message-skip'){
+        const message=mailImports.state.messages[Number(target.dataset.id)];
+        if(action==='mail-message-skip'||window.confirm('Review this email again and import any readable statement PDFs, including older attachments?'))await mailImports.messageChoice(message,action==='mail-message-skip'?'skip':'retry');
+      }
+      if(action==='mail-review'){
+        if(state.selected&&dirty.has(state.selected))throw Error('Save your current statement before opening another.');
+        await shared.adoptMailStatements([row.statement_id]);openDoc(row.statement_id);
+      }
+      if(action==='mail-existing'){
+        if(state.selected&&dirty.has(state.selected))throw Error('Save your current statement before opening another.');
+        historicalDetail={...await shared.statement(row.assessment.match.id),readOnly:true};historySelection=null;
+        openDoc(historicalDetail.doc.id,null,{historical:true});
+      }
+      if(action==='mail-history'){
+        const form=document.querySelector('#mail-history-form');if(!form.reportValidity())return;
+        const from=document.querySelector('#mail-history-after').value,before=document.querySelector('#mail-history-before').value;
+        const afterAt=historyFilters({completedFrom:from}).completedFrom,beforeAt=historyFilters({completedFrom:before}).completedFrom;
+        const count=Number(document.querySelector('#mail-history-count').value);
+        if(afterAt>=beforeAt)throw Error('Choose an end date after the start date.');
+        if(window.confirm(`Import up to ${count} emails received from ${from} to before ${before}, New York time, from the selected Gmail label?`))await mailImports.importHistory({after:afterAt,before:beforeAt,max_messages:count});
+      }
+      if(action==='mail-preview'){
+        const preview=await mailImports.previewOriginal(row.id);document.querySelector('#mail-private-preview')?.remove();
+        const dialog=document.createElement('dialog');dialog.id='mail-private-preview';dialog.className='mail-preview';dialog.setAttribute('aria-label','Original emailed statement');
+        dialog.innerHTML=`<div class="action-row"><strong>Original emailed statement</strong><button type="button" class="button" data-action="mail-preview-close">Close preview</button></div><iframe title="Original emailed statement" referrerpolicy="no-referrer" src="${esc(preview.url)}"></iframe>`;
+        document.body.append(dialog);dialog.showModal();setTimeout(()=>dialog.remove(),Math.min(300,preview.expiresIn)*1000);
+      }
+      if(action==='mail-preview-close')document.querySelector('#mail-private-preview')?.remove();
+      return;
+    }
     if(rereviewBusy&&!['close','back-to-programs','confirm-back-to-programs'].includes(action))throw Error('Please wait for the statement recheck to finish.');
     if(action==='duplicate-view'){state.view='duplicates';render();return;}
     if(action==='duplicate-open'){
@@ -839,7 +901,7 @@ document.addEventListener('click', async e => {
       const rows = reportRows.map(r => { const detail=docDetail(r.statementId);const doc = detail?.readOnly?detail.doc:(state.statements.find(d => d.id === r.statementId)||detail.doc); const resolution = reviewDecision(r.id),pinned=detail?.readOnly||doc.reviewMode==='manual';const sourceLabel=pinned?(detail.importLabel||'Frozen saved comparison'):(detail?.importInfo?.metadata?.label||detail?.importLabel||state.provider.label||'No BILL data'); return [r.vendor,doc.filename,doc.statementDate,r.invoiceNumber,r.kind,r.originalAmount == null ? '' : (r.originalAmount/100).toFixed(2),r.outstanding == null ? '' : (r.outstanding/100).toFixed(2),invoiceResult(r,resolution).label,r.reason,sourceLabel,r.simulated ? 'YES — SIMULATED' : 'NO',resolution?.decision || '',(historicalDetail?historicalDetail.resolutions[r.id]:state.resolutions[r.id])?.note || '',doc.assignee || '',detail?.importId||'',pinned?detail.ruleVersion:MATCH_RULE_VERSION,detail?.readOnly?historySelection?.initials||'':'',detail?.readOnly?historySelection?.completedAt||'':'',doc.notes||'',statuses[r.status].label,invoiceResult(r,resolution).manual?'Manually confirmed':'',...(resolution?.manualCheck?manualReviewReport(r,resolution):['','',''])]; });
       download('statement-reconciliation.csv', toCSV([header,...rows])); toast('Report exported with source and review notes.');
     }
-  } catch(error) {if(!action.startsWith('duplicate-')&&(error.retry||error.code)){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
+  } catch(error) {if(!action.startsWith('duplicate-')&&!action.startsWith('mail-')&&(error.retry||error.code)){sharedError=error;retryOperation=error.retry||null;decorateSharedUi();}toast(error.message || 'This action could not be completed.', true); }
 });
 document.addEventListener('keydown', e => {
   const duplicate=e.target.closest?.('tr[data-action="duplicate-open"]');if(duplicate&&['Enter',' '].includes(e.key)){e.preventDefault();duplicate.click();return;}

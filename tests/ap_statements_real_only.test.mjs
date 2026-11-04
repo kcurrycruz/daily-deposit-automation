@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as mailController from '../app/ap_statements/frontend/mail-imports.mjs';
+import * as mailUI from '../app/ap_statements/frontend/mail-imports-ui.mjs';
 import * as core from '../app/ap_statements/frontend/core.mjs';
 import * as session from '../app/ap_statements/frontend/session.mjs';
 import * as guide from '../app/ap_statements/frontend/guide.mjs';
@@ -83,7 +85,7 @@ test('explicit Save session cannot reintroduce sample documents or simulated rec
 function browserApp(data) {
   const localStorage = storage(data), events = {}, nodes = {};
   for (const id of ['app', 'overlay-root', 'toast', 'pdf-input', 'csv-input']) nodes[`#${id}`] = { innerHTML: '', style: {}, value: '', handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }, querySelector() { return null; } };
-  const context = { ...billRange, ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,...duplicateBillUI,
+  const context = { ...mailController,...mailUI,...billRange, ...core, ...session, ...guide, ...simpleFlow, ...simpleView, ...billTutorial,...billUI,...billWarningsView,...historyBrowser,...duplicates,...dropzone,...referenceReview,...statementList,...duplicateBillUI,
     createBillUpdateUI:options=>billUI.createBillUpdateUI({...options,importer:async()=>({importId:'synthetic',recordCount:1,metadata:{label:'Synthetic worker acknowledgement'}})}),importBillSource, createDemo, simulateRecords, backButtonHtml, requestProgramHub,
     window: { localStorage,addEventListener(){} }, document: { activeElement: null,querySelectorAll:()=>[], querySelector: selector => nodes[selector] ?? null,
       addEventListener: (event, handler) => { events[event] = handler; } }, setTimeout() {}, clearTimeout() {} };

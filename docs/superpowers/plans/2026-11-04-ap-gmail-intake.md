@@ -1,6 +1,6 @@
 # AP Gmail Intake Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. The owner previously selected native execution; preserve it. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. The owner previously selected native execution; preserve it. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Import PDFs from the configured Gmail label every five minutes, scan and compare them outside Streamlit, and present durable unconfirmed drafts or actionable intake issues in AP Statements.
 
@@ -69,11 +69,11 @@ Contract names below are authoritative; implementation may split internals witho
 
 **Interfaces:** Consume existing UUID/statement/record validators. Produce MailConfig, SourcePin, Claim, ReceiptKey, `attachment_parts(message)`, `receipt_id(key) -> str`, `normalize_extraction(doc, receipt_id, sha256) -> dict`, and `GmailClient.profile/labels/message/history/messages/attachment` adapter methods returning validated provider DTOs. Inject transport/token provider; do not log raw provider exceptions.
 
-- [ ] **Step 1: Write failing tests.** `test_same_receipt_stable_across_delivery_and_thread_change`, `test_root_inline_and_nested_pdf_parts`, `test_non_pdf_and_mime_bombs`, `test_opaque_history_id`, `test_secret_redaction_and_fixed_workspace` assert: stable receipt IDs; root path `0` and indexed child paths remain distinct; two same-thread messages differ; depth > 20 or > 200 MIME parts becomes attention; invalid base64url/declared > 20 MiB rejected; huge string history IDs unchanged; config repr contains no token/password. Normalize preserves reference/cent/page values and makes `confirmed=False` with stable row IDs.
-- [ ] **Step 2: Run** `python -m unittest discover -s tests -p test_ap_mail_contracts.py -v` and equivalent Gmail test file; expect missing-module/function failures before implementation.
-- [ ] **Step 3: Implement** the interfaces and bounded Google response adapter. Pin account identity using authenticated user identity, label ID rather than label name; reject wrong identity, malformed/missing profile data and mutation requests. Normalize error codes for 401/403/404/429/transient server failures without copying payload text.
-- [ ] **Step 4: Rerun both files**; all pass including forward-compatible MIME metadata handling and fixture redaction checks.
-- [ ] **Step 5: Commit** only Task 1 files with message `feat(ap): define Gmail intake identities and read-only adapter`.
+- [x] **Step 1: Write failing tests.** `test_same_receipt_stable_across_delivery_and_thread_change`, `test_root_inline_and_nested_pdf_parts`, `test_non_pdf_and_mime_bombs`, `test_opaque_history_id`, `test_secret_redaction_and_fixed_workspace` assert: stable receipt IDs; root path `0` and indexed child paths remain distinct; two same-thread messages differ; depth > 20 or > 200 MIME parts becomes attention; invalid base64url/declared > 20 MiB rejected; huge string history IDs unchanged; config repr contains no token/password. Normalize preserves reference/cent/page values and makes `confirmed=False` with stable row IDs.
+- [x] **Step 2: Run** `python -m unittest discover -s tests -p test_ap_mail_contracts.py -v` and equivalent Gmail test file; expect missing-module/function failures before implementation.
+- [x] **Step 3: Implement** the interfaces and bounded Google response adapter. Pin account identity using authenticated user identity, label ID rather than label name; reject wrong identity, malformed/missing profile data and mutation requests. Normalize error codes for 401/403/404/429/transient server failures without copying payload text.
+- [x] **Step 4: Rerun both files**; all pass including forward-compatible MIME metadata handling and fixture redaction checks.
+- [x] **Step 5: Commit** only Task 1 files with message `feat(ap): define Gmail intake identities and read-only adapter`.
 
 ### Task 2: Durable receipts, outbox, leases and human controls schema
 
@@ -211,4 +211,4 @@ Contract names below are authoritative; implementation may split internals witho
 
 All approved design sections map to tasks: runtime/limits (5, 8, 11), Gmail/account/OAuth (1, 3, 11), durable work/fencing/outbox (2, 4, 8), statement duplicates and immutable human work (7), preliminary source parity/refresh (6, 8), stable UI and controls (9, 10), machine boundaries/rollout/recovery (11, 12). Each Review Focus condition has explicit assertions in its owning tasks. Interfaces use the names defined above; numeric resource/retry defaults remain the approved proposals to verify before activation.
 
-Status: plan written and self-reviewed; awaiting owner review. No implementation tasks started. Native execution preference preserved. The existing baseline is 46 passing core/statement-duplicate/shared-workspace Node tests, not mail feature verification.
+Status: plan approved by owner ("yes"); Task 1 implemented, Task 2 in progress. Native execution preference preserved. The existing baseline is 46 passing core/statement-duplicate/shared-workspace Node tests, not mail feature verification.

@@ -20,8 +20,9 @@ create table public.ap_mail_messages (
  workspace_id uuid not null, connection_id uuid not null, account_id text not null,
  message_id text not null check(octet_length(message_id) between 1 and 256),
  thread_id text not null check(octet_length(thread_id) between 1 and 256),
- received_at timestamptz not null, sender text not null default '' check(octet_length(sender)<=1024),
+ received_at timestamptz, sender text not null default '' check(octet_length(sender)<=1024),
  subject text not null default '' check(octet_length(subject)<=2048), eligible boolean not null,
+ error_code text check(error_code is null or error_code in ('historical','withdrawn','invalid','unreadable','limit','not_found')),
  discovered_at timestamptz not null default now(),
  primary key(workspace_id,account_id,message_id),
  foreign key(workspace_id,connection_id) references public.ap_mail_connections(workspace_id,id)
@@ -118,6 +119,7 @@ begin
   when 'retry' then 'receipt_id expected_version' when 'requeue' then 'receipt_id expected_version'
   when 'pause' then 'connection_id expected_version paused' when 'reconcile' then 'limit'
   when 'outbox_sent' then 'job_id dispatch_generation task_name' when 'outbox_delay' then 'job_id dispatch_generation delay_seconds' end;
+ if p_operation='sync_error' then v_allowed='connection_id expected_generation reason'; end if;
  v_required=case p_operation when 'inventory' then 'connection_id expected_generation expected_version expected_cursor messages receipts next_cursor'
   when 'finish' then 'claim status' else v_allowed end;
  if v_allowed is null or p_data-string_to_array(v_allowed,' ')<>'{}'::jsonb or not(p_data ?& string_to_array(v_required,' ')) then raise exception 'invalid'; end if;
@@ -139,10 +141,12 @@ begin
    jsonb_typeof(p_data->'receipts') is distinct from 'array' or jsonb_array_length(p_data->'receipts')>200 or
    jsonb_typeof(p_data->'next_cursor') is distinct from 'object' then raise exception 'invalid'; end if;
   for item in select value from jsonb_array_elements(p_data->'messages') loop
-   insert into ap_mail_messages(workspace_id,connection_id,account_id,message_id,thread_id,received_at,sender,subject,eligible)
+   insert into ap_mail_messages(workspace_id,connection_id,account_id,message_id,thread_id,received_at,sender,subject,eligible,error_code)
     values(p_workspace,c.id,c.account_id,item->>'message_id',item->>'thread_id',(item->>'received_at')::timestamptz,
-     coalesce(item->>'sender',''),coalesce(item->>'subject',''),(item->>'eligible')::boolean)
-    on conflict(workspace_id,account_id,message_id) do update set eligible=ap_mail_messages.eligible or excluded.eligible;
+     coalesce(item->>'sender',''),coalesce(item->>'subject',''),(item->>'eligible')::boolean,item->>'error_code')
+    on conflict(workspace_id,account_id,message_id) do update set eligible=ap_mail_messages.eligible or excluded.eligible,
+     sender=coalesce(nullif(excluded.sender,''),ap_mail_messages.sender),subject=coalesce(nullif(excluded.subject,''),ap_mail_messages.subject),
+     received_at=coalesce(ap_mail_messages.received_at,excluded.received_at),error_code=excluded.error_code;
   end loop;
   for item in select value from jsonb_array_elements(p_data->'receipts') loop
    if item->>'status' not in ('queued','needs_attention','skipped') then raise exception 'invalid'; end if;
@@ -241,6 +245,14 @@ begin
    result=jsonb_build_object('saved',true);
   end if;
 
+ elsif p_operation='sync_error' then
+  select * into c from ap_mail_connections where workspace_id=p_workspace and id=(p_data->>'connection_id')::uuid for update;
+  if not found then raise exception 'not_found'; end if;
+  if c.generation is distinct from (p_data->>'expected_generation')::bigint then raise exception 'conflict'; end if;
+  if coalesce(p_data->>'reason','') not in ('invalid','auth','denied','wrong_account','label_missing','not_found','quota',
+    'unavailable','limit','unreadable','conflict','paused','not_configured') then raise exception 'invalid'; end if;
+  update ap_mail_connections set error_code=p_data->>'reason',last_checked_at=now() where id=c.id;
+  result=jsonb_build_object('saved',true);
  elsif p_operation='pause' then
   select * into c from ap_mail_connections where workspace_id=p_workspace and id=(p_data->>'connection_id')::uuid for update;
   if not found then raise exception 'not_found'; end if;
@@ -317,11 +329,19 @@ begin
   select * into r from ap_mail_receipts where workspace_id=p_workspace and id=(p_data->>'receipt_id')::uuid;
   if not found then raise exception 'not_found'; end if;
   return to_jsonb(r);
+ elsif p_operation='messages' then
+  select * into c from ap_mail_connections where workspace_id=p_workspace and id=(p_data->>'connection_id')::uuid;
+  if not found then raise exception 'not_found'; end if;
+  if jsonb_typeof(p_data->'ids') is distinct from 'array' or jsonb_array_length(p_data->'ids')>100 then raise exception 'invalid'; end if;
+  select jsonb_agg(to_jsonb(items)) into result from (select message_id,eligible,error_code,received_at from ap_mail_messages
+   where workspace_id=p_workspace and account_id=c.account_id and message_id in (select jsonb_array_elements_text(p_data->'ids'))) items;
+  return jsonb_build_object('items',coalesce(result,'[]'));
  elsif p_operation='status' then
   select * into c from ap_mail_connections where workspace_id=p_workspace and active;
   select jsonb_object_agg(status,n) into result from (select status,count(*) n from ap_mail_receipts where workspace_id=p_workspace group by status) counts;
   return jsonb_build_object('connection',case when c.id is null then null else jsonb_build_object('id',c.id,'email',c.email,
-   'label',c.label_name,'paused',c.paused,'version',c.version,'generation',c.generation,'lastSuccessAt',c.last_success_at,'error',c.error_code) end,'counts',coalesce(result,'{}'));
+   'label',c.label_name,'paused',c.paused,'version',c.version,'generation',c.generation,'lastSuccessAt',c.last_success_at,'error',c.error_code) end,
+   'counts',coalesce(result,'{}')||jsonb_build_object('message_attention',(select count(*) from ap_mail_messages where workspace_id=p_workspace and error_code is not null)));
  elsif p_operation in ('receipts','outbox') then
   v_limit=(p_data->>'limit')::integer;
   if v_limit is null or v_limit<1 or v_limit>(case when p_operation='receipts' then 50 else 100 end) then raise exception 'invalid'; end if;

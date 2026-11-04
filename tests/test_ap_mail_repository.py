@@ -59,6 +59,15 @@ class MailRepositoryTests(unittest.TestCase):
         with self.assertRaises(MailError) as e: repo.mutate('reconcile',{'limit':100},str(uuid4()))
         self.assertEqual(str(e.exception),'unavailable')
 
+    def test_sync_reads_and_error_status_keep_account_scope(self):
+        repo,client=self.repo()
+        client.reply={'items':[{'message_id':'m1','eligible':False,'error_code':'historical'}]}
+        self.assertEqual(repo.messages_known(['m1'])['m1']['error_code'],'historical')
+        self.assertEqual(client.calls[-1][1]['p_data']['connection_id'],C)
+        client.reply={'saved':True}
+        repo.mutate('sync_error',{'connection_id':C,'expected_generation':1,'reason':'auth'})
+        self.assertEqual(client.calls[-1][1]['p_workspace'],W)
+
     def test_safe_read_and_preview_only_accept_receipt_identity(self):
         repo,client=self.repo();rid=str(uuid4())
         client.reply={'connection':None};self.assertEqual(repo.connection(),None)

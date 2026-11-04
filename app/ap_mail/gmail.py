@@ -38,7 +38,7 @@ class AttachmentPart:
     inline_bytes: bytes | None = field(default=None, repr=False)
 
 
-def attachment_parts(message):
+def attachment_parts(message, *, on_error=None):
     """MIME indices, not thread IDs or filenames, identify each attachment."""
     if type(message) is not dict or type(message.get('payload')) is not dict: raise MailError('unreadable')
     output, count = [], 0
@@ -65,9 +65,16 @@ def attachment_parts(message):
             else: raise MailError('unreadable')
         children = part.get('parts', [])
         if type(children) is not list or len(children) > 200: raise MailError('limit')
-        for index, child in enumerate(children): walk(child, path + '.' + str(index), depth+1)
+        for index, child in enumerate(children):
+            try: walk(child, path + '.' + str(index), depth+1)
+            except MailError as error:
+                if on_error is None: raise
+                on_error(error.code)
 
-    walk(message['payload'], '0', 0)
+    try: walk(message['payload'], '0', 0)
+    except MailError as error:
+        if on_error is None: raise
+        on_error(error.code)
     return output
 
 

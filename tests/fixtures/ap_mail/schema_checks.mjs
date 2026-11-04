@@ -40,6 +40,13 @@ try{
              receipts:[{...receipt(id(),'0.9'),declared_size:0}],next_cursor:{phase:'live',history_id:'1000'}};
  await assert.rejects(call('inventory',next),/invalid|check/);
  assert.equal((await q('select cursor from ap_mail_connections where id=$1',[conn])).rows[0].cursor.history_id,'999');
+ const attentionInventory={...inventory,expected_version:current.version,expected_cursor:current.cursor,
+  messages:[{...message,message_id:'bad',received_at:null,error_code:'unreadable'}],receipts:[],next_cursor:current.cursor};
+ await call('inventory',attentionInventory);
+ assert.equal((await read('messages',{connection_id:conn,ids:['bad']})).items[0].error_code,'unreadable');
+ assert.equal((await read('status')).counts.message_attention,1);
+ await call('sync_error',{connection_id:conn,expected_generation:1,reason:'auth'});
+ assert.equal((await read('status')).connection.error,'auth');
  const claimed=await call('claim',{job_id:a,dispatch_generation:1});
  const fence=claimed.claim;
  assert.equal(fence.receipt_id,a);assert.equal(fence.mode,'extract');

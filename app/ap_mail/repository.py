@@ -3,7 +3,7 @@ from uuid import uuid4
 from .contracts import MailError, bounded_text, canonical, digest, identifier, natural, payload_digest
 
 OPERATIONS = frozenset('inventory claim heartbeat record_original save_extraction needs_attention release_retry finish '
-                       'retry requeue pause reconcile outbox_sent outbox_delay'.split())
+                       'retry requeue pause reconcile outbox_sent outbox_delay sync_error'.split())
 FIELDS = {
     'inventory':'connection_id expected_generation expected_version expected_cursor messages receipts next_cursor completed',
     'claim':'job_id dispatch_generation', 'heartbeat':'claim',
@@ -12,6 +12,7 @@ FIELDS = {
     'retry':'receipt_id expected_version', 'requeue':'receipt_id expected_version',
     'pause':'connection_id expected_version paused', 'reconcile':'limit',
     'outbox_sent':'job_id dispatch_generation task_name', 'outbox_delay':'job_id dispatch_generation delay_seconds',
+    'sync_error':'connection_id expected_generation reason',
 }
 
 
@@ -71,6 +72,13 @@ class MailRepository:
 
     def receipt(self, receipt_id):
         return self._read('receipt', {'receipt_id':identifier(receipt_id)})
+
+    def messages_known(self, ids):
+        from .gmail import opaque
+        if type(ids) is not list or len(ids)>100: raise MailError('invalid')
+        for ident in ids: opaque(ident)
+        items=self._read('messages',{'connection_id':self.config.connection_id,'ids':ids})['items']
+        return {item['message_id']:item for item in items}
 
     def private_original(self, receipt_id):
         receipt_id = identifier(receipt_id)

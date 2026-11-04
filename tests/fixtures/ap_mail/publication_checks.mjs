@@ -109,6 +109,7 @@ try{
  await assert.rejects(control('choice',{receipt_id:d.claim.receipt_id,expected_version:similar.version,choice:'existing'}),/conflict/);
  const list=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":50}') v",[w])).rows[0].v;
  assert.ok(list.items.length);assert.equal(JSON.stringify(list).includes('secret-reference'),false);
+ assert.equal(list.items.find(row=>row.id===a.claim.receipt_id).display_status,'reviewed');
  await q("update ap_mail_receipts set discovered_at=now()+interval '1 day' where id=$1",[d.claim.receipt_id]);
  const latest=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":1}') v",[w])).rows[0].v;
  assert.equal(latest.items[0].id,d.claim.receipt_id);

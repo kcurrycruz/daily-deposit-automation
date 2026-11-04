@@ -72,26 +72,33 @@ end $$;
 
 create function public.ap_mail_control_read(p_operation text,p_workspace uuid,p_data jsonb)
 returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
-declare items jsonb; lim integer; c ap_mail_connections;
+declare items jsonb; lim integer; c ap_mail_connections; counts jsonb;
 begin
  if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'invalid'; end if;
  if p_operation='status' then
   if p_data<>'{}'::jsonb then raise exception 'invalid'; end if;
   select * into c from ap_mail_connections where workspace_id=p_workspace and active;
+  select coalesce(jsonb_object_agg(status,n),'{}') into counts from (
+   select case when s.completed then 'reviewed' when s.archived then 'archived' else r.status end status,count(*) n
+   from ap_mail_receipts r left join ap_statements s on s.workspace_id=r.workspace_id and s.id=r.statement_id
+   where r.workspace_id=p_workspace group by 1) t;
   return jsonb_build_object('connection',case when c.id is null then null else jsonb_build_object('id',c.id,'email',c.email,'label',c.label_name,
     'paused',c.paused,'version',c.version,'generation',c.generation,'lastCheckedAt',c.last_checked_at,'lastSuccessAt',c.last_success_at,'error',c.error_code,
-    'historical',c.cursor->'historical') end,'counts',(ap_mail_read('status',p_workspace,'{}'))->'counts');
+    'historical',c.cursor->'historical') end,'counts',counts||jsonb_build_object('message_attention',
+     (ap_mail_read('status',p_workspace,'{}'))->'counts'->'message_attention'));
  end if;
  lim=coalesce((p_data->>'limit')::integer,50);
  if lim not between 1 and 50 or p_data-array['limit','cursor']<>'{}'::jsonb then raise exception 'invalid'; end if;
  if p_operation='receipts' then
   select coalesce(jsonb_agg(to_jsonb(t)),'[]') into items from (
    select r.id,r.version,r.filename,r.status,r.reason,r.statement_id,r.discovered_at,r.imported_at,m.received_at,m.sender,m.subject,
+    case when s.completed then 'reviewed' when s.archived then 'archived' else r.status end display_status,
     r.sha256 is not null original_available,p.receipt_id is not null preliminary_available,
     jsonb_build_object('kind',r.assessment->'kind','repeated',r.assessment->'repeated','added',r.assessment->'added','match',r.assessment->'match') assessment,
     p.metadata preliminary
    from ap_mail_receipts r join ap_mail_messages m on m.workspace_id=r.workspace_id and m.account_id=r.account_id and m.message_id=r.message_id
    left join ap_mail_preliminary p on p.workspace_id=r.workspace_id and p.receipt_id=r.id
+   left join ap_statements s on s.workspace_id=r.workspace_id and s.id=r.statement_id
    where r.workspace_id=p_workspace and (p_data->>'cursor' is null or (r.discovered_at,r.id)<
     ((p_data->'cursor'->>'discovered_at')::timestamptz,(p_data->'cursor'->>'id')::uuid))
    order by r.discovered_at desc,r.id desc limit lim) t;

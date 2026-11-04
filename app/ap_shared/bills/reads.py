@@ -132,7 +132,7 @@ class BillReadAPI:
         self.assert_current(pin);source=self._context['source']
         if not pin.import_id:return None
         return dict(id=pin.import_id,record_count=source['record_count'],metadata=source['metadata'],
-            created_at=source.get('created_at'),vendorDigest=source.get('snapshot_manifest',{}).get('vendorDigest'),workingSet=self._context['working'],
+            created_at=source.get('created_at'),vendorDigest=(source.get('snapshot_manifest') or {}).get('vendorDigest'),workingSet=self._context['working'],
             rangeRefreshPending=bool(pin.working_set_id and self._context['home'].get('working_protection_epoch')!=pin.protection_epoch))
 
     def mappings(self,pin):self.assert_current(pin);return dict(self._context['mappings'])

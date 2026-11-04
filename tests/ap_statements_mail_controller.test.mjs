@@ -40,6 +40,16 @@ test('writes keep one request identity for a lost acknowledgement retry',async()
  await assert.rejects(f.controller.pause(true));fail=false;await f.controller.retryLast();
  const writes=f.calls.filter(c=>c[0]==='mail_pause');assert.equal(writes[0][2].requestId,writes[1][2].requestId);f.controller.dispose();
 });
+test('loading older imports adopts their drafts and polling retains the expanded list',async()=>{
+ const adopted=[],f=fixture({onImported:ids=>adopted.push(...ids)});const original=f.client.request;
+ f.client.request=async(action,payload,options)=>{
+  if(action==='mail_list')return payload.cursor?{items:[{id:'older',status:'awaiting_review',statement_id:'older-statement'}],nextCursor:null}:
+   {items:[{id:'receipt',status:'awaiting_review',statement_id:'new'}],nextCursor:{id:'receipt',discovered_at:'2026-11-04T12:00:00Z'}};
+  return original(action,payload,options);
+ };
+ await f.controller.load();await f.controller.more('receipts');assert.deepEqual(adopted,['new','older-statement']);
+ await f.controller.load();assert.equal(f.controller.state.items.length,2);f.controller.dispose();
+});
 test('incremental workspace adoption retains current dirty document and review decisions',async()=>{
  const existing={id:'existing',confirmed:false,rows:[]};const incoming={id:'new',confirmed:false,rows:[]};const events=[];
  const workspace=createSharedWorkspace({dispose(){},async request(action,payload){assert.equal(action,'statement');return {doc:incoming,resolutions:{},completed:false,archived:false};}},

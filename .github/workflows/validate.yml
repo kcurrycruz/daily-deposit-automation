@@ -1,6 +1,13 @@
 name: Validate Application
 
 on:
+  workflow_dispatch:
+    inputs:
+      synthetic_mail_acceptance:
+        description: 'Use the approved synthetic environment for mail acceptance; no production target'
+        type: boolean
+        required: false
+        default: false
   push:
     paths:
       - 'app/**'
@@ -57,3 +64,41 @@ jobs:
       - run: terraform -chdir=deploy/ap_mail validate
       - run: docker build -f workers/ap_mail/Dockerfile -t ap-mail-smoke .
       - run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint python ap-mail-smoke -m workers.ap_mail.smoke
+
+  mail-synthetic:
+    if: github.event_name == 'workflow_dispatch' && inputs.synthetic_mail_acceptance
+    runs-on: ubuntu-latest
+    environment: ap-mail-synthetic
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.AP_MAIL_WIF_PROVIDER }}
+          service_account: ${{ vars.AP_MAIL_TEST_RUNNER }}
+      - run: pip install --require-hashes -r workers/ap_mail/requirements.lock
+      - run: python -m unittest discover -s tests -p test_ap_mail_integration.py -v
+        env:
+          AP_MAIL_SYNTHETIC_INTEGRATION: '1'
+          AP_MAIL_SYNTHETIC_ATTESTATION: 'synthetic-only'
+          AP_MAIL_ALLOW_TEST_PROJECT: ${{ vars.AP_MAIL_TEST_PROJECT_REF }}
+          AP_MAIL_SUPABASE_URL: ${{ vars.AP_MAIL_TEST_SUPABASE_URL }}
+          AP_MAIL_ALLOW_TEST_WORKSPACE: ${{ vars.AP_MAIL_TEST_WORKSPACE_ID }}
+          AP_MAIL_WORKSPACE_ID: ${{ vars.AP_MAIL_TEST_WORKSPACE_ID }}
+          AP_MAIL_CONNECTION_ID: ${{ vars.AP_MAIL_TEST_CONNECTION_ID }}
+          AP_MAIL_BUCKET: ${{ vars.AP_MAIL_TEST_BUCKET }}
+          AP_MAIL_SUPABASE_KEY: ${{ secrets.AP_MAIL_TEST_SUPABASE_KEY }}
+          AP_MAIL_GOOGLE_PROJECT: ${{ vars.AP_MAIL_TEST_GOOGLE_PROJECT }}
+          AP_MAIL_ALLOW_GOOGLE_PROJECT: ${{ vars.AP_MAIL_TEST_GOOGLE_PROJECT }}
+          AP_MAIL_QUEUE: ${{ vars.AP_MAIL_TEST_QUEUE }}
+          AP_MAIL_PROCESSOR_URL: ${{ vars.AP_MAIL_TEST_PROCESSOR_URL }}
+          AP_MAIL_TASK_CALLER: ${{ vars.AP_MAIL_TEST_TASK_CALLER }}
+          AP_MAIL_PROCESSOR_AUDIENCE: ${{ vars.AP_MAIL_TEST_PROCESSOR_AUDIENCE }}
+          AP_MAIL_GMAIL_SECRET: ${{ vars.AP_MAIL_TEST_GMAIL_SECRET }}
+          AP_MAIL_SYNTHETIC_MESSAGE_ID: ${{ vars.AP_MAIL_TEST_MESSAGE_ID }}

@@ -42,6 +42,10 @@ class MailSourceTests(unittest.TestCase):
         self.assertEqual(result['freshness']['daysOld'],1)
         self.assertFalse(result['freshness']['stale'])
 
+    def test_original_rows_import_with_null_snapshot_manifest_still_compares(self):
+        sources,repo,_=self.make();repo.info['storage_format']='rows-v1';repo.info['snapshot_manifest']=None
+        self.assertEqual(sources.prepare(DOC,CLAIM)['evidence']['rows'][0]['status'],'presence')
+
     def test_incomplete_directory_or_source_change_never_becomes_missing(self):
         sources,repo,reads=self.make();original=reads.vendors_page
         def partial(*args,**kwargs):

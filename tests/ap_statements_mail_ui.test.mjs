@@ -15,3 +15,7 @@ test('capability absence renders nothing and disconnected state does not imply e
  assert.equal(mailImportsHTML({enabled:false}),'');
  assert.match(mailImportsHTML({enabled:true,loaded:true,connection:null,items:[],messages:[],counts:{}}),/not connected/i);
 });
+test('an explicitly completed server statement shows Reviewed without the preliminary action banner',()=>{
+ const html=mailImportsHTML({enabled:true,loaded:true,connection:null,items:[{id:'r',status:'awaiting_review',display_status:'reviewed',filename:'done.pdf',completed:true,statement_id:'s'}],messages:[],counts:{}});
+ assert.match(html,/Reviewed/);assert.doesNotMatch(html,/Awaiting review|Preliminary comparison/);assert.match(html,/badge green/);
+});

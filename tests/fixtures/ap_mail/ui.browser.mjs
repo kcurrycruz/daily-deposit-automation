@@ -48,6 +48,22 @@ try{
    formSame:form===document.querySelector('#mail-history-form'),date:after.value,requests:window.calls.filter(a=>a==='bootstrap').length};
  });
  assert.deepEqual(result,{canvasSame:true,noteSame:true,focused:true,note:'Typing a review',selection:2,scroll:41,formSame:true,date:'2026-10-01',requests:1});
+ await page.evaluate(()=>{
+  document.querySelector('#overlay-root').innerHTML='';
+  const old=window.hwfcSharedClient.request;
+  window.hwfcSharedClient.request=async(action,payload)=>{
+   if(action==='mail_list')return {items:[{id:'completed-receipt',statement_id:'completed-statement',filename:'completed.pdf',status:'awaiting_review',display_status:'reviewed'}],nextCursor:null};
+   if(action==='statement')return {doc:{id:'completed-statement',vendor:'Reviewed Vendor',filename:'completed.pdf',confirmed:true,rows:[],warnings:[],pageCount:1},
+    completed:true,readOnly:true,version:2,resolutions:{},results:[],mappingSnapshot:{},originalAvailable:false};
+   return old(action,payload);
+  };
+  document.querySelector('[data-action="mail-refresh"]').click();
+ });
+ await page.waitForSelector('[data-action="mail-review"]');await page.click('[data-action="mail-review"]');
+ try{await page.waitForSelector('#overlay-root .drawer',{timeout:3000});}
+ catch(error){console.error(JSON.stringify({errors,body:await page.locator('body').innerText()}));throw error;}
+ assert.match(await page.locator('#overlay-root').innerText(),/Reviewed Vendor/);
+ await page.evaluate(()=>document.querySelector('#overlay-root').innerHTML='');
  assert.deepEqual(errors,[]);
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.querySelector('#mail-history-form').getBoundingClientRect().width>0),true);

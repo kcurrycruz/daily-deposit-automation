@@ -667,7 +667,9 @@ document.addEventListener('click', async e => {
       }
       if(action==='mail-review'){
         if(state.selected&&dirty.has(state.selected))throw Error('Save your current statement before opening another.');
-        await shared.adoptMailStatements([row.statement_id]);openDoc(row.statement_id);
+        await shared.adoptMailStatements([row.statement_id]);
+        if(state.statements.some(doc=>doc.id===row.statement_id))openDoc(row.statement_id);
+        else{historicalDetail={...await shared.statement(row.statement_id),readOnly:true};historySelection=null;openDoc(row.statement_id,null,{historical:true});}
       }
       if(action==='mail-existing'){
         if(state.selected&&dirty.has(state.selected))throw Error('Save your current statement before opening another.');

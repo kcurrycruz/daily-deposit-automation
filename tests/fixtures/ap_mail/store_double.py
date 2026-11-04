@@ -14,6 +14,7 @@ class MailStore:
         self.messages={};self.receipts={};self.fail_message=None;self.commits=[]
 
     def connection(self): return deepcopy(self.home)
+    def queue_stale(self,limit=50):return {'queued':0}
 
     def messages_known(self, ids): return {key:deepcopy(self.messages[key]) for key in ids if key in self.messages}
 

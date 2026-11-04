@@ -77,5 +77,20 @@ try{
  claim=(await mail('claim',{job_id:r2.id,dispatch_generation:3})).claim;
  await q('update ap_statements set version=version+1 where id=$1',[e.doc.id]);
  await assert.rejects(publish({...e,claim,pin:await pin()}),/conflict/);
+ await mail('needs_attention',{claim,reason:'conflict'});
+ // All storage writers share the same bucket budget, including mail reservations.
+ const h=await incoming('1');
+ const reserve=(bytes,budget)=>q('select ap_mail_reserve($1,$2,$3,$4,$5) v',[w,h.claim,'hwfc-ap-private',bytes,budget]);
+ await assert.rejects(reserve(8,7),/storage/);await reserve(8,100);
+ const billJob=id();
+ await q("insert into ap_bill_jobs(id,workspace_id,session_nonce,expected_import_version,metadata) values($1,$2,$3,0,'{}')",[billJob,w,id()]);
+ await assert.rejects(q("select ap_storage_reserve('bill',$1,$2,'hwfc-ap-private',95,100)",[w,billJob]),/bill_quota/);
+ await mail('needs_attention',{claim:h.claim,reason:'storage'});
+ // A new comparison cycle can be queued only for an untouched machine draft.
+ const i=await incoming('3');await publish(i);
+ const queued=(await q('select ap_mail_queue_stale($1,$2,50) v',[w,conn])).rows[0].v;
+ assert.equal(queued.queued,1);
+ const job=(await q('select mode,attempts,state from ap_mail_jobs where receipt_id=$1',[i.claim.receipt_id])).rows[0];
+ assert.deepEqual(job,{mode:'recompare',attempts:0,state:'queued'});
  console.log('Mail publication checks passed');
 }finally{await db.close();}

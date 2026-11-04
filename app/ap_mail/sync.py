@@ -180,6 +180,7 @@ class MailSync:
             if not home or home['id']!=connection_id or not home['active']: raise MailError('not_configured')
             if home['paused']: return PollSummary('paused')
             self.gmail.profile();self.gmail.labels()
+            self.repo.queue_stale(50)
             if home['cursor'].get('phase')=='baseline' and not home['cursor'].get('anchor'):
                 home=self.begin_baseline()
             for _ in range(10000):

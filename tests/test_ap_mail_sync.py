@@ -7,6 +7,14 @@ from app.ap_mail.contracts import MailError
 
 
 class SyncTests(unittest.TestCase):
+    def test_each_live_poll_schedules_only_a_bounded_stale_draft_page(self):
+        gmail=Gmail({});store=MailStore();calls=[]
+        store.queue_stale=lambda limit:calls.append(limit)
+        sync=self.sync(gmail,store)
+        self.active(store)
+        sync.poll(C)
+        self.assertEqual(calls,[50])
+        store.home['paused']=True;sync.poll(C);self.assertEqual(calls,[50])
     def sync(self,mail,store,monotonic=lambda:0):
         from app.ap_mail.sync import MailSync
         return MailSync(mail,store,lambda:datetime(2026,11,4,12,10,tzinfo=timezone.utc),monotonic)

@@ -70,6 +70,29 @@ class MailRepository:
         return self._rpc('ap_mail_publish',dict(p_workspace=self.config.workspace_id,p_request_id=identifier(request_id or str(uuid4())),
             p_payload_hash=payload_digest({'operation':'publish','data':payload}),p_data=payload))
 
+    def reserve_original(self,claim,size):
+        from dataclasses import asdict
+        natural(size,1,self.config.max_file_bytes)
+        return self._rpc('ap_mail_reserve',dict(p_workspace=self.config.workspace_id,p_claim=asdict(claim),p_bucket=self.config.bucket,
+            p_requested=size,p_budget=self.config.storage_budget_bytes))
+
+    def copy_original(self,claim,raw):
+        from dataclasses import asdict
+        from .storage import OriginalStore
+        self.reserve_original(claim,len(raw));self.storage._private_bucket()
+        sha=OriginalStore(self.config).put(raw)
+        self.mutate('record_original',dict(claim=asdict(claim),sha256=sha,object_key=self.config.workspace_id+'/pdf/'+sha+'.pdf',size=len(raw)))
+        return sha
+
+    def queue_stale(self,limit=50):
+        natural(limit,1,50)
+        return self._rpc('ap_mail_queue_stale',dict(p_workspace=self.config.workspace_id,p_connection=self.config.connection_id,p_limit=limit))
+
+    def original_bytes(self,receipt):
+        from .storage import OriginalStore
+        verified=self.private_original(receipt['id'])
+        return OriginalStore(self.config).get(verified['sha256'],verified['actual_size'])
+
     def receipts_page(self, filters, cursor=None, limit=50):
         natural(limit, 1, 50)
         if filters: raise MailError('invalid')

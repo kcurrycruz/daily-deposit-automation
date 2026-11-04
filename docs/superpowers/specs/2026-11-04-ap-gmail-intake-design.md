@@ -1,6 +1,6 @@
 # Gmail statement intake and background scanning
 
-Date: 2026-11-04. Status: proposed design, awaiting owner approval. Branch: `codex/ap-gmail-intake`, base `1feb83a`. No application code, cloud resources, credentials or database migrations have been created for this feature.
+Date: 2026-11-04. Status: owner approved the written design ("looks good"); implementation plan pending review. Branch: `codex/ap-gmail-intake`, base `1feb83a`. No application code, cloud resources, credentials or database migrations have been created for this feature.
 
 ## Intent and agreed approach
 

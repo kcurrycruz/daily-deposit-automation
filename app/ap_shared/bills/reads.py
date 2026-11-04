@@ -96,10 +96,11 @@ def safe_read(method):
 
 
 class BillReadAPI:
-    def __init__(self, repository, authorize, caches):
+    def __init__(self, repository, authorize, caches, *, preliminary=False):
         self.repo,self.authorize,self.caches=repository,authorize,caches
         self.config=repository.config;self.repository=repository.working;self.bill_ops=self
         self._grant=object();self._context=None
+        self.preliminary=preliminary
 
     def _check(self, grant):
         if grant is not self._grant:raise PermissionError('Read grant required.')
@@ -117,7 +118,7 @@ class BillReadAPI:
             if (not working or working['workingSetId']!=set_id or working['source']['importId']!=active or
                     working['source']['sourceDigest']!=source['file_hash'] or working['source']['recordCount']!=source['record_count']):raise MailError('stale_source')
             validate_working_manifest(working)
-            if home.get('working_protection_epoch')!=home.get('bill_protection_epoch'):raise MailError('stale_source')
+            if not self.preliminary and home.get('working_protection_epoch')!=home.get('bill_protection_epoch'):raise MailError('stale_source')
         elif working is not None:raise MailError('stale_source')
         pin=SourcePin(active,home.get('import_version',0),source['file_hash'] if active else None,set_id,
             home.get('working_set_version',0),home.get('bill_protection_epoch',0),working['workingDigest'] if working else None,
@@ -131,7 +132,8 @@ class BillReadAPI:
         self.assert_current(pin);source=self._context['source']
         if not pin.import_id:return None
         return dict(id=pin.import_id,record_count=source['record_count'],metadata=source['metadata'],
-            created_at=source.get('created_at'),vendorDigest=source.get('snapshot_manifest',{}).get('vendorDigest'),workingSet=self._context['working'])
+            created_at=source.get('created_at'),vendorDigest=source.get('snapshot_manifest',{}).get('vendorDigest'),workingSet=self._context['working'],
+            rangeRefreshPending=bool(pin.working_set_id and self._context['home'].get('working_protection_epoch')!=pin.protection_epoch))
 
     def mappings(self,pin):self.assert_current(pin);return dict(self._context['mappings'])
 
@@ -148,7 +150,7 @@ class BillReadAPI:
         self._bind(pin);integer(limit,minimum=1,maximum=500)
         if query.get('importId')!=pin.import_id:raise MailError('stale_source')
         if pin.working_set_id:
-            result=WorkingQueries(self).candidates_page(pin.working_set_id,query,cursor,self._grant,limit)
+            result=WorkingQueries(self,allow_pending_protections=self.preliminary).candidates_page(pin.working_set_id,query,cursor,self._grant,limit)
         else:
             query=validate_query(query);query_hash=canonical_hash(query);after=decode_cursor(cursor,pin.import_id,query_hash)
             with self._index(pin.import_id,self._grant) as (index,_):result=index.candidates_page(query,after,limit,RESPONSE_BYTES-4096)
@@ -160,7 +162,7 @@ class BillReadAPI:
     def vendors_page(self,pin,cursor,limit=500,include_archived=False):
         self._bind(pin);integer(limit,minimum=1,maximum=500)
         if pin.working_set_id:
-            result=WorkingQueries(self).vendors_page(pin.working_set_id,cursor,self._grant,limit,include_archived)
+            result=WorkingQueries(self,allow_pending_protections=self.preliminary).vendors_page(pin.working_set_id,cursor,self._grant,limit,include_archived)
         else:
             if include_archived:raise MailError('invalid')
             query_hash=canonical_hash(['bill_vendors_page',pin.import_id]);after=decode_cursor(cursor,pin.import_id,query_hash)
@@ -181,5 +183,5 @@ class BillReadAPI:
     def archived_references_page(self,pin,references,cursor,limit=500):
         self._bind(pin)
         if not pin.working_set_id:raise MailError('invalid')
-        result=WorkingQueries(self).archived_references_page(pin.import_id,references,cursor,self._grant,limit)
+        result=WorkingQueries(self,allow_pending_protections=self.preliminary).archived_references_page(pin.import_id,references,cursor,self._grant,limit)
         self.assert_current(pin);return result

@@ -8,13 +8,14 @@ from ..parser import encoded
 
 
 class WorkingQueries:
-    def __init__(self,operations):
+    def __init__(self,operations,*,allow_pending_protections=False):
         self.ops=operations;self.repo=operations.repository;self.cache=operations.cache
+        self.allow_pending_protections=allow_pending_protections
 
     def _scope(self,set_id,auth):
         self.ops._check(auth);require_uuid(set_id);home=self.repo.home()
         if home.get('active_working_set_id')!=set_id:raise SnapshotError('bill_conflict')
-        if home.get('working_protection_epoch')!=home['bill_protection_epoch']:
+        if not self.allow_pending_protections and home.get('working_protection_epoch')!=home['bill_protection_epoch']:
             raise SnapshotError('bill_range_refresh')
         manifest=self.repo.working_set(set_id)['manifest']
         if manifest['source']['importId']!=home['active_import_id']:raise SnapshotError('bill_conflict')

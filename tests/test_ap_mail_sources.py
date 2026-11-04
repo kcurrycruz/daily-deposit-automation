@@ -24,11 +24,11 @@ class MailSourceTests(unittest.TestCase):
         with self.assertRaises(MailError) as error:SourceReadRepository(Mail()).read_context()
         self.assertEqual(error.exception.code,'denied')
 
-    def make(self):
+    def make(self,preliminary=False):
         from app.ap_shared.bills.reads import BillReadAPI,ReadCaches
         from app.ap_mail.sources import MailSources,DomainAdapter
         repo=ReadStore();self.addCleanup(repo.close);caches=ReadCaches(repo);self.addCleanup(caches.close)
-        reads=BillReadAPI(repo,lambda:True,caches)
+        reads=BillReadAPI(repo,lambda:True,caches,preliminary=preliminary)
         sources=MailSources(reads,DomainAdapter(),lambda claim:True,lambda:datetime(2026,11,4,12,tzinfo=timezone.utc))
         return sources,repo,reads
 
@@ -69,6 +69,20 @@ class MailSourceTests(unittest.TestCase):
         doc=copy.deepcopy(DOC);doc['rows'][0].update(invoiceNumber='OLD',date='2024-10-01')
         result=sources.prepare(doc,CLAIM)
         self.assertEqual(result['evidence']['rows'][0]['status'],'range')
+
+    def test_unattended_draft_keeps_frozen_range_preliminary_until_refresh(self):
+        import copy
+        sources,repo,reads=self.make(preliminary=True);repo.enable_working()
+        old_pin=reads.pin();repo._home['bill_protection_epoch']+=1
+        with self.assertRaises(MailError):reads.assert_current(old_pin)
+        recent=sources.prepare(DOC,CLAIM)
+        self.assertEqual(recent['evidence']['rows'][0]['status'],'presence')
+        self.assertTrue(recent['evidence']['rangeRefreshPending'])
+        doc=copy.deepcopy(DOC);doc['rows'][0].update(invoiceNumber='OLD',date='2024-10-01')
+        self.assertEqual(sources.prepare(doc,CLAIM)['evidence']['rows'][0]['status'],'range')
+        self.assertEqual(repo._home['working_protection_epoch'],0)
+        reads.preliminary=False
+        with self.assertRaises(MailError):reads.pin()
 
     def test_read_handler_has_no_write_dispatch(self):
         sources,repo,reads=self.make()

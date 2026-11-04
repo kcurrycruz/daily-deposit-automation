@@ -60,6 +60,7 @@ class MailSources:
         result=self.domain.run('prepare',dict(doc=doc,info=info,mappings=mappings),
             read=lambda action,payload:self._page(pin,claim,action,payload),heartbeat=lambda:self._check(claim))
         self.assert_current(pin,claim)
+        result['evidence']['rangeRefreshPending']=bool(info and info.get('rangeRefreshPending'))
         freshness={'uploadedAt':None,'daysOld':None,'stale':None}
         if info and info.get('created_at'):
             try:

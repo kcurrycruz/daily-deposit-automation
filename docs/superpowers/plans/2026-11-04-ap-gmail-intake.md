@@ -105,11 +105,11 @@ Contract names below are authoritative; implementation may split internals witho
 
 **Interfaces:** `TaskDispatcher(repository, tasks_client, config).drain(limit=100) -> DispatchSummary`; `.reconcile(limit=100) -> DispatchSummary`. Task name is a deterministic hash of fixed workspace/job/dispatch generation; JSON body contains job ID and dispatch generation only. Target URL and OIDC service account/audience come only from server configuration.
 
-- [ ] **Step 1: Write failing tests.** `test_enqueue_ack_lost`, `test_outbox_commit_precedes_task`, `test_task_missing_lease_expired_repair`, `test_backoff_and_pause` assert: retry after successful creation/timeout accepts AlreadyExists without duplicate job; unknown create outcome never discards outbox; 404 task plus expired/nonexistent lease produces one recoverable dispatch generation; active lease is not replaced; quota failure applies bounded delay; paused connection dispatch cannot make a new claim.
-- [ ] **Step 2: Run** `python -m unittest discover -s tests -p test_ap_mail_dispatch.py -v`; expect missing module failure.
-- [ ] **Step 3: Implement** TaskDispatcher with bounded retries, deterministic deduplication, generation guards and safe request logging. Verify task name/generation matches pending work before acknowledging it. Retained task names never force resetting receipt history; database generation remains the authority.
-- [ ] **Step 4: Rerun tests** with timeout-before-send, timeout-after-create, duplicate delivery and process-restart fault injection.
-- [ ] **Step 5: Commit** with message `feat(ap): dispatch and recover queued statement scans`.
+- [x] **Step 1: Write failing tests.** `test_enqueue_ack_lost`, `test_outbox_commit_precedes_task`, `test_task_missing_lease_expired_repair`, `test_backoff_and_pause` assert: retry after successful creation/timeout accepts AlreadyExists without duplicate job; unknown create outcome never discards outbox; 404 task plus expired/nonexistent lease produces one recoverable dispatch generation; active lease is not replaced; quota failure applies bounded delay; paused connection dispatch cannot make a new claim.
+- [x] **Step 2: Run** `python -m unittest discover -s tests -p test_ap_mail_dispatch.py -v`; expect missing module failure.
+- [x] **Step 3: Implement** TaskDispatcher with bounded retries, deterministic deduplication, generation guards and safe request logging. Verify task name/generation matches pending work before acknowledging it. Retained task names never force resetting receipt history; database generation remains the authority.
+- [x] **Step 4: Rerun tests** with timeout-before-send, timeout-after-create, duplicate delivery and process-restart fault injection.
+- [x] **Step 5: Commit** with message `feat(ap): dispatch and recover queued statement scans`.
 
 ### Task 5: Isolated headless extraction using the existing scanner
 
@@ -211,4 +211,4 @@ Contract names below are authoritative; implementation may split internals witho
 
 All approved design sections map to tasks: runtime/limits (5, 8, 11), Gmail/account/OAuth (1, 3, 11), durable work/fencing/outbox (2, 4, 8), statement duplicates and immutable human work (7), preliminary source parity/refresh (6, 8), stable UI and controls (9, 10), machine boundaries/rollout/recovery (11, 12). Each Review Focus condition has explicit assertions in its owning tasks. Interfaces use the names defined above; numeric resource/retry defaults remain the approved proposals to verify before activation.
 
-Status: plan approved by owner ("yes"); Tasks 1–3 implemented, Task 4 in progress. Native execution preference preserved. The existing baseline is 46 passing core/statement-duplicate/shared-workspace Node tests, not mail feature verification.
+Status: plan approved by owner ("yes"); Tasks 1–4 implemented, Task 5 in progress. Native execution preference preserved. The existing baseline is 46 passing core/statement-duplicate/shared-workspace Node tests, not mail feature verification.

@@ -1,0 +1,7 @@
+{
+  "name": "hwfc-ap-mail-scanner",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=24 <25"},
+  "dependencies": {"playwright": "1.62.1"}
+}

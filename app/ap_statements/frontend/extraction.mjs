@@ -109,12 +109,12 @@ function scanQuality(lines, filename, ocrFields) {
   const agrees=doc.declaredTotal!=null && doc.rows.reduce((sum,row)=>sum+row.amount,0)===doc.declaredTotal;
   return {doc, score:valid.length*100 + doc.rows.length*10 + (agrees?20:0) + (doc.statementDate?5:0) + (doc.declaredTotal!=null?5:0)};
 }
-async function retryScan(page, initial, filename, report) {
+async function retryScan(page, initial, filename, report, maxRasterPixels) {
   const quality=scanQuality(initial,filename), doc=quality.doc;
   if (doc.rows.length && doc.statementDate && doc.declaredTotal!=null && doc.rows.every(row=>row.confidence>=80 && row.date)) return {lines:initial};
   const rinella=layouts.find(layout=>layout.id==='rinella').pattern.test(initial.map(line=>line.text).join('\n'));
   if (!rinella && doc.rows.length) return {lines:initial};
-  const scaled=page.getViewport({scale:(rinella?400:300)/72});
+  const scaled=rasterViewport(page,(rinella?400:300)/72,maxRasterPixels);
   const canvas=documentCanvas(scaled);
   try {
     report('Reading scan more closely');
@@ -162,7 +162,8 @@ function straighten(canvas, angle) {
   ctx.translate(copy.width/2, copy.height/2); ctx.rotate(-angle); ctx.drawImage(canvas, -canvas.width/2, -canvas.height/2);
   const target = canvas.getContext('2d'); target.clearRect(0, 0, canvas.width, canvas.height); target.drawImage(copy, 0, 0); copy.width = 0; copy.height = 0;
 }
-export async function extractPDF(file, onProgress = () => {}) {
+export async function extractPDF(file, onProgress = () => {}, {maxRasterPixels} = {}) {
+  if(maxRasterPixels!==undefined&&(!Number.isSafeInteger(maxRasterPixels)||maxRasterPixels<1||maxRasterPixels>20_000_000))throw Error('Invalid raster budget.');
   if (file.size > 50 * 1024 * 1024) throw new Error('This PDF is larger than 50 MB. Split or compress it before uploading.');
   const bytes = new Uint8Array(await file.arrayBuffer());
   const document = await pdfjs.getDocument({ data: bytes, useSystemFonts: true }).promise;
@@ -172,7 +173,7 @@ export async function extractPDF(file, onProgress = () => {}) {
     for (let index = 1; index <= document.numPages; index++) {
       onProgress({ page: index, total: document.numPages, stage: 'Reading text', fraction: (index - 1) / document.numPages });
       const page = await document.getPage(index);
-      const viewport = page.getViewport({ scale: 1 });
+      const viewport = rasterViewport(page,1);
       const content = await page.getTextContent();
       const words = content.items.filter(item => item.str?.trim()).flatMap(item => {
         const transform = pdfjs.Util.transform(viewport.transform, item.transform);
@@ -186,7 +187,7 @@ export async function extractPDF(file, onProgress = () => {}) {
       let lines, ocrFields, ocr = false;
       if (words.map(w => w.text).join(' ').length < 60) {
         ocr = true;
-        const scaled = page.getViewport({ scale: 200 / 72 });
+        const scaled = rasterViewport(page,200/72,maxRasterPixels);
         const canvas = documentCanvas(scaled);
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise;
         improveScan(canvas);
@@ -203,7 +204,7 @@ export async function extractPDF(file, onProgress = () => {}) {
         lines = wordsToLines(recognized, .005);
         if (!lines.length) lines = (data.text || '').split('\n').filter(Boolean).map((text, i, all) => ({ text, y: i / all.length, words: [], confidence: data.confidence ?? 0 }));
         canvas.width = 0; canvas.height = 0;
-        const retry=await retryScan(page,lines,file.name,stage=>onProgress({page:index,total:document.numPages,stage,fraction:(index-.1)/document.numPages}));
+        const retry=await retryScan(page,lines,file.name,stage=>onProgress({page:index,total:document.numPages,stage,fraction:(index-.1)/document.numPages}),maxRasterPixels);
         lines=retry.lines;
         ocrFields=retry.ocrFields;
         if(retry.note)scanNotes.push(`Page ${index}: ${retry.note}`);
@@ -217,6 +218,20 @@ export async function extractPDF(file, onProgress = () => {}) {
     statement.rawText = pages.map(p => `PAGE ${p.page}\n${p.lines.map(l => l.text).join('\n')}`).join('\n\n');
     return statement;
   } finally { await document.destroy(); }
+}
+function rasterViewport(page, scale, maxPixels) {
+  let viewport=page.getViewport({scale});
+  const valid=()=>Number.isFinite(viewport.width)&&Number.isFinite(viewport.height)&&viewport.width>0&&viewport.height>0;
+  if(!valid())throw Error('Invalid PDF dimensions.');
+  if(maxPixels!==undefined){
+    // Ceil-aware scaling bounds the actual allocation, including retry canvases.
+    for(let step=0;step<8&&(Math.ceil(viewport.width)*Math.ceil(viewport.height)>maxPixels||Math.max(viewport.width,viewport.height)>32767);step++){
+      scale*=Math.min(Math.sqrt(maxPixels/(Math.ceil(viewport.width)*Math.ceil(viewport.height))),32767/Math.max(viewport.width,viewport.height))*.999999;
+      viewport=page.getViewport({scale});if(!valid())throw Error('Invalid PDF dimensions.');
+    }
+    if(Math.ceil(viewport.width)*Math.ceil(viewport.height)>maxPixels||viewport.width<1||viewport.height<1||Math.max(viewport.width,viewport.height)>32767)throw Error('PDF dimensions exceed the raster budget.');
+  }
+  return viewport;
 }
 function documentCanvas(viewport) {
   const canvas = globalThis.document.createElement('canvas'); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height); return canvas;

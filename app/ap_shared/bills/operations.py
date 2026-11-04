@@ -181,43 +181,9 @@ class BillOperations:
 
     @contextmanager
     def _index(self, import_id, auth):
-        self._check(auth)
-        source = self.repository.source(import_id)
-        if source['state'] != 'ready':
-            raise SnapshotError('bill_incomplete')
-        if source.get('storage_format', 'rows-v1') == 'snapshot-v2':
-            with self.cache.acquire(self.config.workspace_id, import_id, source['snapshot_manifest'], auth, self._check) as connection:
-                yield SnapshotIndex(connection, build=False), source
-            return
-        # Legacy sources stay immutable and readable. Build only a temporary local
-        # index from their complete paginated records; never rewrite their rows.
-        with tempfile.TemporaryDirectory(prefix='hwfc-bill-legacy-') as folder:
-            from pathlib import Path
-            connection = sqlite3.connect(Path(folder) / 'legacy.sqlite')
-            try:
-                connection.executescript('create table bill_records(ordinal integer primary key,vendor_key text,reference_key text,kind text,amount integer,record text);create table bill_vendors(vendor_key text primary key,vendor text,ordinal integer);create table bill_warnings(id integer primary key,source_rows text,reason text);')
-                after = -1
-                while True:
-                    self._check(auth)
-                    page = self.repository.base.records_page(self.config.workspace_id, import_id, after, 500)
-                    for record in page['records']:
-                        after += 1
-                        record = validate_record(record)
-                        if record['id'] != f'{import_id}:{after}':
-                            raise SnapshotError('bill_incomplete')
-                        connection.execute('insert into bill_records values(?,?,?,?,?,?)', (after, vendor_key(record['vendor']), invoice_key(record['invoiceNumber']), record.get('kind', 'invoice'), record['amount'], encoded(record)))
-                        connection.execute('insert or replace into bill_vendors values(?,?,?)', (vendor_key(record['vendor']), record['vendor'], after))
-                    if page['nextCursor'] is None:
-                        break
-                if after + 1 != source['record_count']:
-                    raise SnapshotError('bill_incomplete')
-                connection.commit()
-                connection.execute('create index bill_reference on bill_records(reference_key,kind)')
-                connection.execute('create index bill_vendor_amount on bill_records(vendor_key,kind,amount)')
-                yield SnapshotIndex(connection, build=False), source
-                self._check(auth)
-            finally:
-                connection.close()
+        from .reads import open_source_index
+        with open_source_index(self.repository,self.config,self.cache,import_id,auth,self._check) as value:
+            yield value
 
     def handle(self, action, payload, request_id, authorization):
         require_uuid(request_id); self._check(authorization)

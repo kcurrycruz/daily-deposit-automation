@@ -346,11 +346,24 @@ revoke all on function public.ap_mail_mutate(text,uuid,uuid,text,jsonb) from pub
 grant execute on function public.ap_mail_mutate(text,uuid,uuid,text,jsonb) to service_role;
 
 create function public.ap_mail_read(p_operation text,p_workspace uuid,p_data jsonb)
-returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare c ap_mail_connections; r ap_mail_receipts; result jsonb; v_limit integer;
+returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+declare c ap_mail_connections; r ap_mail_receipts; result jsonb; v_limit integer; v_home jsonb; v_source jsonb; v_working jsonb;
 begin
  if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'invalid'; end if;
- if p_operation='connection' then
+ if p_operation='source_context' then
+  if p_data<>'{}'::jsonb then raise exception 'invalid'; end if;
+  select to_jsonb(w) into v_home from ap_workspaces w where w.id=p_workspace;
+  if not found then raise exception 'not_found'; end if;
+  if v_home->>'active_import_id' is not null then
+   select to_jsonb(b) into v_source from ap_bill_imports b where b.workspace_id=p_workspace and b.id=(v_home->>'active_import_id')::uuid;
+  end if;
+  if v_home->>'active_working_set_id' is not null then
+   select manifest into v_working from ap_bill_working_sets where workspace_id=p_workspace and id=(v_home->>'active_working_set_id')::uuid;
+  end if;
+  return jsonb_build_object('home',v_home,'source',v_source,'working',v_working,
+   'mappings',(select coalesce(jsonb_object_agg(vendor,bill_vendor),'{}') from ap_vendor_mappings where workspace_id=p_workspace),
+   'mappingVersions',(select coalesce(jsonb_object_agg(vendor,version),'{}') from ap_vendor_mappings where workspace_id=p_workspace));
+ elsif p_operation='connection' then
   select * into c from ap_mail_connections where workspace_id=p_workspace and id=(p_data->>'connection_id')::uuid;
   return jsonb_build_object('connection',case when c.id is not null then to_jsonb(c) else null end);
  elsif p_operation='receipt' then

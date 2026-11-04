@@ -251,6 +251,12 @@ export function comparisonInputKey(statement,mappings={}){
     groupInvoices(statement).map(row=>[invoiceKey(row.invoiceNumber),row.kind,row.originalAmount])]);
 }
 export function reconcile(statement, provider, mappings = {}) {
+  return matchingRows(statement,provider,mappings,false);
+}
+export function preliminaryReconcile(statement, provider, mappings = {}) {
+  return matchingRows(statement,provider,mappings,true);
+}
+function matchingRows(statement, provider, mappings, preliminary) {
   const scope=provider.scopes?.[statement.id];
   const complete=!provider.scopes||!!scope?.complete&&scope.inputKey===comparisonInputKey(statement,mappings)&&scope.directoryComplete&&scope.workingSet?.workingSetId===provider.workingSet?.workingSetId;
   const directory=scope?.directoryComplete?scope.vendorDirectory:(provider.vendorDirectory||provider.records||[]);
@@ -263,7 +269,7 @@ export function reconcile(statement, provider, mappings = {}) {
     const result = (status, reason, candidates = []) => ({ ...row, status, reason, candidates, matchMethod, ...(referenceRule?{referenceRule}:{}),...(candidates.some(c=>scope?.archivedIds?.includes(c.id))?{coverage:'archived'}:{}),...(candidates.some(c=>scope?.retainedReviewIds?.includes(c.id))?{priorReviewEvidence:true}:{}),statementId: statement.id, vendor: statement.vendor, simulated: !!provider.simulated });
     if (row.kind === 'opening') return result('history', 'Carried-forward balance: older invoice detail is needed. It is not a new invoice.');
     if (row.kind === 'payment') return result('history', 'Account-level payment: invoice allocations are not supplied by this statement.');
-    if (!statement.confirmed || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
+    if ((!preliminary && !statement.confirmed) || row.confidence < 80 || row.duplicate) return result('extraction', row.duplicate ? 'More than one invoice charge uses this number. Check the source rows.' : 'Confirm the extracted invoice numbers and amounts before matching.');
     if (!provider.loaded) return result('unverified', 'No BILL records are connected or imported. This does not mean the invoice is missing.');
     if(!complete)return result('unverified','The BILL comparison is loading or unavailable. Wait or retry before reviewing.');
     const kindRecords = records.filter(r => (r.kind ?? 'invoice') === row.kind);

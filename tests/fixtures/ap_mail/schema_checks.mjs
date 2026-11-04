@@ -28,6 +28,9 @@ try{
  assert.equal((await q('select count(*)::int n from ap_mail_jobs')).rows[0].n,2);
  assert.equal((await q('select count(*)::int n from ap_mail_outbox')).rows[0].n,2);
  const read=(op,data={})=>q('select ap_mail_read($1,$2,$3) value',[op,w,JSON.stringify(data)]).then(r=>r.rows[0].value);
+ const sourceContext=await read('source_context');
+ assert.equal(sourceContext.home.id,w);assert.equal(sourceContext.source,null);
+ assert.deepEqual(sourceContext.mappings,{});assert.deepEqual(sourceContext.mappingVersions,{});
  assert.equal((await read('status')).counts.queued,2);
  assert.equal((await read('receipts',{limit:1,cursor:null})).items.length,1);
  assert.equal((await read('outbox',{limit:100,cursor:null})).items.length,2);

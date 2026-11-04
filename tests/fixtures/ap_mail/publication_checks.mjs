@@ -34,6 +34,7 @@ try{
  assert.equal((await q("select has_function_privilege('anon','public.ap_mail_publish(uuid,uuid,text,jsonb)','EXECUTE') allowed")).rows[0].allowed,false);
  const a=await incoming('a'),request=id(),first=await publish(a,request);
  assert.equal(first.status,'awaiting_review');assert.equal(first.statement_id,a.doc.id);
+ assert.equal((await mail('claim',{job_id:a.claim.job_id,dispatch_generation:1})).retry,false);
  assert.deepEqual(await publish(a,request),first); // lost response can replay after lease is released
  await assert.rejects(publish({...a,doc:{...a.doc,vendor:'Changed'}},request),/conflict/);
  const rev=(await q('select * from ap_statement_revisions where statement_id=$1',[a.doc.id])).rows[0];

@@ -178,7 +178,8 @@ begin
   select * into c from ap_mail_connections where workspace_id=p_workspace and id=j.connection_id;
   insert into ap_mail_processor_slots(workspace_id) values(p_workspace) on conflict do nothing;
   select * into s from ap_mail_processor_slots where workspace_id=p_workspace for update;
-  result=jsonb_build_object('claim',null);
+  result=jsonb_build_object('claim',null,'retry',c.active and not c.paused and c.generation=j.connection_generation and
+   j.state='queued' and j.attempts<3 and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint);
   if c.active and not c.paused and c.generation=j.connection_generation and j.state='queued' and j.attempts<3 and
    j.next_retry_at<=now() and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint and s.lease_until<=now() then
    update ap_mail_processor_slots set job_id=j.id,generation=generation+1,lease_until=now()+interval '60 seconds'

@@ -7,6 +7,9 @@ on:
       - 'streamlit_app.py'
       - 'tests/**'
       - 'requirements.txt'
+      - 'workers/**'
+      - 'deploy/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/validate.yml'
   pull_request:
     paths:
@@ -14,11 +17,15 @@ on:
       - 'streamlit_app.py'
       - 'tests/**'
       - 'requirements.txt'
+      - 'workers/**'
+      - 'deploy/**'
+      - 'supabase/migrations/**'
       - '.github/workflows/validate.yml'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,6 +35,25 @@ jobs:
         with:
           node-version: '24'
       - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r workers/ap_mail/requirements.lock
+      - run: npm ci --prefix app/ap_statements --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix workers/ap_mail --ignore-scripts --no-audit --no-fund
+      - run: node app/ap_statements/build.mjs
+      - run: node workers/ap_mail/node_modules/playwright/cli.js install --with-deps chromium
       - run: python -m compileall -q app streamlit_app.py
       - run: python -m unittest discover -s tests -v
       - run: node --test --test-isolation=none tests/ap_statements*.test.mjs
+
+  mail-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.17.1'
+      - run: terraform -chdir=deploy/ap_mail init -backend=false -input=false
+      - run: terraform -chdir=deploy/ap_mail fmt -check
+      - run: terraform -chdir=deploy/ap_mail validate
+      - run: docker build -f workers/ap_mail/Dockerfile -t ap-mail-smoke .
+      - run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint python ap-mail-smoke -m workers.ap_mail.smoke

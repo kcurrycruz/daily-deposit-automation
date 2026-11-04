@@ -1,6 +1,7 @@
 """Durable outbox dispatch. The database, not task retention, owns job identity."""
 from dataclasses import dataclass
 import re
+import time
 from urllib.parse import urlparse
 
 from .contracts import MailError, canonical, identifier, natural, payload_digest
@@ -18,7 +19,7 @@ class DispatchConfig:
         url=urlparse(self.processor_url)
         if (not match or url.scheme!='https' or not url.hostname or not url.hostname.endswith('.run.app') or
                 url.username or url.password or url.port is not None or url.path!='/process' or url.query or url.fragment or
-                self.audience!='https://'+url.hostname):raise MailError('invalid')
+                self.audience not in ('https://'+url.hostname,'https://ap-mail-processor.'+(match[1] if match else '')+'.internal')):raise MailError('invalid')
         if not re.fullmatch(r'[a-z][a-z0-9-]{4,62}@'+re.escape(match[1])+r'\.iam\.gserviceaccount\.com',self.service_account):
             raise MailError('invalid')
 
@@ -32,8 +33,9 @@ class DispatchSummary:
 
 class TaskDispatcher:
     """Tasks adapter maps AlreadyExists/NotFound/quota to safe MailError codes."""
-    def __init__(self, repository, tasks_client, config):
+    def __init__(self, repository, tasks_client, config, *, clock=time.monotonic):
         self.repo,self.tasks,self.config=repository,tasks_client,config
+        self.clock=clock
 
     def _name(self, row):
         if row['workspace_id']!=self.repo.config.workspace_id:raise MailError('denied')
@@ -52,11 +54,13 @@ class TaskDispatcher:
         conn=self.repo.connection()
         return bool(conn and conn['active'] and not conn['paused'])
 
-    def drain(self, limit=100):
+    def drain(self, limit=100, *, budget_seconds=60):
         natural(limit,1,100)
+        deadline=self.clock()+natural(budget_seconds,1,60)
         if not self._active():return DispatchSummary()
         page=self.repo.outbox_page(limit=limit);sent=failed=0
         for row in page['items']:
+            if self.clock()>=deadline:break
             name=self._name(row)
             if row['state']!='pending':continue
             try:
@@ -74,15 +78,19 @@ class TaskDispatcher:
                 self.repo.mutate('outbox_delay',dict(job_id=row['job_id'],dispatch_generation=row['dispatch_generation'],delay_seconds=60))
         return DispatchSummary(sent,failed)
 
-    def reconcile(self, limit=100):
+    def reconcile(self, limit=100, *, budget_seconds=60):
         natural(limit,1,100)
+        deadline=self.clock()+natural(budget_seconds,1,60)
         # Expired jobs must leave Scanning even while discovery is paused.
         repaired=self.repo.mutate('reconcile',{'limit':limit})
         recovered=repaired.get('recovered',0);failed=0
         if not self._active():return DispatchSummary(recovered=recovered)
         connection=self.repo.connection()
         page=self.repo.outbox_page(cursor=connection.get('dispatch_cursor'),limit=limit,state='sent')
+        last=connection.get('dispatch_cursor');complete=True
         for row in page['items']:
+            if self.clock()>=deadline:complete=False;break
+            last=dict(job_id=row['job_id'],dispatch_generation=row['dispatch_generation'])
             name=self._name(row)
             if row['state']!='sent':continue
             if row.get('task_name')!=name:raise MailError('invalid')
@@ -94,5 +102,5 @@ class TaskDispatcher:
                 if error.code!='not_found':failed+=1;continue
                 result=self.repo.mutate('dispatch_missing',dict(job_id=row['job_id'],dispatch_generation=row['dispatch_generation']))
                 recovered+=int(result.get('requeued',False))
-        self.repo.mutate('dispatch_checkpoint',dict(connection_id=connection['id'],expected_generation=connection['generation'],cursor=page['nextCursor']))
+        self.repo.mutate('dispatch_checkpoint',dict(connection_id=connection['id'],expected_generation=connection['generation'],cursor=page['nextCursor'] if complete else last))
         return DispatchSummary(failed=failed,recovered=recovered)

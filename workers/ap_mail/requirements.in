@@ -1,0 +1,7 @@
+# Isolated background runtime. Streamlit does not install these packages.
+google-auth==2.62.1
+google-cloud-tasks==2.26.0
+google-cloud-secret-manager==2.31.0
+gunicorn==26.2.0
+httpx==0.28.1
+supabase==2.33.0

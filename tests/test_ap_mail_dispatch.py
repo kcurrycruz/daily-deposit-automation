@@ -45,6 +45,15 @@ class Tasks:
 
 
 class DispatchTests(unittest.TestCase):
+    def test_checker_time_budget_leaves_remaining_outbox_for_next_poll(self):
+        runner,store,tasks=self.make();now=[0];runner.clock=lambda:now[0]
+        rows=[{**store.row,'job_id':f'00000000-0000-4000-8000-00000000000{n}'} for n in (3,4,5)]
+        store.outbox_page=lambda **kw:{'items':rows,'nextCursor':None}
+        original=tasks.create_task
+        def slow(request):now[0]+=20;return original(request)
+        tasks.create_task=slow
+        self.assertEqual(runner.drain(budget_seconds=10).sent,1)
+        self.assertEqual(len(tasks.creates),1)
     def make(self):
         from app.ap_mail.dispatch import TaskDispatcher,DispatchConfig
         store,tasks=Store(),Tasks()

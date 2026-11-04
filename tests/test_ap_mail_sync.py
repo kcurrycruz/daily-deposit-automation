@@ -15,6 +15,14 @@ class SyncTests(unittest.TestCase):
         sync.poll(C)
         self.assertEqual(calls,[50])
         store.home['paused']=True;sync.poll(C);self.assertEqual(calls,[50])
+
+    def test_explicit_message_retry_is_durable_and_processes_old_email(self):
+        store=MailStore();self.active(store)
+        store.home['cursor']['manual_pending']=['old']
+        mail=Gmail({'old':message('old','1700000000000')})
+        self.sync(mail,store).poll(C)
+        self.assertEqual(len(store.receipts),1)
+        self.assertEqual(store.home['cursor'].get('manual_pending',[]),[])
     def sync(self,mail,store,monotonic=lambda:0):
         from app.ap_mail.sync import MailSync
         return MailSync(mail,store,lambda:datetime(2026,11,4,12,10,tzinfo=timezone.utc),monotonic)

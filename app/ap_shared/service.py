@@ -11,7 +11,7 @@ from uuid import UUID, uuid5
 from .access import require_access
 from .models import (ApConfig,Authorization,JsonObject,ApValidationError,allowed,text,integer,date_value,
     require_uuid,normalize_initials,validate_record,validate_statement,validate_resolution,validate_provider_metadata,
-    MAX_FILE_BYTES,MAX_CHUNK_BYTES,MAX_RECORDS,PAGE_SIZE,RULE_VERSION,BILL_ACTIONS,DUPLICATE_ACTIONS,WORKING_ACTIONS)
+    MAX_FILE_BYTES,MAX_CHUNK_BYTES,MAX_RECORDS,PAGE_SIZE,RULE_VERSION,BILL_ACTIONS,DUPLICATE_ACTIONS,WORKING_ACTIONS,MAIL_ACTIONS)
 
 class ApService:
     def __init__(self,repository,config:ApConfig,clock,revalidate):
@@ -22,6 +22,7 @@ class ApService:
         self.bill_operations=None
         self.duplicate_operations=None
         self.working_operations=None
+        self.mail_operations=None
 
     def _working_api(self):
         if self.working_operations is None:
@@ -106,6 +107,12 @@ class ApService:
     def handle(self,action:str,payload:JsonObject,request_id:str,authorization:Authorization) -> JsonObject:
         require_uuid(request_id); self._check(authorization)
         workspace=self.config.workspace_id
+        if action in MAIL_ACTIONS:
+            if self.mail_operations is None:
+                from .mail.service import MailService
+                from .mail.repository import MailControlsRepository
+                self.mail_operations=MailService(MailControlsRepository(self.repository),self.config,self.clock,self._check)
+            return self.mail_operations.handle(action,payload,request_id,authorization)
         if action in WORKING_ACTIONS:
             return self._working_api().handle(action,payload,request_id,authorization)
         if action in ('bill_candidates_page','bill_vendors_page') and ('working_set_id' in payload or

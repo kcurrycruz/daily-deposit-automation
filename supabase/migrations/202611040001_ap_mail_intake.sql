@@ -23,6 +23,7 @@ create table public.ap_mail_messages (
  received_at timestamptz, sender text not null default '' check(octet_length(sender)<=1024),
  subject text not null default '' check(octet_length(subject)<=2048), eligible boolean not null,
  error_code text check(error_code is null or error_code in ('historical','withdrawn','invalid','unreadable','limit','not_found')),
+ version bigint not null default 1,
  discovered_at timestamptz not null default now(),
  primary key(workspace_id,account_id,message_id),
  foreign key(workspace_id,connection_id) references public.ap_mail_connections(workspace_id,id)
@@ -148,7 +149,7 @@ begin
      coalesce(item->>'sender',''),coalesce(item->>'subject',''),(item->>'eligible')::boolean,item->>'error_code')
     on conflict(workspace_id,account_id,message_id) do update set eligible=ap_mail_messages.eligible or excluded.eligible,
      sender=coalesce(nullif(excluded.sender,''),ap_mail_messages.sender),subject=coalesce(nullif(excluded.subject,''),ap_mail_messages.subject),
-     received_at=coalesce(ap_mail_messages.received_at,excluded.received_at),error_code=excluded.error_code;
+     received_at=coalesce(ap_mail_messages.received_at,excluded.received_at),error_code=excluded.error_code,version=ap_mail_messages.version+1;
   end loop;
   for item in select value from jsonb_array_elements(p_data->'receipts') loop
    if item->>'status' not in ('queued','needs_attention','skipped') then raise exception 'invalid'; end if;

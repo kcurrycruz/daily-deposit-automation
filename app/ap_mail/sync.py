@@ -70,6 +70,7 @@ class MailSync:
         if home['paused']: raise MailError('paused')
         profile=self.gmail.profile(); self.gmail.labels()
         cursor=dict(phase='baseline',anchor=opaque(profile['historyId']))
+        if home['cursor'].get('manual_pending'):cursor['manual_pending']=home['cursor']['manual_pending']
         if mode=='existing': cursor['historical']=self._historical(history_bounds)
         return self._save(home,cursor)
 
@@ -163,6 +164,7 @@ class MailSync:
             if error.code!='not_found': raise
             # Capture the replacement anchor before reconciliation, just as at baseline.
             cursor=dict(phase='recovery',anchor=self.gmail.profile()['historyId'],
+                        **({'manual_pending':cursor['manual_pending']} if cursor.get('manual_pending') else {}),
                         **({'historical':cursor['historical']} if 'historical' in cursor else {}))
             return self._save(home,cursor),False,(0,0,0)
         pending=_history_pending(page)
@@ -186,6 +188,13 @@ class MailSync:
             for _ in range(10000):
                 if self.monotonic()>=deadline: return PollSummary('ok',*counts,next_work=True)
                 cursor=deepcopy(home['cursor']);request=home.get('history_request')
+                if cursor.get('manual_pending'):
+                    ident=cursor['manual_pending'][0]
+                    meta,receipts=self._message(ident,True,home,'live')
+                    cursor['manual_pending']=cursor['manual_pending'][1:]
+                    home=self._save(home,cursor,[meta],receipts)
+                    counts=[counts[0]+1,counts[1]+len(receipts),counts[2]+int(bool(meta.get('error_code')))]
+                    continue
                 if request and request['id']!=cursor.get('historical',{}).get('id'):
                     cursor['historical']=self._historical(request);home=self._save(home,cursor);continue
                 phase=cursor['phase']

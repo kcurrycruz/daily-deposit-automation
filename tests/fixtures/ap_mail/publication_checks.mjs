@@ -92,5 +92,30 @@ try{
  assert.equal(queued.queued,1);
  const job=(await q('select mode,attempts,state from ap_mail_jobs where receipt_id=$1',[i.claim.receipt_id])).rows[0];
  assert.deepEqual(job,{mode:'recompare',attempts:0,state:'queued'});
+ // Human controls never take a worker lease, create a revision or expose secrets.
+ const control=(op,data,request=id(),digest=hash(data))=>q('select ap_mail_control($1,$2,$3,$4,$5) v',[op,w,request,digest,data]).then(r=>r.rows[0].v);
+ const paused=(await q('select version from ap_mail_connections where id=$1',[conn])).rows[0].version;
+ const pauseRequest=id(),pauseData={connection_id:conn,expected_version:paused,paused:true};
+ const pauseReply=await control('pause',pauseData,pauseRequest);assert.deepEqual(await control('pause',pauseData,pauseRequest),pauseReply);
+ await assert.rejects(control('pause',{...pauseData,paused:false},pauseRequest),/conflict/);
+ await control('pause',{...pauseData,expected_version:paused+1,paused:false});
+ const history={connection_id:conn,expected_version:paused+2,after:'2026-10-01T00:00:00Z',before:'2026-11-01T00:00:00Z',max_messages:1001};
+ await assert.rejects(control('history',history),/invalid/);
+ await control('history',{...history,max_messages:100});
+ assert.equal((await q('select history_request from ap_mail_connections where id=$1',[conn])).rows[0].history_request.max_messages,100);
+ const similar=(await q('select version from ap_mail_receipts where id=$1',[d.claim.receipt_id])).rows[0];
+ // Candidate a changed since the saved similarity assessment; it cannot be silently chosen.
+ await assert.rejects(control('choice',{receipt_id:d.claim.receipt_id,expected_version:similar.version,choice:'existing'}),/conflict/);
+ const list=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":50}') v",[w])).rows[0].v;
+ assert.ok(list.items.length);assert.equal(JSON.stringify(list).includes('secret-reference'),false);
+ await q("update ap_mail_receipts set discovered_at=now()+interval '1 day' where id=$1",[d.claim.receipt_id]);
+ const latest=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":1}') v",[w])).rows[0].v;
+ assert.equal(latest.items[0].id,d.claim.receipt_id);
+ const next=(await q("select ap_mail_control_read('receipts',$1,$2) v",[w,{limit:50,cursor:latest.nextCursor}])).rows[0].v;
+ assert.ok(next.items.every(row=>row.id!==d.claim.receipt_id));
+ const msg=id();await q(`insert into ap_mail_messages(workspace_id,connection_id,account_id,message_id,thread_id,eligible,error_code)
+ values($1,$2,'test',$3,$3,false,'historical')`,[w,conn,msg]);
+ await control('message_retry',{connection_id:conn,message_id:msg,expected_version:1});
+ assert.ok((await q('select cursor from ap_mail_connections where id=$1',[conn])).rows[0].cursor.manual_pending.includes(msg));
  console.log('Mail publication checks passed');
 }finally{await db.close();}

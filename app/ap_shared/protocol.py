@@ -4,6 +4,7 @@ from .models import validate_request,ApValidationError
 from .repository import ApStoreError
 from .bills.contracts import SnapshotError, MESSAGES as BILL_MESSAGES
 from .bills.duplicates.contracts import DuplicateError, MESSAGES as DUPLICATE_MESSAGES
+from ..ap_mail.contracts import MailError
 
 MESSAGES={'validation':'Check the fields and allowed size limits before retrying.',
     'denied':'AP access is locked or expired. Unlock AP again.',
@@ -25,10 +26,16 @@ def dispatch_request(value,session,config,service,now):
     except PermissionError: code='denied'
     except SnapshotError as error: code=error.code
     except DuplicateError as error: code=error.code
+    except MailError as error: code='mail_'+error.code
     except ApValidationError: code='validation'
     except ApStoreError as error: code=error.code if error.code in MESSAGES else 'unavailable'
     except Exception: code='unavailable'
     if not reply['ok']:
-        reply['data']=None; reply['error']={'code':code,'message':DUPLICATE_MESSAGES[code] if code in DUPLICATE_MESSAGES else BILL_MESSAGES[code] if code in BILL_MESSAGES else MESSAGES[code]}
+        mail_messages={'mail_not_configured':'Email imports are not connected yet. Manual uploads remain available.',
+            'mail_conflict':'This import changed. Refresh Email imports before trying again.',
+            'mail_paused':'Email imports are paused. Resume them before retrying.',
+            'mail_invalid':'Check the import fields and limits before retrying.',
+            'mail_denied':'This private email import is unavailable. Unlock AP again.'}
+        reply['data']=None; reply['error']={'code':code,'message':mail_messages.get(code,'Email imports are temporarily unavailable. Your saved statements are unchanged.') if code.startswith('mail_') else DUPLICATE_MESSAGES[code] if code in DUPLICATE_MESSAGES else BILL_MESSAGES[code] if code in BILL_MESSAGES else MESSAGES[code]}
     return reply
 

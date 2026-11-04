@@ -85,8 +85,8 @@ begin
     if target.id is null or target.current_revision_id is distinct from (v_assessment->'match'->>'revision_id')::uuid or
       target.version is distinct from (v_assessment->'match'->>'version')::integer then raise exception 'conflict'; end if;
    end if;
-   if kind='duplicate' or (kind='similar' and r.human_choice->>'choice'='existing') then v_state='already_imported';
-   elsif kind='similar' and r.human_choice->>'choice' is distinct from 'continue' then v_state='needs_attention';
+   if kind='duplicate' or (kind='similar' and r.human_choice->>'choice'='existing' and r.human_choice->'match'=v_assessment->'match') then v_state='already_imported';
+   elsif kind='similar' and not coalesce(r.human_choice->>'choice'='continue' and r.human_choice->'match'=v_assessment->'match',false) then v_state='needs_attention';
    else
     -- No machine comparison is saved as a human review result.
     insert into ap_statements(id,workspace_id,file_hash,original_object_key,filename)

@@ -12,7 +12,7 @@ create table public.ap_mail_connections (
  generation bigint not null default 1 check(generation>0), version bigint not null default 1 check(version>0),
  cursor jsonb not null default '{"phase":"baseline"}' check(jsonb_typeof(cursor)='object' and octet_length(cursor::text)<=65536),
  activated_at timestamptz not null default now(), last_checked_at timestamptz, last_success_at timestamptz,
- error_code text, history_request jsonb, created_at timestamptz not null default now(),
+ error_code text, history_request jsonb, dispatch_cursor jsonb, created_at timestamptz not null default now(),
  unique(workspace_id,id)
 );
 create unique index ap_mail_one_connection on public.ap_mail_connections(workspace_id) where active;
@@ -118,6 +118,8 @@ begin
   when 'needs_attention' then 'claim reason' when 'release_retry' then 'claim reason delay_seconds' when 'finish' then 'claim status reason'
   when 'retry' then 'receipt_id expected_version' when 'requeue' then 'receipt_id expected_version'
   when 'pause' then 'connection_id expected_version paused' when 'reconcile' then 'limit'
+  when 'dispatch_missing' then 'job_id dispatch_generation'
+  when 'dispatch_checkpoint' then 'connection_id expected_generation cursor'
   when 'outbox_sent' then 'job_id dispatch_generation task_name' when 'outbox_delay' then 'job_id dispatch_generation delay_seconds' end;
  if p_operation='sync_error' then v_allowed='connection_id expected_generation reason'; end if;
  v_required=case p_operation when 'inventory' then 'connection_id expected_generation expected_version expected_cursor messages receipts next_cursor'
@@ -299,8 +301,32 @@ begin
   end loop;
   result=jsonb_build_object('recovered',changed);
 
+ elsif p_operation='dispatch_missing' then
+  select * into j from ap_mail_jobs where workspace_id=p_workspace and id=(p_data->>'job_id')::uuid for update;
+  if not found then raise exception 'not_found'; end if;
+  select * into c from ap_mail_connections where workspace_id=p_workspace and id=j.connection_id;
+  result=jsonb_build_object('requeued',false);
+  if c.active and not c.paused and c.generation=j.connection_generation and j.state='queued' and j.attempts<3 and
+   j.lease_until<=now() and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint then
+   update ap_mail_jobs set dispatch_generation=dispatch_generation+1,updated_at=now() where id=j.id returning * into j;
+   insert into ap_mail_outbox(workspace_id,job_id,dispatch_generation) values(p_workspace,j.id,j.dispatch_generation);
+   result=jsonb_build_object('requeued',true);
+  end if;
+ elsif p_operation='dispatch_checkpoint' then
+  select * into c from ap_mail_connections where workspace_id=p_workspace and id=(p_data->>'connection_id')::uuid for update;
+  if not found then raise exception 'not_found'; end if;
+  if c.generation is distinct from (p_data->>'expected_generation')::bigint then raise exception 'conflict'; end if;
+  if p_data->'cursor'<>'null'::jsonb then
+   if jsonb_typeof(p_data->'cursor') is distinct from 'object' or
+    (p_data->'cursor'->>'job_id')::uuid is null or coalesce((p_data->'cursor'->>'dispatch_generation')::bigint,0)<1 then raise exception 'invalid'; end if;
+  end if;
+  update ap_mail_connections set dispatch_cursor=nullif(p_data->'cursor','null'::jsonb) where id=c.id;
+  result=jsonb_build_object('saved',true);
  elsif p_operation in ('outbox_sent','outbox_delay') then
+  select * into j from ap_mail_jobs where workspace_id=p_workspace and id=(p_data->>'job_id')::uuid;
+  if j.id is null or j.dispatch_generation is distinct from (p_data->>'dispatch_generation')::bigint then raise exception 'conflict'; end if;
   if p_operation='outbox_sent' then
+   if coalesce(octet_length(p_data->>'task_name'),0) not between 1 and 1024 then raise exception 'invalid'; end if;
    update ap_mail_outbox set state='sent',task_name=p_data->>'task_name',sent_at=now()
     where workspace_id=p_workspace and job_id=(p_data->>'job_id')::uuid and dispatch_generation=(p_data->>'dispatch_generation')::bigint;
   else
@@ -308,6 +334,8 @@ begin
    update ap_mail_outbox set next_attempt_at=now()+make_interval(secs=>(p_data->>'delay_seconds')::integer)
     where workspace_id=p_workspace and job_id=(p_data->>'job_id')::uuid and dispatch_generation=(p_data->>'dispatch_generation')::bigint;
   end if;
+  get diagnostics changed=row_count;
+  if changed<>1 then raise exception 'conflict'; end if;
   result=jsonb_build_object('saved',true);
  else raise exception 'invalid';
  end if;
@@ -352,10 +380,11 @@ begin
     where ar.workspace_id=p_workspace and ((p_data->>'cursor') is null or ar.id>(p_data->>'cursor')::uuid)
     order by ar.id limit v_limit) items;
   else
+   if coalesce(p_data->>'state','pending') not in ('pending','sent') then raise exception 'invalid'; end if;
    select jsonb_agg(to_jsonb(items)) into result from (
     select o.* from ap_mail_outbox o join ap_mail_jobs j on j.workspace_id=o.workspace_id and j.id=o.job_id
     join ap_mail_connections mc on mc.workspace_id=j.workspace_id and mc.id=j.connection_id
-    where o.workspace_id=p_workspace and o.dispatch_generation=j.dispatch_generation and j.state='queued' and
+    where o.workspace_id=p_workspace and o.state=coalesce(p_data->>'state','pending') and o.dispatch_generation=j.dispatch_generation and j.state='queued' and
      mc.active and not mc.paused and mc.generation=j.connection_generation and o.next_attempt_at<=now() and
      ((p_data->>'cursor') is null or (o.job_id,o.dispatch_generation)>((p_data->'cursor'->>'job_id')::uuid,(p_data->'cursor'->>'dispatch_generation')::bigint))
     order by o.job_id,o.dispatch_generation limit v_limit) items;

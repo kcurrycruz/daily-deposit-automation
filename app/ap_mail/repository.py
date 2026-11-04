@@ -3,7 +3,7 @@ from uuid import uuid4
 from .contracts import MailError, bounded_text, canonical, digest, identifier, natural, payload_digest
 
 OPERATIONS = frozenset('inventory claim heartbeat record_original save_extraction needs_attention release_retry finish '
-                       'retry requeue pause reconcile outbox_sent outbox_delay sync_error'.split())
+                       'retry requeue pause reconcile outbox_sent outbox_delay sync_error dispatch_missing dispatch_checkpoint'.split())
 FIELDS = {
     'inventory':'connection_id expected_generation expected_version expected_cursor messages receipts next_cursor completed',
     'claim':'job_id dispatch_generation', 'heartbeat':'claim',
@@ -13,6 +13,8 @@ FIELDS = {
     'pause':'connection_id expected_version paused', 'reconcile':'limit',
     'outbox_sent':'job_id dispatch_generation task_name', 'outbox_delay':'job_id dispatch_generation delay_seconds',
     'sync_error':'connection_id expected_generation reason',
+    'dispatch_missing':'job_id dispatch_generation',
+    'dispatch_checkpoint':'connection_id expected_generation cursor',
 }
 
 
@@ -64,11 +66,12 @@ class MailRepository:
         if cursor is not None: identifier(cursor)
         return self._read('receipts', {'cursor':cursor,'limit':limit})
 
-    def outbox_page(self, cursor=None, limit=100):
+    def outbox_page(self, cursor=None, limit=100, *, state='pending'):
         natural(limit, 1, 100)
+        if state not in ('pending','sent'): raise MailError('invalid')
         if cursor is not None:
             identifier(cursor['job_id']); natural(cursor['dispatch_generation'], 1)
-        return self._read('outbox', {'cursor':cursor,'limit':limit})
+        return self._read('outbox', {'cursor':cursor,'limit':limit,'state':state})
 
     def receipt(self, receipt_id):
         return self._read('receipt', {'receipt_id':identifier(receipt_id)})

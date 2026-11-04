@@ -54,6 +54,11 @@ try{
  assert.equal((await call('claim',{job_id:a,dispatch_generation:1})).claim,null);
  assert.equal((await q('select attempts from ap_mail_jobs where id=$1',[a])).rows[0].attempts,1);
  const renewed=await call('heartbeat',{claim:fence});assert.ok(renewed.claim.lease_until);
+ assert.equal((await call('dispatch_missing',{job_id:a,dispatch_generation:1})).requeued,false);
+ await call('outbox_sent',{job_id:b,dispatch_generation:1,task_name:'projects/test/locations/us-east1/queues/q/tasks/test'});
+ assert.equal((await read('outbox',{limit:100,state:'sent'})).items.length,1);
+ await call('dispatch_checkpoint',{connection_id:conn,expected_generation:1,cursor:{job_id:b,dispatch_generation:1}});
+ assert.equal((await read('connection',{connection_id:conn})).connection.dispatch_cursor.job_id,b);
  await assert.rejects(call('record_original',{claim:fence,sha256:'a'.repeat(64),object_key:w+'/pdf/'+'a'.repeat(64)+'.pdf'}),/invalid/);
  await assert.rejects(call('record_original',{claim:{...fence,slot_generation:999},sha256:'a'.repeat(64),object_key:w+'/pdf/'+'a'.repeat(64)+'.pdf',size:8}),/stale_claim/);
  await call('record_original',{claim:fence,sha256:'a'.repeat(64),object_key:w+'/pdf/'+'a'.repeat(64)+'.pdf',size:8});
@@ -77,12 +82,14 @@ try{
  await call('retry',{receipt_id:a,expected_version:receiptVersion},retryRequest);
  const retried=(await q('select * from ap_mail_jobs where id=$1',[a])).rows[0];
  assert.equal(retried.attempts,0);assert.equal(retried.dispatch_generation,3);
+ assert.equal((await call('dispatch_missing',{job_id:a,dispatch_generation:3})).requeued,true);
+ assert.equal((await call('dispatch_missing',{job_id:a,dispatch_generation:3})).requeued,false);
  // Three failed real claims exhaust; transport duplicates do not add attempts.
  for(let attempt=1;attempt<=3;attempt++){
-  const f=(await call('claim',{job_id:a,dispatch_generation:3})).claim;
+  const f=(await call('claim',{job_id:a,dispatch_generation:4})).claim;
   assert.ok(f);await call('release_retry',{claim:f,reason:'unavailable',delay_seconds:0});
  }
- assert.equal((await call('claim',{job_id:a,dispatch_generation:3})).claim,null);
+ assert.equal((await call('claim',{job_id:a,dispatch_generation:4})).claim,null);
  assert.equal((await q('select status from ap_mail_receipts where id=$1',[a])).rows[0].status,'needs_attention');
  const cv=(await q('select version from ap_mail_connections where id=$1',[conn])).rows[0].version;
  await call('pause',{connection_id:conn,expected_version:cv,paused:true});

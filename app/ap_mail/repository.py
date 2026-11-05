@@ -65,6 +65,9 @@ class MailRepository:
         if cursor is not None:identifier(cursor)
         return self._rpc('ap_mail_candidates',dict(p_workspace=self.config.workspace_id,p_cursor=cursor,p_limit=limit))
 
+    def byte_match(self,receipt_id):
+        return self._rpc('ap_mail_byte_match',dict(p_workspace=self.config.workspace_id,p_receipt_id=identifier(receipt_id)))['match']
+
     def publish(self,payload,request_id=None):
         if set(payload)!=set('doc assessment evidence claim pin'.split()) or len(canonical(payload).encode())>1024*1024:raise MailError('invalid')
         return self._rpc('ap_mail_publish',dict(p_workspace=self.config.workspace_id,p_request_id=identifier(request_id or str(uuid4())),

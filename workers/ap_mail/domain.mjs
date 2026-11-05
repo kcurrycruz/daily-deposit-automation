@@ -1,8 +1,8 @@
 import {createInterface} from 'node:readline';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {preliminaryReconcile,groupInvoices} from '../../app/ap_statements/frontend/core.mjs';
-import {assessStatement} from '../../app/ap_statements/frontend/statement-duplicates.mjs';
+import {preliminaryReconcile,groupInvoices,invoiceKey} from '../../app/ap_statements/frontend/core.mjs';
+import {assessStatement,sameStatementVendor} from '../../app/ap_statements/frontend/statement-duplicates.mjs';
 import {createComparisonSource} from '../../app/ap_statements/frontend/comparison-source.mjs';
 const failure=code=>Object.assign(Error(code),{code});
 const bounded=value=>{
@@ -18,6 +18,19 @@ export function calculatePreview(doc,provider,mappings={}){
 }
 export function assessIncoming(doc,candidates,mappings={}){
  return bounded(assessStatement(doc,candidates,mappings));
+}
+export async function assessPaged(doc,firstPage,request){
+ const mappings=firstPage.mappings,eligible=[],seen=new Set();let page=firstPage;
+ const references=new Set(groupInvoices(doc).filter(row=>['invoice','credit'].includes(row.kind)).map(row=>row.kind+':'+invoiceKey(row.invoiceNumber)));
+ while(true){
+  eligible.push(...page.items.filter(item=>sameStatementVendor(doc.vendor,item.doc.vendor,mappings)&&
+   groupInvoices(item.doc).some(row=>references.has(row.kind+':'+invoiceKey(row.invoiceNumber)))));
+  if(Buffer.byteLength(JSON.stringify({doc,candidates:eligible,mappings}))>900000)throw failure('limit');
+  const cursor=page.nextCursor;if(cursor===null)break;
+  if(seen.has(cursor))throw failure('unavailable');seen.add(cursor);
+  page=await request('statement_candidates_page',{cursor});
+ }
+ return assessIncoming(doc,eligible,mappings);
 }
 export async function prepareComparison(doc,info,mappings,request){
  if(!info){const provider={loaded:false,simulated:false,records:[],scopes:{}};return {provider,evidence:calculatePreview(doc,provider,mappings)};}
@@ -48,7 +61,7 @@ async function main(){
   let value;
   if(input.mode==='prepare')value=await prepareComparison(input.doc,input.info,input.mappings||{},request);
   else if(input.mode==='compare')value=calculatePreview(input.doc,input.provider,input.mappings||{});
-  else if(input.mode==='assess')value=assessIncoming(input.doc,input.candidates,input.mappings||{});
+  else if(input.mode==='assess')value=input.stream?await assessPaged(input.doc,input.firstPage,request):assessIncoming(input.doc,input.candidates,input.mappings||{});
   else throw failure('invalid');
   process.stdout.write(JSON.stringify({type:'result',value:bounded(value)})+'\n');
  }finally{lines.close();process.stdin.destroy();}

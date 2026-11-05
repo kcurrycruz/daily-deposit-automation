@@ -101,10 +101,15 @@ try{
  const paused=(await q('select version from ap_mail_connections where id=$1',[conn])).rows[0].version;
  await call('pause',{connection_id:conn,expected_version:paused,paused:false});
  const oldAccountClaim=(await call('claim',{job_id:b,dispatch_generation:1})).claim;
- await q('update ap_mail_connections set generation=generation+1 where id=$1',[conn]);
+ await q("update ap_mail_connections set generation=generation+1,account_id='account-2' where id=$1",[conn]);
  await assert.rejects(call('heartbeat',{claim:oldAccountClaim}),/stale_claim/);
  await call('reconcile',{limit:100});
  assert.equal((await q('select status from ap_mail_receipts where id=$1',[b])).rows[0].status,'needs_attention');
+ const oldReceipt=(await q('select * from ap_mail_receipts where id=$1',[b])).rows[0];
+ await assert.rejects(call('retry',{receipt_id:b,expected_version:oldReceipt.version}),/wrong_account/);
+ const incompatible=(await q("update ap_mail_jobs set state='queued',connection_generation=2,attempts=0,lease_until='-infinity' where id=$1 returning dispatch_generation",[b])).rows[0];
+ const refused=await call('claim',{job_id:b,dispatch_generation:incompatible.dispatch_generation});
+ assert.equal(refused.claim,null);assert.equal(refused.retry,false);
  for(const role of ['anon','authenticated']){
   await db.exec('set role '+role);
   await assert.rejects(q('select * from ap_mail_receipts'),/permission denied/);

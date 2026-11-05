@@ -7,6 +7,15 @@ from app.ap_mail.contracts import MailError
 
 
 class SyncTests(unittest.TestCase):
+    def test_unrelated_label_changes_never_import_old_baseline_mail(self):
+        for field in ('labelsAdded','labelsRemoved'):
+            store=MailStore();mail=Gmail({'old':message('old','1700000000000')})
+            mail.lists={None:{'messages':[{'id':'old','threadId':'same-thread'}]}}
+            self.sync(mail,store).poll(C)
+            mail.events[('999',None)]={'historyId':'1001','history':[{'id':'1000',field:[{'message':{'id':'old','threadId':'same-thread'},'labelIds':['STARRED']}]}]}
+            self.sync(mail,store).poll(C);self.assertEqual(store.receipts,{},field)
+            mail.events[('1001',None)]={'historyId':'1002','history':[history_event('old',added_label=True)]}
+            self.sync(mail,store).poll(C);self.assertEqual(len(store.receipts),1)
     def test_each_live_poll_schedules_only_a_bounded_stale_draft_page(self):
         gmail=Gmail({});store=MailStore();calls=[]
         store.queue_stale=lambda limit:calls.append(limit)

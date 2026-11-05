@@ -176,12 +176,14 @@ begin
   select * into j from ap_mail_jobs where workspace_id=p_workspace and id=(p_data->>'job_id')::uuid for update;
   if not found then raise exception 'not_found'; end if;
   select * into c from ap_mail_connections where workspace_id=p_workspace and id=j.connection_id;
+  select * into r from ap_mail_receipts where workspace_id=p_workspace and id=j.receipt_id;
   insert into ap_mail_processor_slots(workspace_id) values(p_workspace) on conflict do nothing;
   select * into s from ap_mail_processor_slots where workspace_id=p_workspace for update;
   result=jsonb_build_object('claim',null,'retry',c.active and not c.paused and c.generation=j.connection_generation and
-   j.state='queued' and j.attempts<3 and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint);
+   j.state='queued' and j.attempts<3 and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint and r.account_id=c.account_id and r.connection_id=c.id);
   if c.active and not c.paused and c.generation=j.connection_generation and j.state='queued' and j.attempts<3 and
-   j.next_retry_at<=now() and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint and s.lease_until<=now() then
+   j.next_retry_at<=now() and j.dispatch_generation=(p_data->>'dispatch_generation')::bigint and s.lease_until<=now() and
+   r.account_id=c.account_id and r.connection_id=c.id then
    update ap_mail_processor_slots set job_id=j.id,generation=generation+1,lease_until=now()+interval '60 seconds'
     where workspace_id=p_workspace returning * into s;
    update ap_mail_jobs set state='running',attempts=attempts+1,lease_generation=lease_generation+1,
@@ -205,6 +207,7 @@ begin
    j.lease_generation is distinct from (f->>'lease_generation')::bigint or
    s.generation is distinct from (f->>'slot_generation')::bigint or j.slot_generation<>s.generation then raise exception 'stale_claim'; end if;
   select * into r from ap_mail_receipts where id=j.receipt_id and workspace_id=p_workspace for update;
+  if r.account_id is distinct from c.account_id or r.connection_id is distinct from c.id then raise exception 'stale_claim'; end if;
   if p_operation='heartbeat' then
    update ap_mail_jobs set lease_until=now()+interval '60 seconds',updated_at=now() where id=j.id returning * into j;
    update ap_mail_processor_slots set lease_until=j.lease_until where workspace_id=p_workspace;
@@ -270,6 +273,7 @@ begin
   if not found then raise exception 'not_found'; end if;
   if r.version is distinct from (p_data->>'expected_version')::bigint then raise exception 'conflict'; end if;
   select * into c from ap_mail_connections where workspace_id=p_workspace and id=r.connection_id;
+  if r.account_id is distinct from c.account_id then raise exception 'wrong_account'; end if;
   if not c.active or c.paused then raise exception 'paused'; end if;
   select * into j from ap_mail_jobs where workspace_id=p_workspace and receipt_id=r.id for update;
   if j.state='running' and j.lease_until>now() then raise exception 'conflict'; end if;
@@ -289,10 +293,13 @@ begin
   changed=0;
   for j in select mj.* from ap_mail_jobs mj join ap_mail_connections mc on mc.id=mj.connection_id and mc.workspace_id=mj.workspace_id
     where mj.workspace_id=p_workspace and mj.state in ('queued','running') and
-     ((mj.state='running' and mj.lease_until<=now()) or not mc.active or mc.generation<>mj.connection_generation)
+     ((mj.state='running' and mj.lease_until<=now()) or not mc.active or mc.generation<>mj.connection_generation or
+      not exists(select 1 from ap_mail_receipts mr where mr.id=mj.receipt_id and mr.workspace_id=p_workspace and mr.account_id=mc.account_id and mr.connection_id=mc.id))
     order by mj.id limit (p_data->>'limit')::integer for update of mj loop
    select * into c from ap_mail_connections where workspace_id=p_workspace and id=j.connection_id;
-   v_reason=case when not c.active or c.generation<>j.connection_generation then 'wrong_account' when j.attempts>=3 then 'exhausted' else null end;
+   select * into r from ap_mail_receipts where workspace_id=p_workspace and id=j.receipt_id;
+   v_reason=case when not c.active or c.generation<>j.connection_generation or r.account_id is distinct from c.account_id or r.connection_id is distinct from c.id
+    then 'wrong_account' when j.attempts>=3 then 'exhausted' else null end;
    update ap_mail_jobs set state=case when v_reason is not null then 'attention' else 'queued' end,dispatch_generation=dispatch_generation+1,
     lease_until='-infinity',next_retry_at=now(),updated_at=now() where id=j.id returning * into j;
    update ap_mail_receipts set status=case when v_reason is not null then 'needs_attention' else 'queued' end,

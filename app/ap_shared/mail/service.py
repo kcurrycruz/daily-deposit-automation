@@ -5,6 +5,8 @@ from ..models import allowed,require_uuid,integer,text
 
 FIELDS={
  'mail_status':('', ''),'mail_list':('cursor limit',''),'mail_messages':('cursor limit',''),
+ 'mail_receipt_updates':('receipt_ids','receipt_ids'),
+ 'mail_evidence':('receipt_id expected_version cursor limit','receipt_id expected_version'),
  'mail_pause':('connection_id expected_version paused','connection_id expected_version paused'),
  'mail_retry':('receipt_id expected_version','receipt_id expected_version'),
  'mail_history':('connection_id expected_version after before max_messages','connection_id expected_version after before max_messages'),
@@ -22,9 +24,15 @@ class MailService:
         self.check(authorization)
         if action not in FIELDS:raise MailError('invalid')
         data=allowed(payload,*FIELDS[action])
+        if action=='mail_receipt_updates':
+            if type(data['receipt_ids']) is not list or not 1<=len(data['receipt_ids'])<=50:raise MailError('invalid')
+            for ident in data['receipt_ids']:require_uuid(ident)
         for key in ('receipt_id','connection_id'):
             if key in data:require_uuid(data[key])
         if 'expected_version' in data:integer(data['expected_version'],minimum=1)
+        if action=='mail_evidence':
+            integer(data.setdefault('limit',50),minimum=1,maximum=50)
+            integer(data.setdefault('cursor',0),minimum=0,maximum=100000)
         if 'message_id' in data:
             from ...ap_mail.gmail import opaque
             opaque(data['message_id'])
@@ -53,10 +61,10 @@ class MailService:
             result=self.repo.preview(data['receipt_id']);url=result.get('url');parsed=urlparse(url if isinstance(url,str) else '')
             prefix=self.config.supabase_url.rstrip('/')+'/storage/v1/object/sign/'+self.config.bucket+'/'
             if not isinstance(url,str) or not url.startswith(prefix) or parsed.username or parsed.password or parsed.fragment or not 1<=result.get('expiresIn',0)<=300:raise MailError('denied')
-        elif action in ('mail_status','mail_list','mail_messages'):
-            name={'mail_status':'status','mail_list':'receipts','mail_messages':'messages'}[action]
+        elif action in ('mail_status','mail_list','mail_receipt_updates','mail_evidence','mail_messages'):
+            name={'mail_status':'status','mail_list':'receipts','mail_receipt_updates':'receipt_updates','mail_evidence':'evidence','mail_messages':'messages'}[action]
             raw=self.repo.read(name,data)
-            keys=('connection','counts') if action=='mail_status' else ('items','nextCursor')
+            keys=('connection','counts') if action=='mail_status' else ('receipt_id','receipt_version','statement_id','revision_id','preliminary','current_head','compared_at','source','metadata','rows','total','nextCursor') if action=='mail_evidence' else ('items','nextCursor')
             result={key:raw[key] for key in keys}
         else:result=self.repo.control(action.removeprefix('mail_'),data,request_id)
         self.check(authorization);return result

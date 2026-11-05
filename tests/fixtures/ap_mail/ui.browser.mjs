@@ -52,14 +52,25 @@ try{
   document.querySelector('#overlay-root').innerHTML='';
   const old=window.hwfcSharedClient.request;
   window.hwfcSharedClient.request=async(action,payload)=>{
-   if(action==='mail_list')return {items:[{id:'completed-receipt',statement_id:'completed-statement',filename:'completed.pdf',status:'awaiting_review',display_status:'reviewed'}],nextCursor:null};
+   if(action==='mail_list'||action==='mail_receipt_updates')return {items:[{id:'completed-receipt',version:2,statement_id:'completed-statement',filename:'completed.pdf',status:'awaiting_review',display_status:'reviewed',original_available:true,preliminary_available:true}],nextCursor:null};
+   if(action==='mail_evidence')return {receipt_id:'completed-receipt',receipt_version:2,preliminary:true,current_head:false,compared_at:'2026-11-04T12:00:00Z',source:{label:'Synthetic Bills.csv'},metadata:{},rows:[{invoiceNumber:'123',originalAmount:150,status:'amount',reason:'Amounts differ',candidates:[{invoiceNumber:'123',amount:100}]}],total:1,nextCursor:null};
+   if(action==='mail_preview')return {url:location.origin+'/synthetic-original.pdf',expiresIn:300};
    if(action==='statement')return {doc:{id:'completed-statement',vendor:'Reviewed Vendor',filename:'completed.pdf',confirmed:true,rows:[],warnings:[],pageCount:1},
     completed:true,readOnly:true,version:2,resolutions:{},results:[],mappingSnapshot:{},originalAvailable:false};
    return old(action,payload);
   };
   document.querySelector('[data-action="mail-refresh"]').click();
  });
- await page.waitForSelector('[data-action="mail-review"]');await page.click('[data-action="mail-review"]');
+ await page.waitForSelector('[data-action="mail-review"]');
+ await page.click('[data-action="mail-evidence"]');await page.waitForSelector('.mail-evidence');
+ assert.match(await page.locator('.mail-evidence').innerText(),/Amount difference/);
+ assert.match(await page.locator('.mail-evidence').innerText(),/Synthetic Bills.csv/);
+ if(process.env.AP_MAIL_EVIDENCE_SCREENSHOT)await page.screenshot({path:process.env.AP_MAIL_EVIDENCE_SCREENSHOT,fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.querySelector('.mail-evidence .table-wrap').scrollWidth>document.querySelector('.mail-evidence .table-wrap').clientWidth),true);
+ await page.setViewportSize({width:1280,height:900});
+ await page.click('[data-action="mail-evidence-close"]');assert.equal(await page.locator('.mail-evidence').count(),0);
+ await page.click('[data-action="mail-review"]');
  try{await page.waitForSelector('#overlay-root .drawer',{timeout:3000});}
  catch(error){console.error(JSON.stringify({errors,body:await page.locator('body').innerText()}));throw error;}
  assert.match(await page.locator('#overlay-root').innerText(),/Reviewed Vendor/);
@@ -67,5 +78,14 @@ try{
  assert.deepEqual(errors,[]);
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.querySelector('#mail-history-form').getBoundingClientRect().width>0),true);
+ await page.click('[data-action="mail-preview"]');await page.waitForSelector('#mail-private-preview');
+ await page.evaluate(()=>{
+  const timer=document.querySelector('#mail-private-preview').mailTimer,clear=window.clearTimeout;
+  window.previewTimerCleared=false;window.clearTimeout=id=>{if(id===timer&&timer!==undefined)window.previewTimerCleared=true;return clear(id);};
+  const old=window.hwfcSharedClient.request;window.hwfcSharedClient.request=(action,payload)=>action==='mail_status'?Promise.reject(Object.assign(Error('Locked'),{code:'denied'})):old(action,payload);
+  document.querySelector('[data-action="mail-refresh"]').click();
+ });
+ await page.waitForSelector('#mail-private-preview',{state:'detached',timeout:3000});
+ assert.equal(await page.evaluate(()=>window.previewTimerCleared),true);
  console.log('Mail browser DOM checks passed');
 }finally{await browser?.close();await new Promise(r=>server.close(r));}

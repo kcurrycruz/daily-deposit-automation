@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mailImportsHTML} from '../app/ap_statements/frontend/mail-imports-ui.mjs';
+import {mailImportsHTML,mailEvidenceHTML} from '../app/ap_statements/frontend/mail-imports-ui.mjs';
 import {completionPayload} from '../app/ap_statements/frontend/history.mjs';
 test('mail controls escape subjects, label preliminary work and show separate New York dates',()=>{
  const html=mailImportsHTML({enabled:true,loaded:true,connection:{id:'conn',label:'AP Statements',paused:false},counts:{queued:2},
@@ -18,4 +18,11 @@ test('capability absence renders nothing and disconnected state does not imply e
 test('an explicitly completed server statement shows Reviewed without the preliminary action banner',()=>{
  const html=mailImportsHTML({enabled:true,loaded:true,connection:null,items:[{id:'r',status:'awaiting_review',display_status:'reviewed',filename:'done.pdf',completed:true,statement_id:'s'}],messages:[],counts:{}});
  assert.match(html,/Reviewed/);assert.doesNotMatch(html,/Awaiting review|Preliminary comparison/);assert.match(html,/badge green/);
+});
+test('saved preliminary found and amount differences show their source without review controls',()=>{
+ const html=mailEvidenceHTML({receipt_id:'r',preliminary:true,compared_at:'2026-11-04T12:00:00Z',source:{label:'Saved Bills.csv',uploadedAt:'2026-11-03T12:00:00Z'},
+ metadata:{},total:2,nextCursor:null,rows:[{invoiceNumber:'<script>123</script>',originalAmount:100,status:'presence',reason:'Found',candidates:[{invoiceNumber:'123',amount:100,vendor:'Synthetic'}]},
+ {invoiceNumber:'124',originalAmount:150,status:'amount',reason:'Different amount',candidates:[{invoiceNumber:'124',amount:100,vendor:'Synthetic'}]}]});
+ assert.match(html,/Preliminary/);assert.match(html,/Invoice found/);assert.match(html,/Amount difference/);assert.match(html,/Saved Bills.csv/);
+ assert.doesNotMatch(html,/<script>|data-action="complete|data-action="candidate-confirm/);
 });

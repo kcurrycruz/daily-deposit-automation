@@ -9,11 +9,21 @@ class ControlsStore:
     def __init__(self):self.calls=[];self.is_enabled=True;self.callback=lambda:None
     def enabled(self):return self.is_enabled
     def read(self,action,payload):
-        self.callback();return {'connection':None,'counts':{},'secret_ref':'must-not-return','items':[],'nextCursor':None}
+        self.callback()
+        if action=='evidence':return dict(receipt_id=payload['receipt_id'],receipt_version=1,statement_id=None,revision_id=None,preliminary=True,current_head=True,
+            compared_at='2026-11-04T12:00:00Z',source={'importId':'synthetic'},metadata={},rows=[{'invoiceNumber':'123','status':'amount','candidates':[]}],total=1,nextCursor=None)
+        return {'connection':None,'counts':{},'secret_ref':'must-not-return','items':[],'nextCursor':None}
     def control(self,action,payload,request):self.calls.append((action,payload,request));return {'saved':True}
     def preview(self,receipt):return {'url':'https://synthetic.supabase.co/storage/v1/object/sign/hwfc-ap-private/test','expiresIn':300}
 
 class MailControlsTests(unittest.TestCase):
+    def test_preliminary_evidence_is_authorized_bounded_and_not_a_review(self):
+        service,store,auth,state,clock=self.make();rid=str(uuid4())
+        reply=service.handle('mail_evidence',{'receipt_id':rid,'expected_version':1,'limit':50},str(uuid4()),auth)
+        self.assertTrue(reply['preliminary']);self.assertEqual(reply['rows'][0]['status'],'amount')
+        self.assertNotIn('resolutions',reply)
+        store.callback=lambda:state.clear()
+        with self.assertRaises(PermissionError):service.handle('mail_evidence',{'receipt_id':rid,'expected_version':1},str(uuid4()),auth)
     def make(self):
         from app.ap_shared.mail.service import MailService
         service,repo,auth,state,clock=fixture();store=ControlsStore()
@@ -39,6 +49,11 @@ class MailControlsTests(unittest.TestCase):
         self.assertNotIn('secret_ref',result)
         store.is_enabled=False
         with self.assertRaises(MailError):service.handle('mail_status',{},str(uuid4()),auth)
+
+    def test_receipt_refresh_accepts_only_fifty_fixed_workspace_ids(self):
+        service,store,auth,_,_=self.make()
+        self.assertEqual(service.handle('mail_receipt_updates',{'receipt_ids':[str(uuid4())]},str(uuid4()),auth)['items'],[])
+        with self.assertRaises((MailError,ApValidationError)):service.handle('mail_receipt_updates',{'receipt_ids':[str(uuid4()) for _ in range(51)]},str(uuid4()),auth)
 
     def test_receipt_preview_only_accepts_id_and_revalidates_url(self):
         service,store,auth,_,_=self.make();rid=str(uuid4())

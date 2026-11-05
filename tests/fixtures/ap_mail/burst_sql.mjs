@@ -33,6 +33,7 @@ const functions={
  ap_mail_mutate:['p_operation','p_workspace','p_request_id','p_payload_hash','p_data'],
  ap_mail_read:['p_operation','p_workspace','p_data'],ap_mail_publish:['p_workspace','p_request_id','p_payload_hash','p_data'],
  ap_mail_candidates:['p_workspace','p_cursor','p_limit'],ap_mail_queue_stale:['p_workspace','p_connection','p_limit'],
+ ap_mail_byte_match:['p_workspace','p_receipt_id'],
  ap_mail_reserve:['p_workspace','p_claim','p_bucket','p_requested','p_budget'],
 };
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});

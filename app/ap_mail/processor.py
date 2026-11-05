@@ -45,6 +45,7 @@ class MailProcessor:
         return self.lease.check(claim)
 
     def _download(self,receipt):
+        if receipt.get('account_id')!=self.gmail.account_id:raise MailError('wrong_account')
         self.gmail.profile()
         message=self.gmail.message(receipt['message_id'])
         if self.gmail.label_id not in message.get('labelIds',[]):raise MailError('withdrawn')

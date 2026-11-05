@@ -11,7 +11,7 @@ PDF=b'%PDF-synthetic'
 class Store:
     def __init__(self):
         self.events=[];self.claim=asdict(CLAIM);self.lost=False;self.error=None;self.published=0
-        self.row=dict(id=CLAIM.receipt_id,message_id='msg',part_path='0',filename='synthetic.pdf',declared_size=len(PDF),extraction=None)
+        self.row=dict(id=CLAIM.receipt_id,account_id='test',message_id='msg',part_path='0',filename='synthetic.pdf',declared_size=len(PDF),extraction=None)
     def mutate(self,op,data,request_id=None):
         self.events.append(op)
         if op=='claim':return {'claim':self.claim}
@@ -28,6 +28,7 @@ class Store:
 
 class Gmail:
     label_id='Label_1'
+    account_id='test'
     def __init__(self):self.downloads=0;self.error=None
     def profile(self):
         if self.error:raise MailError(self.error)
@@ -48,6 +49,10 @@ class Publication:
     def publish(self,doc,*args):self.doc=doc;return {'status':'awaiting_review'}
 
 class ProcessorTests(unittest.TestCase):
+    def test_old_account_receipt_is_rejected_before_message_lookup(self):
+        p,r,g,s,pub,e=self.make();r.row['account_id']='previous-account'
+        g.message=lambda mid:(_ for _ in ()).throw(AssertionError('Must not query another mailbox'))
+        self.assertEqual(p.run(CLAIM.job_id,1)['code'],'wrong_account');self.assertIsNone(pub.doc)
     def make(self):
         from app.ap_mail.processor import MailProcessor
         repo=Store();gmail=Gmail();sources=Sources();pub=Publication();extractions=[]

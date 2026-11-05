@@ -182,6 +182,12 @@ html body{background:#fff}.main{background:#fff}
 .mail-receipt{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;padding:20px;border-top:1px solid #e2e7dc;overflow-wrap:anywhere}
 .mail-receipt>.action-row{grid-column:1/-1;flex-wrap:wrap}
 .mail-warning{color:#8b6124!important}
+.mail-evidence{margin:0 20px 20px}
+.mail-evidence>p{margin:16px 20px;font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+.mail-evidence h3{margin:0;font-size:14px}
+.mail-evidence table{min-width:640px}
+.mail-evidence td{vertical-align:top;overflow-wrap:anywhere;max-width:360px}
+.mail-evidence>.button{margin:0 20px 12px}
 .mail-history form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:16px}
 .mail-history input{min-width:0;width:100%}
 .mail-preview{width:min(1100px,94vw);height:92vh;border:1px solid #d9e1d2;border-radius:10px;padding:16px}

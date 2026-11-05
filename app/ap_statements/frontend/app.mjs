@@ -69,10 +69,12 @@ const duplicateDrafts=createDuplicateReviewDrafts();
 let duplicateReturn=null,duplicateSourceKey='',duplicateSearchTimer=null,duplicateSearchQuery=null,duplicateSaveAttempt=null;
 const mailImports=createMailImports({request:(...args)=>window.hwfcSharedClient.request(...args)},{
   hasUnsaved:()=>dirty.size>0||duplicateDrafts.hasAnyUnsaved(),onImported:ids=>shared?.adoptMailStatements(ids),onChange:s=>{
+    if(!s.enabled)clearMailPreview();
     if(s.locked&&shared){shared.dispose();shared.state.accessDenied=true;receiveShared(shared.state);return;}
     patchMailImports(document.querySelector('#mail-imports-summary'),s,{compact:true});
     patchMailImports(document.querySelector('#mail-imports-region'),s);
   }});
+function clearMailPreview(){const dialog=document.querySelector('#mail-private-preview');if(dialog){clearTimeout(dialog.mailTimer);dialog.remove();}}
 function receiveWorkspace(snapshot,change={}){
   if(snapshot.accessDenied)mailImports.dispose();else mailImports.setCapability(snapshot.ready?snapshot.capabilities?.mailIntake:0);
   receiveShared(snapshot,change);
@@ -130,6 +132,7 @@ function renderDuplicateUpdate(){
   if(focus){const input=focus.id?document.querySelector('#'+focus.id):slot.querySelector?.(focus.summary?'.duplicate-diagnostics summary':`[data-action="${focus.action}"]`);input?.focus({preventScroll:true});if(typeof focus.start==='number')input?.setSelectionRange?.(focus.start,focus.end);}
 }
 function receiveShared(snapshot,change={}){
+  if(snapshot.accessDenied){const preview=document.querySelector('#mail-private-preview');if(preview){clearTimeout(preview.mailTimer);preview.remove();}}
   if(snapshot.accessDenied){clearTimeout(previewTimer);previewTimer=null;historyLoadToken++;historyPreview?.dispose();historyPreview=null;previewReturnFocus=null;document.querySelector('#history-preview-root')?.remove();files.clear();historyPage.items=[];historicalDetail=null;historySelection=null;pendingRereview=null;state.selected=null;dirty.clear();overlay.innerHTML='';}
   const sourceKey=JSON.stringify(shared?.duplicates?.state.source);
   const duplicateOnly=change.reason==='duplicates'&&!snapshot.accessDenied&&shared?.state?.ready&&sourceKey===duplicateSourceKey&&shared?.duplicates?.state.phase!=='locked';
@@ -660,6 +663,9 @@ document.addEventListener('click', async e => {
       if(action==='mail-retry')await mailImports.retry(row);
       if(action==='mail-more')await mailImports.more('receipts');
       if(action==='mail-message-more')await mailImports.more('messages');
+      if(action==='mail-evidence'){await mailImports.openEvidence(row);document.querySelector('[data-mail-evidence]')?.scrollIntoView({block:'start'});}
+      if(action==='mail-evidence-more')await mailImports.moreEvidence();
+      if(action==='mail-evidence-close'){mailImports.closeEvidence();[...document.querySelectorAll('[data-action="mail-evidence"]')].find(button=>button.dataset.id===target.dataset.id)?.focus({preventScroll:true});}
       if(['mail-use-existing','mail-import-separate','mail-skip'].includes(action))await mailImports.resolveSimilar(row,{'mail-use-existing':'existing','mail-import-separate':'continue','mail-skip':'skip'}[action]);
       if(action==='mail-message-retry'||action==='mail-message-skip'){
         const message=mailImports.state.messages[Number(target.dataset.id)];
@@ -685,12 +691,12 @@ document.addEventListener('click', async e => {
         if(window.confirm(`Import up to ${count} emails received from ${from} to before ${before}, New York time, from the selected Gmail label?`))await mailImports.importHistory({after:afterAt,before:beforeAt,max_messages:count});
       }
       if(action==='mail-preview'){
-        const preview=await mailImports.previewOriginal(row.id);document.querySelector('#mail-private-preview')?.remove();
+        const preview=await mailImports.previewOriginal(row.id);clearMailPreview();
         const dialog=document.createElement('dialog');dialog.id='mail-private-preview';dialog.className='mail-preview';dialog.setAttribute('aria-label','Original emailed statement');
         dialog.innerHTML=`<div class="action-row"><strong>Original emailed statement</strong><button type="button" class="button" data-action="mail-preview-close">Close preview</button></div><iframe title="Original emailed statement" referrerpolicy="no-referrer" src="${esc(preview.url)}"></iframe>`;
-        document.body.append(dialog);dialog.showModal();setTimeout(()=>dialog.remove(),Math.min(300,preview.expiresIn)*1000);
+        document.body.append(dialog);dialog.showModal();dialog.mailTimer=setTimeout(()=>dialog.remove(),Math.min(300,preview.expiresIn)*1000);
       }
-      if(action==='mail-preview-close')document.querySelector('#mail-private-preview')?.remove();
+      if(action==='mail-preview-close')clearMailPreview();
       return;
     }
     if(rereviewBusy&&!['close','back-to-programs','confirm-back-to-programs'].includes(action))throw Error('Please wait for the statement recheck to finish.');

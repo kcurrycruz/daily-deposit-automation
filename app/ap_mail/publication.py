@@ -8,21 +8,23 @@ class MailPublication:
     def __init__(self,repository,domain,authorize=lambda claim:True):self.repo,self.domain,self.authorize=repository,domain,authorize
 
     def assess(self,extracted,claim,pin):
-        candidates=[];cursor=None;seen=set();mappings=None
-        while True:
+        if self.authorize(claim) is False:raise MailError('stale_claim')
+        byte=self.repo.byte_match(claim.receipt_id)
+        if byte:return dict(kind='duplicate',match=byte,repeated=0,added=0,byte_identical=True)
+        mappings=None
+        def page(cursor):
+            nonlocal mappings
             if self.authorize(claim) is False:raise MailError('stale_claim')
-            page=self.repo.candidates_page(cursor,50)
-            if page['epoch']!=pin.protection_epoch or page['mappingVersions']!=pin.mapping_versions:raise MailError('stale_source')
-            if mappings is None:mappings=page['mappings']
-            if page['mappings']!=mappings:raise MailError('stale_source')
-            candidates.extend(page['items'])
-            if len(canonical({'doc':extracted,'candidates':candidates,'mappings':mappings}).encode())>900000:raise MailError('limit')
-            cursor=page['nextCursor']
-            if cursor is None:break
-            if cursor in seen:raise MailError('unavailable')
-            seen.add(cursor)
-        if payload_digest({'mappings':mappings,'versions':page['mappingVersions']})!=pin.mapping_digest:raise MailError('stale_source')
-        result=self.domain.run('assess',dict(doc=extracted,candidates=candidates,mappings=mappings),heartbeat=lambda:self.authorize(claim))
+            result=self.repo.candidates_page(cursor,50)
+            if result['epoch']!=pin.protection_epoch or result['mappingVersions']!=pin.mapping_versions:raise MailError('stale_source')
+            if mappings is None:mappings=result['mappings']
+            if result['mappings']!=mappings or payload_digest({'mappings':mappings,'versions':result['mappingVersions']})!=pin.mapping_digest:raise MailError('stale_source')
+            return result
+        first=page(None)
+        def read(action,payload):
+            if action!='statement_candidates_page' or set(payload)!=set(('cursor',)):raise MailError('denied')
+            return page(payload['cursor'])
+        result=self.domain.run('assess',dict(doc=extracted,stream=True,firstPage=first),read=read,heartbeat=lambda:self.authorize(claim))
         match=result.get('match')
         if match:result['match']={key:match[key] for key in ('id','revision_id','version')}
         return result

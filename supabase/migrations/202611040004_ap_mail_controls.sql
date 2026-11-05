@@ -72,7 +72,8 @@ end $$;
 
 create function public.ap_mail_control_read(p_operation text,p_workspace uuid,p_data jsonb)
 returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
-declare items jsonb; lim integer; c ap_mail_connections; counts jsonb;
+declare items jsonb; lim integer; c ap_mail_connections; counts jsonb; evidence_receipt ap_mail_receipts; evidence_preliminary ap_mail_preliminary;
+ b ap_bill_imports; response jsonb; element jsonb; offset_value integer; taken integer;
 begin
  if jsonb_typeof(p_data) is distinct from 'object' then raise exception 'invalid'; end if;
  if p_operation='status' then
@@ -88,8 +89,39 @@ begin
      (ap_mail_read('status',p_workspace,'{}'))->'counts'->'message_attention'));
  end if;
  lim=coalesce((p_data->>'limit')::integer,50);
- if lim not between 1 and 50 or p_data-array['limit','cursor']<>'{}'::jsonb then raise exception 'invalid'; end if;
- if p_operation='receipts' then
+ if p_operation='evidence' then
+  if p_data-array['receipt_id','expected_version','cursor','limit']<>'{}'::jsonb or
+    not(p_data ?& array['receipt_id','expected_version']) or lim not between 1 and 50 then raise exception 'invalid'; end if;
+  offset_value=coalesce((p_data->>'cursor')::integer,0);
+  if offset_value not between 0 and 100000 then raise exception 'invalid'; end if;
+  select * into evidence_receipt from ap_mail_receipts where workspace_id=p_workspace and id=(p_data->>'receipt_id')::uuid;
+  if not found then raise exception 'not_found'; end if;
+  if evidence_receipt.version is distinct from (p_data->>'expected_version')::bigint then raise exception 'conflict'; end if;
+  select * into evidence_preliminary from ap_mail_preliminary where workspace_id=p_workspace and receipt_id=evidence_receipt.id;
+  if not found then raise exception 'not_found'; end if;
+  select * into b from ap_bill_imports where workspace_id=p_workspace and id=(evidence_preliminary.source_pin->>'import_id')::uuid;
+  response=jsonb_build_object('receipt_id',evidence_receipt.id,'receipt_version',evidence_receipt.version,'statement_id',evidence_preliminary.statement_id,'revision_id',evidence_preliminary.revision_id,
+    'preliminary',true,'current_head',exists(select 1 from ap_statements s where s.workspace_id=p_workspace and s.id=evidence_preliminary.statement_id
+       and s.current_revision_id=evidence_preliminary.revision_id and not s.completed and not s.archived),'compared_at',evidence_preliminary.created_at,
+    'source',jsonb_build_object('importId',b.id,'label',b.metadata->>'label','uploadedAt',b.created_at,
+       'workingSetId',evidence_preliminary.source_pin->'working_set_id','sourceDigest',evidence_preliminary.source_pin->'source_digest'),
+    'metadata',evidence_preliminary.metadata,'rows','[]'::jsonb,'total',jsonb_array_length(evidence_preliminary.rows),'nextCursor',null);
+  items='[]';taken=0;
+  for element in select value from jsonb_array_elements(evidence_preliminary.rows) with ordinality t(value,ordinal)
+    where ordinal>offset_value order by ordinal limit lim loop
+   if octet_length((response||jsonb_build_object('rows',items||jsonb_build_array(element)))::text)>900000 then
+    if taken=0 then raise exception 'limit'; end if;
+    exit;
+   end if;
+   items=items||jsonb_build_array(element);taken=taken+1;
+  end loop;
+  return response||jsonb_build_object('rows',items,'nextCursor',case when offset_value+taken<jsonb_array_length(evidence_preliminary.rows) then offset_value+taken else null end);
+ end if;
+ if p_operation='receipt_updates' then
+  if p_data-array['receipt_ids']<>'{}'::jsonb or jsonb_typeof(p_data->'receipt_ids') is distinct from 'array' or
+    jsonb_array_length(p_data->'receipt_ids') not between 1 and 50 then raise exception 'invalid'; end if;
+ elsif lim not between 1 and 50 or p_data-array['limit','cursor']<>'{}'::jsonb then raise exception 'invalid'; end if;
+ if p_operation in ('receipts','receipt_updates') then
   select coalesce(jsonb_agg(to_jsonb(t)),'[]') into items from (
    select r.id,r.version,r.filename,r.status,r.reason,r.statement_id,r.discovered_at,r.imported_at,m.received_at,m.sender,m.subject,
     case when s.completed then 'reviewed' when s.archived then 'archived' else r.status end display_status,
@@ -99,10 +131,11 @@ begin
    from ap_mail_receipts r join ap_mail_messages m on m.workspace_id=r.workspace_id and m.account_id=r.account_id and m.message_id=r.message_id
    left join ap_mail_preliminary p on p.workspace_id=r.workspace_id and p.receipt_id=r.id
    left join ap_statements s on s.workspace_id=r.workspace_id and s.id=r.statement_id
-   where r.workspace_id=p_workspace and (p_data->>'cursor' is null or (r.discovered_at,r.id)<
+   where r.workspace_id=p_workspace and (p_operation<>'receipt_updates' or r.id in(select value::uuid from jsonb_array_elements_text(p_data->'receipt_ids'))) and
+    (p_data->>'cursor' is null or (r.discovered_at,r.id)<
     ((p_data->'cursor'->>'discovered_at')::timestamptz,(p_data->'cursor'->>'id')::uuid))
    order by r.discovered_at desc,r.id desc limit lim) t;
-  return jsonb_build_object('items',items,'nextCursor',case when jsonb_array_length(items)=lim then
+  return jsonb_build_object('items',items,'nextCursor',case when p_operation='receipts' and jsonb_array_length(items)=lim then
    jsonb_build_object('id',items->-1->'id','discovered_at',items->-1->'discovered_at') else null end);
  elsif p_operation='messages' then
   select coalesce(jsonb_agg(to_jsonb(t)),'[]') into items from (

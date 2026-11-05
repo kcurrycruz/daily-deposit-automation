@@ -2,6 +2,15 @@
 begin;
 alter table public.ap_mail_preliminary add column metadata jsonb not null default '{}';
 
+create function public.ap_mail_byte_match(p_workspace uuid,p_receipt_id uuid)
+returns jsonb language sql stable security definer set search_path=public,pg_temp as $$
+ select jsonb_build_object('match',(select jsonb_build_object('id',s.id,'revision_id',s.current_revision_id,'version',s.version)
+  from ap_mail_receipts r join ap_statements s on s.workspace_id=r.workspace_id and s.file_hash=r.sha256
+  where r.workspace_id=p_workspace and r.id=p_receipt_id and s.current_revision_id is not null limit 1));
+$$;
+revoke all on function public.ap_mail_byte_match(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.ap_mail_byte_match(uuid,uuid) to service_role;
+
 create function public.ap_mail_candidates(p_workspace uuid,p_cursor uuid,p_limit integer)
 returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
 declare h ap_workspaces; item record; items jsonb='[]'; last_id uuid; more boolean;
@@ -55,6 +64,7 @@ begin
   j.lease_generation is distinct from (f->>'lease_generation')::bigint or
   slot.generation is distinct from (f->>'slot_generation')::bigint or j.slot_generation<>slot.generation then raise exception 'stale_claim'; end if;
  select * into r from ap_mail_receipts where workspace_id=p_workspace and id=j.receipt_id for update;
+ if r.account_id is distinct from c.account_id or r.connection_id is distinct from c.id then raise exception 'stale_claim'; end if;
  if r.extraction is null or doc is distinct from r.extraction or doc->'confirmed' is distinct from 'false'::jsonb or
   coalesce(r.sha256,'') !~ '^[a-f0-9]{64}$' or r.original_object_key is distinct from p_workspace::text||'/pdf/'||r.sha256||'.pdf' or
   r.actual_size is null or r.extraction_digest is null or r.parser_version is null or

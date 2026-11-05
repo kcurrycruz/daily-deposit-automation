@@ -11,6 +11,7 @@ def message(ident, received='1793793600000', parts=None):
 
 class Gmail:
     label_id='Label_1'
+    account_id='test'
     def __init__(self, messages=None):
         self.data=messages or {};self.calls=[];self.anchor='999';self.lists={None:dict(messages=[])};self.events={}
     def profile(self):self.calls.append('profile');return {'historyId':self.anchor}

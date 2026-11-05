@@ -38,7 +38,7 @@ def _header(payload, name, maximum):
     return ''
 
 
-def _history_pending(result):
+def _history_pending(result,label_id):
     pending={}
     for event in result.get('history',[]):
         if type(event) is not dict: raise MailError('unreadable')
@@ -49,7 +49,12 @@ def _history_pending(result):
                 msg=item if field=='messages' else item.get('message',{}) if type(item) is dict else {}
                 if type(msg) is not dict: raise MailError('unreadable')
                 ident=opaque(msg.get('id'))
-                eligible=field in ('messagesAdded','labelsAdded')
+                eligible=field=='messagesAdded'
+                if field=='labelsAdded':
+                    labels=item.get('labelIds',[])
+                    if type(labels) is not list or len(labels)>1000:raise MailError('unreadable')
+                    for label in labels:opaque(label)
+                    eligible=label_id in labels
                 pending[ident]=dict(id=ident,eligible=eligible or pending.get(ident,{}).get('eligible',False))
     if len(pending)>1000: raise MailError('limit')
     return list(pending.values())
@@ -167,7 +172,7 @@ class MailSync:
                         **({'manual_pending':cursor['manual_pending']} if cursor.get('manual_pending') else {}),
                         **({'historical':cursor['historical']} if 'historical' in cursor else {}))
             return self._save(home,cursor),False,(0,0,0)
-        pending=_history_pending(page)
+        pending=_history_pending(page,self.gmail.label_id)
         if not pending and not page.get('nextPageToken'):
             cursor['history_id']=page['historyId'];cursor.pop('live_page',None)
             return self._save(home,cursor,completed=True),True,(0,0,0)

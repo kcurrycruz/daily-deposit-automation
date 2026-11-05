@@ -38,12 +38,21 @@ try{
  assert.deepEqual(await publish(a,request),first); // lost response can replay after lease is released
  await assert.rejects(publish({...a,doc:{...a.doc,vendor:'Changed'}},request),/conflict/);
  const rev=(await q('select * from ap_statement_revisions where statement_id=$1',[a.doc.id])).rows[0];
+ const receiptVersion=(await q('select version from ap_mail_receipts where id=$1',[a.claim.receipt_id])).rows[0].version;
+ await q('update ap_mail_preliminary set rows=$1 where receipt_id=$2',[Array.from({length:75},(_,n)=>({id:'row-'+n,invoiceNumber:String(n),originalAmount:100,status:n?'amount':'presence',candidates:[]})),a.claim.receipt_id]);
+ const evidence=(await q("select ap_mail_control_read('evidence',$1,$2) v",[w,{receipt_id:a.claim.receipt_id,expected_version:receiptVersion,limit:50,cursor:0}])).rows[0].v;
+ assert.equal(evidence.preliminary,true);assert.equal(evidence.rows.length,50);assert.equal(evidence.total,75);assert.equal(evidence.nextCursor,50);
+ const evidenceTail=(await q("select ap_mail_control_read('evidence',$1,$2) v",[w,{receipt_id:a.claim.receipt_id,expected_version:receiptVersion,limit:50,cursor:50}])).rows[0].v;
+ assert.equal(evidenceTail.rows.length,25);assert.equal(evidenceTail.nextCursor,null);
+ await assert.rejects(q("select ap_mail_control_read('evidence',$1,$2)",[w,{receipt_id:a.claim.receipt_id,expected_version:receiptVersion-1,limit:50}]),/conflict/);
  assert.deepEqual(rev.results,[]);assert.deepEqual(rev.resolutions,{});assert.equal(rev.import_id,null);
  assert.equal((await q('select count(*)::int n from ap_mail_preliminary')).rows[0].n,1);
  assert.equal((await q('select count(*)::int n from ap_completion_events')).rows[0].n,0);
  // Byte matches link even completed/archived, regardless of semantic parser output.
  await q('update ap_statements set completed=true,archived=true,version=version+1 where id=$1',[a.doc.id]);
- const b=await incoming('a');assert.equal((await publish(b)).status,'already_imported');
+ const b=await incoming('a');
+ assert.equal((await q('select ap_mail_byte_match($1,$2) v',[w,b.claim.receipt_id])).rows[0].v.match.id,a.doc.id);
+ assert.equal((await publish(b)).status,'already_imported');
  assert.equal((await q('select count(*)::int n from ap_statement_revisions')).rows[0].n,1);
  // Semantic duplicate keeps its different incoming original and links the saved head.
  const c=await incoming('c');c.assessment={kind:'duplicate',match:{id:a.doc.id,revision_id:rev.id,version:2},repeated:1,added:0};
@@ -110,6 +119,8 @@ try{
  const list=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":50}') v",[w])).rows[0].v;
  assert.ok(list.items.length);assert.equal(JSON.stringify(list).includes('secret-reference'),false);
  assert.equal(list.items.find(row=>row.id===a.claim.receipt_id).display_status,'reviewed');
+ const refreshed=(await q("select ap_mail_control_read('receipt_updates',$1,$2) v",[w,{receipt_ids:[a.claim.receipt_id]}])).rows[0].v;
+ assert.equal(refreshed.items.length,1);assert.equal(refreshed.items[0].id,a.claim.receipt_id);
  await q("update ap_mail_receipts set discovered_at=now()+interval '1 day' where id=$1",[d.claim.receipt_id]);
  const latest=(await q("select ap_mail_control_read('receipts',$1,'{\"limit\":1}') v",[w])).rows[0].v;
  assert.equal(latest.items[0].id,d.claim.receipt_id);

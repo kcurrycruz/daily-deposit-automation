@@ -68,6 +68,7 @@ class GitHubSecretStore:
         env={key:value for key,value in os.environ.items()
              if key not in {'GH_DEBUG','DEBUG','GIT_TRACE','GIT_TRACE_CURL','GIT_CURL_VERBOSE'}}
         env['GH_PROMPT_DISABLED']='1'
+        env['GH_HOST']='github.com'
         try:
             result=self.run(['gh',*args],input=payload,capture_output=True,timeout=30,
                             env=env,check=False)

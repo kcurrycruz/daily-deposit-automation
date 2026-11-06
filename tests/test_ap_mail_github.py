@@ -20,6 +20,17 @@ def grant():
 
 
 class GithubGrantTests(unittest.TestCase):
+    def test_inherited_enterprise_host_cannot_redirect_the_gmail_grant(self):
+        api=self.api();hosts=[]
+        def run(args,**kwargs):
+            hosts.append(kwargs['env'].get('GH_HOST'))
+            meta={'nameWithOwner':REPOSITORY,'isPrivate':False,'viewerPermission':'WRITE'}
+            return subprocess.CompletedProcess(args,0,json.dumps(meta).encode(),b'')
+        with patch.dict('os.environ',{'GH_HOST':'enterprise.example.test'}):
+            store=api.GitHubSecretStore(REPOSITORY,run=run)
+            store.validate();store.add(REFERENCE,json.dumps(grant()).encode())
+        self.assertEqual(hosts,['github.com','github.com','github.com'])
+
     def api(self):
         self.assertIsNotNone(importlib.util.find_spec('workers.ap_mail.github'), 'GitHub grant adapter is missing')
         from workers.ap_mail import github

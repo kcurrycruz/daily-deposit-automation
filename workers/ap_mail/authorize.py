@@ -43,12 +43,14 @@ def persist_grant(store,secret_name,token,client,identity,label):
     except Exception:raise MailError('storage') from None
     return dict(account_id=identity['sub'],email=identity['email'],label_id=label['id'],label_name=label['name'],secret_version=version)
 
-def authorize(client_path,expected_email,label_name,secret_name):
+def authorize(client_path,expected_email,label_name,secret_name,*,store=None):
     from .http import verify_google_token
-    from .runtime import BoundedTransport,SecretStore
+    from .shared import BoundedTransport
     from app.ap_mail.gmail import GmailClient
     logging.disable(logging.CRITICAL)
     try:
+        if store is not None:
+            store.validate()
         path=Path(client_path)
         if path.stat().st_size>16384:raise MailError('invalid')
         client=json.loads(path.read_text(encoding='utf-8'))['installed']
@@ -90,15 +92,25 @@ def authorize(client_path,expected_email,label_name,secret_name):
         if len(labels)!=1:raise MailError('label_missing')
         label=labels[0];gmail=GmailClient(transport,lambda:token['access_token'],identity['sub'],identity['email'],label['id'])
         gmail.profile();gmail.labels()
-        return persist_grant(SecretStore(),secret_name,token,client,identity,label)
+        if store is None:
+            from .runtime import SecretStore
+            store=SecretStore()
+        return persist_grant(store,secret_name,token,client,identity,label)
     except MailError:raise
     except Exception:raise MailError('auth') from None
 
 def main():
     parser=argparse.ArgumentParser(description='Authorize the selected Gmail account without saving tokens to disk.')
     parser.add_argument('--client-json',required=True);parser.add_argument('--expected-email',required=True)
-    parser.add_argument('--label',default='AP Statements');parser.add_argument('--secret',required=True)
+    parser.add_argument('--label',default='AP Statements')
+    destination=parser.add_mutually_exclusive_group(required=True)
+    destination.add_argument('--secret');destination.add_argument('--github-repo')
     args=parser.parse_args()
-    try:print(json.dumps(authorize(args.client_json,args.expected_email,args.label,args.secret)))
+    try:
+        store=None;reference=args.secret
+        if args.github_repo:
+            from .github import GitHubSecretStore,grant_reference
+            store=GitHubSecretStore(args.github_repo);reference=grant_reference(args.github_repo)
+        print(json.dumps(authorize(args.client_json,args.expected_email,args.label,reference,store=store)))
     except MailError as error:raise SystemExit('Gmail setup did not finish: '+error.code+'. No token was printed.') from None
 if __name__=='__main__':main()

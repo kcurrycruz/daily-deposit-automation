@@ -42,6 +42,7 @@ jobs:
         with:
           node-version: '24'
       - run: pip install -r requirements.txt
+      - run: pip install -r tests/requirements-ap-mail.txt
       - run: pip install --require-hashes -r workers/ap_mail/requirements.lock
       - run: npm ci --prefix app/ap_statements --ignore-scripts --no-audit --no-fund
       - run: npm ci --prefix workers/ap_mail --ignore-scripts --no-audit --no-fund

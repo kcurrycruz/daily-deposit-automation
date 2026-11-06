@@ -1,0 +1,2 @@
+# Test-only YAML structure checks; not installed by Streamlit or the intake worker.
+PyYAML==6.0.3

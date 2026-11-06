@@ -179,7 +179,8 @@ class MailSync:
         cursor['live_page']=dict(pending=pending,page_next=page.get('nextPageToken'),history_id=page['historyId'])
         return self._save(home,cursor),False,(0,0,0)
 
-    def poll(self, connection_id, budget_seconds=60):
+    def poll(self, connection_id, budget_seconds=60, *, queue_stale=True):
+        if type(queue_stale) is not bool: raise MailError('invalid')
         deadline=self.monotonic()+natural(budget_seconds,1,60)
         counts=[0,0,0];home=None;live_idle=False
         try:
@@ -187,7 +188,7 @@ class MailSync:
             if not home or home['id']!=connection_id or not home['active']: raise MailError('not_configured')
             if home['paused']: return PollSummary('paused')
             self.gmail.profile();self.gmail.labels()
-            self.repo.queue_stale(50)
+            if queue_stale:self.repo.queue_stale(50)
             if home['cursor'].get('phase')=='baseline' and not home['cursor'].get('anchor'):
                 home=self.begin_baseline()
             for _ in range(10000):

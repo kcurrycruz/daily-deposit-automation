@@ -34,13 +34,17 @@ const functions={
  ap_mail_read:['p_operation','p_workspace','p_data'],ap_mail_publish:['p_workspace','p_request_id','p_payload_hash','p_data'],
  ap_mail_candidates:['p_workspace','p_cursor','p_limit'],ap_mail_queue_stale:['p_workspace','p_connection','p_limit'],
  ap_mail_byte_match:['p_workspace','p_receipt_id'],
+ ap_mail_batch_pending:['p_workspace','p_connection','p_generation','p_cursor','p_limit'],
  ap_mail_reserve:['p_workspace','p_claim','p_bucket','p_requested','p_budget'],
 };
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
 try{for await(const line of lines){
  try{
   const request=JSON.parse(line);let value;
-  if(request.test==='expire'){
+  if(request.test==='batch_config'){
+   if(request.reference!=='github:kcurrycruz/daily-deposit-automation:AP_MAIL_GMAIL_GRANT')throw Error('invalid');
+   await q('update ap_mail_connections set secret_ref=$1 where id=$2',[request.reference,conn]);value={saved:true};
+  }else if(request.test==='expire'){
    await q("update ap_mail_jobs set lease_until=now()-interval '1 second' where id=$1",[request.job_id]);
    await q("update ap_mail_processor_slots set lease_until=now()-interval '1 second' where job_id=$1",[request.job_id]);value={saved:true};
   }else if(request.test==='advance'){

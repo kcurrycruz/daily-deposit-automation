@@ -7,6 +7,15 @@ from app.ap_mail.contracts import MailError
 
 
 class SyncTests(unittest.TestCase):
+    def test_batch_coordinator_can_own_the_single_stale_draft_page(self):
+        import inspect
+        store=MailStore();mail=Gmail({});calls=[];self.active(store)
+        store.queue_stale=lambda limit:calls.append(limit)
+        sync=self.sync(mail,store)
+        self.assertIn('queue_stale',inspect.signature(sync.poll).parameters,'coordinator-owned stale queue is missing')
+        self.assertEqual(sync.poll(C,queue_stale=False).status,'ok');self.assertEqual(calls,[])
+        self.assertEqual(sync.poll(C).status,'ok');self.assertEqual(calls,[50])
+
     def test_unrelated_label_changes_never_import_old_baseline_mail(self):
         for field in ('labelsAdded','labelsRemoved'):
             store=MailStore();mail=Gmail({'old':message('old','1700000000000')})

@@ -41,6 +41,8 @@ def validate_context(env,event):
             raise MailError('denied')
         if not re.fullmatch('[0-9a-f]{40}',env.get('AP_MAIL_SOURCE_SHA','')):
             raise MailError('invalid')
+        if env.get('GITHUB_EVENT_NAME')=='schedule' and env.get('AP_MAIL_SCHEDULE_ENABLED')!='true':
+            raise MailError('paused')
         reference=grant_reference(REPOSITORY)
         EnvironmentGrantStore(reference,env.get('AP_MAIL_GMAIL_GRANT','')).read(reference)
         mail=MailConfig(env['AP_MAIL_SUPABASE_URL'],env['AP_MAIL_SUPABASE_KEY'],

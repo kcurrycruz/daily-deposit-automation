@@ -27,7 +27,8 @@ class BatchWorkflowTests(unittest.TestCase):
                        'github.event.repository.private == false',"github.ref == 'refs/heads/main'",
                        "github.event.repository.default_branch == 'main'"]:
             self.assertIn(clause,job['if'])
-        self.assertNotIn('||',job['if']);self.assertNotIn('pull_request',raw)
+        self.assertRegex(job['if'],r"&&\s*\(github.event_name == 'workflow_dispatch' \|\| vars.AP_MAIL_SCHEDULE_ENABLED == 'true'\)")
+        self.assertEqual(job['if'].count('||'),1);self.assertNotIn('pull_request',raw)
         for forbidden in ['actions/cache','actions/upload-artifact','id-token: write','--no-sandbox','docker build','gcloud ','terraform apply']:
             self.assertNotIn(forbidden,raw)
 

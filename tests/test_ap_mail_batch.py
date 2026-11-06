@@ -12,7 +12,7 @@ from test_ap_mail_repository import W,C
 
 
 def environment():
-    return dict(AP_MAIL_BATCH_ENABLED='true',GITHUB_REPOSITORY=REPOSITORY,
+    return dict(AP_MAIL_BATCH_ENABLED='true',AP_MAIL_SCHEDULE_ENABLED='true',GITHUB_REPOSITORY=REPOSITORY,
         GITHUB_REF='refs/heads/main',GITHUB_EVENT_NAME='schedule',
         GITHUB_WORKFLOW_REF=REPOSITORY+'/.github/workflows/ap-mail-batch.yml@refs/heads/main',
         RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',RUNNER_ARCH='X64',
@@ -53,6 +53,13 @@ class Sync:
 
 
 class BatchTests(unittest.TestCase):
+    def test_manual_acceptance_can_run_before_schedule_activation(self):
+        api=self.api();env={**environment(),'AP_MAIL_SCHEDULE_ENABLED':'false'}
+        with self.assertRaises(MailError) as caught:api.validate_context(env,event())
+        self.assertEqual(caught.exception.code,'paused')
+        env['GITHUB_EVENT_NAME']='workflow_dispatch'
+        self.assertEqual(api.validate_context(env,event()).mail.connection_id,C)
+
     def test_real_sql_pdf_batch_recovers_and_preserves_human_history(self):
         from fixtures.ap_mail.batch_run_check import run_batch_check
         run_batch_check()

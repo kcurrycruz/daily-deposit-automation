@@ -139,3 +139,9 @@ Final: fixed inherited GH_HOST secret destination — test_inherited_enterprise_
 Final: minor (deferred): none.
 Final: Ruling: Linux acceptance remains an explicit gate — local Windows tests cannot prove Linux sandbox/OCR/setup duration — deployment may require correction before credentials or activation.
 Final: Ruling: real Gmail/Supabase and scheduled success remain unverified — no live setup or new consent performed — owner-selected acceptance and an observed scheduled run are required before claiming live success.
+
+## Authorized integration and Linux packaging follow-up
+
+The owner authorized merge and push on 2026-11-06. DD-v2 was fast-forwarded to 89c6981 and the actual merged checkout passed 117 mail tests (116 passed, one unconfigured live integration skip, zero failures, 315.494 seconds) plus all 480 AP frontend tests (1,448.9016 ms). Both remote heads were verified after push: DD-v2 89c698191839f2d84ab560fbfde7afdf1f4eccc9 and main f3b7369fea7b5b8adefe21969b22c83723b54671. Main received only the disabled scheduler file.
+
+GitHub run 42255112833 accepted the Ubuntu setup, hash-locked dependencies, npm installs, bundled frontend build and compilation. The separate container packaging job reproduced an existing failure: build.mjs could not resolve streamlit_bridge.mjs because Docker did not copy that source and its context whitelist omitted it. The minimal fix adds the exact source to the Docker COPY inventory and both matching context whitelists; no matching, credential or runtime behavior changed. Existing deployment checks passed 1/1. Worker candidate 0a74c5db21aaecf1255707f0308196c06b71b515 includes this fix; both scheduler source refs advance to it. The real Linux container rerun remains the acceptance test; no local Docker success is asserted. Live migrations, Gmail consent and activation remain outstanding.

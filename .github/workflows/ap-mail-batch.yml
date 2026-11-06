@@ -15,7 +15,7 @@ concurrency:
 
 env:
   # Update both literal release refs only after the replacement source is verified.
-  AP_MAIL_SOURCE_SHA: 7a8f3356541f5e8234a48eb0b1053afe54f3a2c4
+  AP_MAIL_SOURCE_SHA: f78eaae29bfd4c595b7a81a08dff8e0b74902275
   AP_MAIL_RUNNER: ubuntu-24.04
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
   PIP_NO_CACHE_DIR: '1'
@@ -37,7 +37,7 @@ jobs:
       - name: Check out the reviewed AP release
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: 7a8f3356541f5e8234a48eb0b1053afe54f3a2c4
+          ref: f78eaae29bfd4c595b7a81a08dff8e0b74902275
           persist-credentials: false
           fetch-depth: 1
       - name: Verify the exact source revision

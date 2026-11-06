@@ -1,6 +1,6 @@
 # AP Gmail intake with no paid hosting
 
-Date: 2026-11-06. Status: proposed; implementation and activation are not approved by this document.
+Date: 2026-11-06. Status: design approved by the owner in chat; implementation plan review and live activation remain separate gates.
 
 ## Intent and agreed constraints
 

@@ -8,31 +8,33 @@ The owner receives fewer than 50 statement PDFs monthly. Outlook forwarding and 
 
 Reuse the existing Gmail sync, PDF extraction, BILL comparison, duplicate protection, private storage, and preliminary review UI. Keep foreground Streamlit work separate from PDF processing. The previous five-minute Cloud Run rollout is superseded for this owner; no Cloud Run resources have been deployed or Gmail consent granted for it.
 
-No new hosting subscription, payment method, paid model API, container registry, or Google Secret Manager/Tasks/Scheduler dependency is allowed. This is an allowance-limited design, not a promise of unlimited free compute or storage. Existing Supabase limits still apply. Imports stop instead of causing a paid upgrade or overage.
+No new hosting subscription, payment method, paid model API, container registry, or Google Secret Manager/Tasks/Scheduler dependency is allowed. The repository is already public: standard GitHub-hosted runner compute is free independently of included private-repository usage. Existing platform limits and Supabase storage limits still apply. Imports stop instead of causing a paid upgrade or overage.
 
 ## Approaches considered
 
 1. Cloud Run: existing implementation, durable five-minute operation, but requires billing; rejected by the owner.
 2. An existing computer: no additional hosting subscription and frequent checks, but requires an awake connected machine; offered but not selected.
-3. GitHub Actions twice daily: independent of Streamlit and a personal computer, with included usage and scheduling limitations; selected by the owner.
+3. GitHub Actions twice daily: independent of Streamlit and a personal computer, with free standard runners on the already-public repository and scheduling/platform limitations; selected by the owner.
 
 ## Verified current state and open account checks
 
-Local source is clean on DD-v2 at e6edd3acd5fd809bc2add02b109913ad713dcb32. The prior cloud implementation is merged. MailProcessor already owns renewal, original/extraction reuse, comparison and fenced publication. The database is the durable queue; Cloud Tasks is currently only a dispatch adapter. The mail connection secret_ref is opaque text in SQL; its cloud-specific validation resides in the Cloud Run adapter.
+The design branch codex/ap-mail-free-batch starts from DD-v2 at e6edd3acd5fd809bc2add02b109913ad713dcb32. The prior cloud implementation is merged. MailProcessor already owns renewal, original/extraction reuse, comparison and fenced publication. The database is the durable queue; Cloud Tasks is currently only a dispatch adapter. The mail connection secret_ref is opaque text in SQL; its cloud-specific validation resides in the Cloud Run adapter.
 
 The four 20261104 mail migrations are still required; they have not been applied to the real database. Existing deployment recovery, private storage, history protections and owner consent requirements remain in force.
 
-The GitHub connector is unavailable in this session. The connected Work Chrome profile is signed out. Repository visibility/default branch, owner allowance, current consumption, and paid-usage controls have therefore NOT been verified. Do not report a free-run guarantee or enable imports until those checks succeed. A GitHub Actions schedule runs the default branch; DD-v2 must not be assumed to be that branch.
+The GitHub connector is unavailable in this session. On 2026-11-06 the owner signed the connected Work Chrome profile into KarlHWFC. Browser observation verified kcurrycruz/daily-deposit-automation is Public and its root opens main, showing the older d1c59f8 commit. KarlHWFC has access to the repository but its settings page says repository options are unavailable; only Secrets and variables is exposed. Do not confuse KarlHWFC's billing with kcurrycruz's. No owner billing usage/control has been read or changed. Official GitHub documentation confirms standard runners in public repositories are free independently of the private-repository included allowance.
+
+A schedule must live on the actual default branch. Proposed deployment: a narrowly scoped scheduler workflow on main checks out an immutable, reviewed AP release commit from DD-v2 and invokes its batch entry point. Require execution from the reviewed main workflow for schedule/manual events; do not allow arbitrary workflow_dispatch input refs to receive secrets. Advance the pinned AP source SHA only through a reviewed release. Do not change the default branch, merge the whole newer app into main, or switch Streamlit's deployed branch automatically. Confirm the actual default branch from repository metadata before preparing the final integration diff.
 
 ## Schedule and bounded resource use
 
 Builder proposal: run daily, including weekends, near 08:17 and 16:17 America/New_York. Use the currently documented timezone-aware schedule; validate syntax against official GitHub documentation. These are target times, not delivery guarantees: GitHub can delay or drop scheduled events. The existing app continues to show the last successful poll; missed runs are caught up from persisted Gmail history next time.
 
-Use one standard Ubuntu-hosted job, a fixed concurrency group with cancel-in-progress false, and a 20-minute whole-job timeout. This bounds a normal 31-day schedule to at most 62 jobs / 1,240 runner-minutes, before GitHub accounting differences and exceptional owner-triggered runs. It is not a statement of the owner's actual allowance. Existing CI also consumes the shared allowance.
+Use one standard Ubuntu-hosted job, a fixed concurrency group with cancel-in-progress false, and a 20-minute whole-job timeout. This bounds a normal 31-day schedule to at most 62 jobs / 1,240 runner-minutes, excluding exceptional owner-triggered runs. Standard public-repository runner compute does not draw from the owner's private-repository allowance. The limits bound resource use and backlog, not a paid allocation.
 
 The coordinator gets a shorter internal deadline (proposed 14 minutes), a maximum of ten PDF processing starts per run, and enough reserved time for the existing 600-second per-PDF limit before starting another PDF. Never shorten the established file protections or disable the Chromium sandbox to fit a run. On a time/item limit, leave remaining jobs durably queued for the next scheduled run. Do not sleep or automatically rerun workflows to exhaust the backlog.
 
-Before activation, verify an applicable GitHub Actions hard-stop budget preventing paid usage, or the account's documented no-paid-usage behavior. Include compute, artifact/cache/package storage and shared-account effects in that check. No workflow variable substitutes for an account-level spending control. Do not change account-wide spending settings without reviewing their impact on existing CI. If free capacity is exhausted, delayed imports are acceptable. Do not publish private code or financial data to obtain free public-repository compute.
+Before activation, verify the repository remains public and only standard free GitHub-hosted Linux runners are selected. Fail closed before credential exposure if the repository becomes private, the event/repository binding differs, or a paid/custom runner is selected. A private-repository deployment is not implicitly authorized; it needs separately verified allowance and effective paid-usage blocking. Do not add artifact/cache/package storage to this workflow. Do not change any repository visibility or account-wide spending settings. If platform limits prevent runs, delayed imports are acceptable. The public repository must contain code only: keep financial data in private Supabase storage and suppress all identifying PDF/Gmail/BILL content in public workflow logs and summaries.
 
 Avoid persistent Actions caches, uploaded artifacts, container images and paid runners in this intake workflow. Install pinned runtime dependencies on each ephemeral runner. Bound setup as part of the same timeout and measure its actual overhead. Dependency installation/build happens before sensitive credentials are exposed to the processing step.
 
@@ -77,7 +79,7 @@ Original baseline behavior remains new arrivals only. Explicit bounded Import ea
 1. Approve this revised design; implement in an isolated codex/ branch with a task plan.
 2. Add the batch adapter/entry point, direct secret destination, guarded twice-daily workflow, any minimal additive SQL read and truthful setup/UI documentation. Preserve the cloud deployment as an optional tested backend.
 3. Run targeted unit/integration tests and relevant regressions. Test the actual Ubuntu browser/OCR environment with sandbox enabled and synthetic PDFs. Do not claim Linux acceptance from Windows-only verification.
-4. Verify GitHub ownership, visibility, actual default branch, free usage remaining, and effective paid-usage blocking; resolve any unavailable/unsupported control before activation. No repository visibility or default-branch change is automatic.
+4. Verify GitHub deployment authority, public visibility, actual default branch, standard free runner selection, no persistent workflow artifact/cache storage, and private financial-data handling. Prepare a minimal reviewed default-branch scheduler diff pinned to the tested AP release. No repository visibility or default-branch change is automatic. If the repository is private by activation time, stop and revisit the design and no-paid-usage controls.
 5. Inventory/privately back up the approved database definitions and counts. Apply missing migrations in order only after the real target and recovery copy are reviewed. Preserve all existing financial records.
 6. Configure the Gmail API/OAuth client; obtain owner consent with direct private secret storage. Configure only public IDs as variables and private values as secrets. Keep the workflow enable flag off and the database connection paused until readiness checks pass.
 7. Test a synthetic PDF end to end, then one owner-selected real statement while the twice-daily schedule is still disabled. Verify private original, one draft/link, correct extracted rows and BILL source, and unchanged human history. Measure runtime and foreground impact against the actual allowance.
@@ -94,7 +96,7 @@ Recovery disables the workflow/connection, preserves all SQL queues/receipts and
 - Existing exact/semantic duplicate links, overlapping invoices, similarity choices and human-history protections.
 - No Cloud Run/Tasks/Secret Manager calls in the batch path; no secrets in child environments, output, temp payloads or artifacts.
 - Workflow default-branch semantics, explicit enablement, timezone, pinned trusted actions/dependencies, read-only permissions, no PR secret execution, timeout and storage policy.
-- Real included-usage/budget control verified separately from automated code tests; measured setup/runtime fits the intended operating budget.
+- Public-repository/free-runner eligibility verified separately from automated code tests; a visibility change fails closed; measured setup/runtime fits the bounded job.
 
 ## Builder discretion
 

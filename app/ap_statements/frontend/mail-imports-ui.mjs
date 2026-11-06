@@ -27,9 +27,9 @@ function statusHTML(s){
  if(!s.loaded&&!s.error)return '<span role="status">Checking email imports…</span>';
  const c=s.connection,counts=s.counts||{};
  return `${s.error?`<div class="notice amber" role="alert">${esc(s.error)} ${button('mail-refresh','Refresh')} ${button('mail-retry-last','Retry last action')}</div>`:''}
- ${!c?'<p>Email imports are not connected yet. You can still upload statements manually.</p>':`<div class="mail-status-line"><div><strong>${esc(c.label||'AP Statements')}</strong><small>${esc(c.email||'')} · ${c.paused?'Paused':'Automatic imports on'}</small></div>${button('mail-pause',c.paused?'Resume imports':'Pause imports','',s.busy)}</div>
+ ${!c?'<p>Email imports are not connected yet. You can still upload statements manually.</p>':`<div class="mail-status-line"><div><strong>${esc(c.label||'AP Statements')}</strong><small>${esc(c.email||'')} · ${c.paused?'Paused':'Ready for scheduled imports'}</small></div>${button('mail-pause',c.paused?'Resume imports':'Pause imports','',s.busy)}</div>
  <p>${Number(counts.queued)||0} queued · ${Number(counts.scanning)||0} scanning · ${(Number(counts.needs_attention)||0)+(Number(counts.message_attention)||0)} need attention</p>
- <small>Last successful check: ${esc(c.lastSuccessAt?nyTimestamp(c.lastSuccessAt):'Waiting for first check')}. New mail is checked about every five minutes. Pausing stops new scans; an active scan may finish.</small>
+ <small>Last successful check: ${esc(c.lastSuccessAt?nyTimestamp(c.lastSuccessAt):'Waiting for first check')}. New mail, retries, and earlier-email requests run on the configured import schedule. Pausing stops new scans; an active scan may finish.</small>
  ${c.error?`<p class="notice amber">${esc(reasons[c.error]||'The last email check did not finish. Retry or check the connection.')}</p>`:''}`}`;
 }
 function rowsHTML(s){return (s.items||[]).map(raw=>{const r={...raw,status:raw.display_status||raw.status};return `<article class="mail-receipt"><div><strong>${esc(r.filename)}</strong><small>${esc(r.sender)} ${r.subject?`· ${esc(r.subject)}`:''}</small><small>Received: ${esc(r.received_at?nyTimestamp(r.received_at):'Not supplied')} · Imported: ${esc(r.imported_at?nyTimestamp(r.imported_at):'Not imported yet')}</small></div>
@@ -49,7 +49,7 @@ export function mailImportsHTML(s,{compact=false}={}){
  return `<section class="panel mail-imports"><div class="panel-title"><h2>Email imports</h2>${button('mail-refresh','Refresh')}</div><div data-mail-status>${statusHTML(s)}</div>
  <div data-mail-evidence>${mailEvidenceHTML(s.evidence,{busy:s.evidenceBusy})}</div><div data-mail-rows>${rowsHTML(s)}</div><div data-mail-more>${s.nextCursor?button('mail-more','Load older imports'):''}</div>
  <div data-mail-messages>${messagesHTML(s)}</div><div data-mail-message-more>${s.messageCursor?button('mail-message-more','More emails needing attention'):''}</div>
- <details class="mail-history"><summary>Import earlier emails</summary><p>New arrivals are imported automatically. Choose a date range to import older emails from this label. Duplicate checks still apply.</p>
+ <details class="mail-history"><summary>Import earlier emails</summary><p>New arrivals are imported automatically. Choose a date range to import older emails from this label. Duplicate checks still apply. Requests are picked up on the next scheduled check.</p>
  <form id="mail-history-form"><label for="mail-history-after">Received from (New York)</label><input id="mail-history-after" type="date" required>
  <label for="mail-history-before">Received before (New York)</label><input id="mail-history-before" type="date" required>
  <label for="mail-history-count">Maximum emails</label><input id="mail-history-count" type="number" min="1" max="1000" value="100" required>

@@ -1,10 +1,12 @@
 # Gmail statement intake: owner setup and recovery
 
+**Selected no-paid-hosting route:** use [twice-daily GitHub intake](ap-gmail-intake-free-setup.md). It needs no Google Cloud billing account. The rest of this guide describes optional Cloud Run; do not provision it for the free GitHub route.
+
 Forwarding to the Gmail **AP Statements** label is the first step. The app also needs a separate authenticated background service. Streamlit does not keep this worker alive, and refreshing AP does not run OCR. Nothing in this branch provisions or activates that connection automatically.
 
 ## What is ready and what is still gated
 
-The code checks the selected label about every five minutes, saves eligible PDFs privately, and processes one PDF at a time. Its comparison is **preliminary**, using the current saved BILL source and saved vendor mappings. A person still checks PDF reading, vendor choice, exceptions, initials, and completion. Matching does not establish payment settlement. Credits omitted from the Bills CSV cannot be proved present in BILL by this workflow. Continue updating the Bills CSV manually.
+The optional Cloud Run configuration checks the selected label about every five minutes, saves eligible PDFs privately, and processes one PDF at a time. Its comparison is **preliminary**, using the current saved BILL source and saved vendor mappings. A person still checks PDF reading, vendor choice, exceptions, initials, and completion. Matching does not establish payment settlement. Credits omitted from the Bills CSV cannot be proved present in BILL by this workflow. Continue updating the Bills CSV manually.
 
 The queue survives restarts and uses separate identities for message/MIME part, original hash, processing attempt, and dispatch. Identical statement content links to its saved copy, including completed/archived copies. Different originals are retained. Overlapping statements retain every incoming row and identify new/repeated invoices. Similar statements wait for a user choice. Automatic evidence cannot overwrite a human-edited, confirmed, completed, archived, or reopened head.
 

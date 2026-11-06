@@ -2,6 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mailImportsHTML,mailEvidenceHTML} from '../app/ap_statements/frontend/mail-imports-ui.mjs';
 import {completionPayload} from '../app/ap_statements/frontend/history.mjs';
+
+test('email status describes scheduled work without promising a five-minute checker',()=>{
+ const html=mailImportsHTML({enabled:true,loaded:true,connection:{id:'conn',label:'AP Statements',paused:false,lastSuccessAt:'2026-11-06T13:17:00Z'},counts:{},items:[],messages:[]});
+ assert.doesNotMatch(html,/every five minutes|Automatic imports on/);
+ assert.match(html,/Ready for scheduled imports/);assert.match(html,/Last successful check/);
+ assert.match(html,/New mail, retries, and earlier-email requests run on the configured import schedule/);
+ assert.match(html,/next scheduled check/);assert.match(html,/Pause imports/);
+ assert.match(html,/preliminary/i);assert.match(html,/Credits absent/);
+});
 test('mail controls escape subjects, label preliminary work and show separate New York dates',()=>{
  const html=mailImportsHTML({enabled:true,loaded:true,connection:{id:'conn',label:'AP Statements',paused:false},counts:{queued:2},
  items:[{id:'receipt',status:'awaiting_review',filename:'<img src=x onerror=alert(1)>',subject:'<script>bad</script>',received_at:'2026-11-04T15:00:00Z',

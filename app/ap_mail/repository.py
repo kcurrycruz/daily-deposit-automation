@@ -109,6 +109,14 @@ class MailRepository:
             identifier(cursor['job_id']); natural(cursor['dispatch_generation'], 1)
         return self._read('outbox', {'cursor':cursor,'limit':limit,'state':state})
 
+    def batch_pending(self, generation, cursor=None, limit=25):
+        natural(generation, 1)
+        natural(limit, 1, 100)
+        if cursor is not None: identifier(cursor)
+        return self._rpc('ap_mail_batch_pending', dict(
+            p_workspace=self.config.workspace_id, p_connection=self.config.connection_id,
+            p_generation=generation, p_cursor=cursor, p_limit=limit))
+
     def receipt(self, receipt_id):
         return self._read('receipt', {'receipt_id':identifier(receipt_id)})
 

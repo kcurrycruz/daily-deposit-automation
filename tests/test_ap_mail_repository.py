@@ -15,6 +15,17 @@ class RpcClient:
 
 
 class MailRepositoryTests(unittest.TestCase):
+    def test_batch_pending_pins_connection_and_validates_bounds(self):
+        repo,client=self.repo()
+        self.assertTrue(callable(getattr(repo,'batch_pending',None)), 'connection-scoped batch read is missing')
+        client.reply={'items':[],'nextCursor':None}
+        self.assertEqual(repo.batch_pending(1)['items'],[])
+        name,args=client.calls[-1]
+        self.assertEqual(name,'ap_mail_batch_pending')
+        self.assertEqual(args,dict(p_workspace=W,p_connection=C,p_generation=1,p_cursor=None,p_limit=25))
+        for generation,cursor,limit in [(0,None,25),(True,None,25),(1,'bad',25),(1,None,0),(1,None,101)]:
+            with self.assertRaises(MailError):repo.batch_pending(generation,cursor,limit)
+
     def test_mail_capability_is_optional_and_versioned(self):
         import httpx
         from test_ap_shared_repository import BackendTransport, make_repository

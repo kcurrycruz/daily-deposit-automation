@@ -11,6 +11,7 @@ COPY app/ap_mail app/ap_mail
 COPY app/ap_shared app/ap_shared
 COPY app/ap_statements/frontend app/ap_statements/frontend
 COPY app/ap_statements/build.mjs app/ap_statements/build.mjs
+COPY app/ap_statements/streamlit_bridge.mjs app/ap_statements/streamlit_bridge.mjs
 COPY app/ap_statements/licenses app/ap_statements/licenses
 COPY workers/ap_mail workers/ap_mail
 RUN node app/ap_statements/build.mjs && node -e "if(process.versions.node.split('.')[0]!=='24')process.exit(1)" && python3 -c "import sys;assert sys.version_info[:2]==(3,12)"

@@ -1,0 +1,74 @@
+name: Import AP statements twice daily
+
+on:
+  schedule:
+    - cron: '17 8,16 * * *'
+      timezone: America/New_York
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ap-mail-free-batch
+  cancel-in-progress: false
+
+env:
+  # Update both literal release refs only after the replacement source is verified.
+  AP_MAIL_SOURCE_SHA: f78eaae29bfd4c595b7a81a08dff8e0b74902275
+  AP_MAIL_RUNNER: ubuntu-24.04
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_NO_CACHE_DIR: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  intake:
+    if: >-
+      ${{ vars.AP_MAIL_BATCH_ENABLED == 'true' &&
+          github.repository == 'kcurrycruz/daily-deposit-automation' &&
+          github.event.repository.private == false &&
+          github.ref == 'refs/heads/main' &&
+          github.event.repository.default_branch == 'main' &&
+          contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) &&
+          (github.event_name == 'workflow_dispatch' || vars.AP_MAIL_SCHEDULE_ENABLED == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the reviewed AP release
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: f78eaae29bfd4c595b7a81a08dff8e0b74902275
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify the exact source revision
+        run: test "$(git rev-parse HEAD)" = "$AP_MAIL_SOURCE_SHA"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install the locked worker dependencies
+        run: python -m pip install --require-hashes -r workers/ap_mail/requirements.lock
+      - name: Install the locked statement reader
+        run: npm ci --prefix app/ap_statements --ignore-scripts --no-audit --no-fund
+      - name: Install the locked browser driver
+        run: npm ci --prefix workers/ap_mail --ignore-scripts --no-audit --no-fund
+      - name: Prepare bundled PDF and OCR assets
+        run: node app/ap_statements/build.mjs
+      - name: Install the matching sandboxed browser
+        run: node workers/ap_mail/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Verify the reader with a synthetic PDF
+        run: python -m workers.ap_mail.smoke
+      - name: Import and preliminarily check statements
+        run: python -m workers.ap_mail.batch
+        env:
+          AP_MAIL_BATCH_ENABLED: ${{ vars.AP_MAIL_BATCH_ENABLED }}
+          AP_MAIL_SCHEDULE_ENABLED: ${{ vars.AP_MAIL_SCHEDULE_ENABLED }}
+          AP_MAIL_SUPABASE_URL: ${{ vars.AP_MAIL_SUPABASE_URL }}
+          AP_MAIL_WORKSPACE_ID: ${{ vars.AP_MAIL_WORKSPACE_ID }}
+          AP_MAIL_CONNECTION_ID: ${{ vars.AP_MAIL_CONNECTION_ID }}
+          AP_MAIL_BUCKET: ${{ vars.AP_MAIL_BUCKET }}
+          AP_MAIL_SUPABASE_KEY: ${{ secrets.AP_MAIL_SUPABASE_KEY }}
+          AP_MAIL_GMAIL_GRANT: ${{ secrets.AP_MAIL_GMAIL_GRANT }}

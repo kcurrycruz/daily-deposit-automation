@@ -31,7 +31,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -48,12 +48,16 @@ jobs:
       - run: npm ci --prefix workers/ap_mail --ignore-scripts --no-audit --no-fund
       - run: node app/ap_statements/build.mjs
       - run: node workers/ap_mail/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Use the runner's existing Chrome sandbox helper
+        run: |
+          test "$(stat -c '%u:%a' /opt/google/chrome/chrome-sandbox)" = '0:4755'
+          echo 'CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox' >> "$GITHUB_ENV"
       - run: python -m compileall -q app streamlit_app.py
       - run: python -m unittest discover -s tests -v
       - run: node --test --test-isolation=none tests/ap_statements*.test.mjs
 
   mail-package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +68,7 @@ jobs:
       - run: terraform -chdir=deploy/ap_mail fmt -check
       - run: terraform -chdir=deploy/ap_mail validate
       - run: docker build -f workers/ap_mail/Dockerfile -t ap-mail-smoke .
-      - run: docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint python ap-mail-smoke -m workers.ap_mail.smoke
+      - run: docker run --rm --network none --read-only --security-opt seccomp=workers/ap_mail/seccomp_profile.json --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint python ap-mail-smoke -m workers.ap_mail.smoke
 
   mail-synthetic:
     if: github.event_name == 'workflow_dispatch' && inputs.synthetic_mail_acceptance

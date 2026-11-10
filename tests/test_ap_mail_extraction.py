@@ -50,6 +50,19 @@ class ExtractionTests(unittest.TestCase):
                 doc=run_child([sys.executable,str(child)],{},timeout_seconds=5,heartbeat=lambda:True)
             self.assertEqual(doc['rows'][0]['amount'],13800)
 
+    def test_sandbox_helper_reaches_child_without_database_or_gmail_credentials(self):
+        from app.ap_mail.process import run_json
+        with tempfile.TemporaryDirectory() as folder:
+            child=Path(folder)/'environment.py'
+            child.write_text("import json,os,sys\njson.load(sys.stdin)\n"
+                "print(json.dumps({'type':'result','value':{k:os.environ.get(k) for k in "
+                "['CHROME_DEVEL_SANDBOX','AP_MAIL_SUPABASE_KEY','AP_MAIL_GMAIL_GRANT']}}))\n",encoding='utf-8')
+            with patch.dict(os.environ,CHROME_DEVEL_SANDBOX='/opt/google/chrome/chrome-sandbox',
+                            AP_MAIL_SUPABASE_KEY='private-db',AP_MAIL_GMAIL_GRANT='private-mail'):
+                result=run_json([sys.executable,str(child)],{},timeout_seconds=5,heartbeat=lambda:True)
+            self.assertEqual(result,{'CHROME_DEVEL_SANDBOX':'/opt/google/chrome/chrome-sandbox',
+                                     'AP_MAIL_SUPABASE_KEY':None,'AP_MAIL_GMAIL_GRANT':None})
+
     def test_timeout_and_heartbeat_loss_terminate_owned_child(self):
         from app.ap_mail.extraction import run_child
         with tempfile.TemporaryDirectory() as folder:

@@ -79,6 +79,14 @@ After an authorized reviewed-code push, run **Validate Application** on that rev
 
 Windows results do not substitute for Linux acceptance. If setup/runtime cannot fit the 20-minute job, leave activation off and resolve it. Never disable the sandbox as a workaround.
 
+Ubuntu 24.04 runners use the existing root-owned Google Chrome sandbox helper
+through `CHROME_DEVEL_SANDBOX`; setup checks its owner and setuid mode before
+running the pinned Playwright browser. The credential-free parser child inherits
+this setting. AppArmor and global kernel restrictions remain enabled. Container
+acceptance uses Playwright's version-matched seccomp profile with the non-root
+user, no network and a read-only filesystem. See the
+[profile provenance](../workers/ap_mail/seccomp_profile.README.md).
+
 Keep `AP_MAIL_SCHEDULE_ENABLED=false`. After migration/access checks, deliberately resume the matching app connection and set `AP_MAIL_BATCH_ENABLED=true` for manual acceptance. Use **Actions → Import AP statements twice daily → Run workflow → main**.
 
 The first successful check inventories existing labeled mail and anchors history without importing an unexpected backlog. Use the app's explicit bounded **Import earlier emails** control for older mail.

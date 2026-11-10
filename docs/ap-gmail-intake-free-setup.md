@@ -79,9 +79,10 @@ After an authorized reviewed-code push, run **Validate Application** on that rev
 
 Windows results do not substitute for Linux acceptance. If setup/runtime cannot fit the 20-minute job, leave activation off and resolve it. Never disable the sandbox as a workaround.
 
-Ubuntu 24.04 runners use the existing root-owned Google Chrome sandbox helper
-through `CHROME_DEVEL_SANDBOX`; setup checks its owner and setuid mode before
-running the pinned Playwright browser. The credential-free parser child inherits
+Ubuntu 24.04 runners install the matching pinned Playwright browser's sandbox
+helper into a private root-owned directory and select it through
+`CHROME_DEVEL_SANDBOX`. Setup checks ownership, parent-directory permissions and
+setuid mode before running the browser. The credential-free parser child inherits
 this setting. AppArmor and global kernel restrictions remain enabled. Container
 acceptance uses Playwright's version-matched seccomp profile with the non-root
 user, no network and a read-only filesystem. See the

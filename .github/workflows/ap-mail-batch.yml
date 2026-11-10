@@ -59,10 +59,8 @@ jobs:
         run: node app/ap_statements/build.mjs
       - name: Install the matching sandboxed browser
         run: node workers/ap_mail/node_modules/playwright/cli.js install --with-deps chromium
-      - name: Use the runner's existing Chrome sandbox helper
-        run: |
-          test "$(stat -c '%u:%a' /opt/google/chrome/chrome-sandbox)" = '0:4755'
-          echo 'CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox' >> "$GITHUB_ENV"
+      - name: Prepare the matching Chromium sandbox helper
+        run: bash workers/ap_mail/prepare-linux-sandbox.sh
       - name: Verify the reader with a synthetic PDF
         run: python -m workers.ap_mail.smoke
       - name: Import and preliminarily check statements

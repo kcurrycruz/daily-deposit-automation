@@ -48,10 +48,9 @@ jobs:
       - run: npm ci --prefix workers/ap_mail --ignore-scripts --no-audit --no-fund
       - run: node app/ap_statements/build.mjs
       - run: node workers/ap_mail/node_modules/playwright/cli.js install --with-deps chromium
-      - name: Use the runner's existing Chrome sandbox helper
-        run: |
-          test "$(stat -c '%u:%a' /opt/google/chrome/chrome-sandbox)" = '0:4755'
-          echo 'CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox' >> "$GITHUB_ENV"
+      - name: Prepare the matching Chromium sandbox helper
+        run: bash workers/ap_mail/prepare-linux-sandbox.sh
+      - run: python -m workers.ap_mail.smoke
       - run: python -m compileall -q app streamlit_app.py
       - run: python -m unittest discover -s tests -v
       - run: node --test --test-isolation=none tests/ap_statements*.test.mjs

@@ -10,6 +10,7 @@
 !app/ap_statements/package*.json
 !app/ap_statements/build.mjs
 !app/ap_statements/streamlit_bridge.mjs
+!app/ap_statements/bridge_core.mjs
 !app/ap_statements/licenses
 !app/ap_statements/licenses/**
 !workers

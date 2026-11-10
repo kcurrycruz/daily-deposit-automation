@@ -10,7 +10,7 @@ from .contracts import MailError,CODES
 
 OUTPUT_BYTES=1024*1024
 ENV_KEYS=frozenset(('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','TMPDIR','LANG','LC_ALL',
-                    'NODE_PATH','PLAYWRIGHT_BROWSERS_PATH','AP_MAIL_BROWSER_BINARY'))
+                    'NODE_PATH','PLAYWRIGHT_BROWSERS_PATH','AP_MAIL_BROWSER_BINARY','CHROME_DEVEL_SANDBOX'))
 
 
 def _terminate(process):

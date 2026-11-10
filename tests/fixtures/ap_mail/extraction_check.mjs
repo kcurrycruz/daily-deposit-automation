@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
+import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join,resolve,dirname,basename} from 'node:path';
 import {textPdf,imagePdf,encryptedPdf,statementLines} from './pdfs.mjs';
@@ -8,6 +9,14 @@ const folder=await mkdtemp(join(tmpdir(),'ap-mail-synthetic-'));
 const view=await openExtractionPage();
 const comparable=doc=>({vendor:doc.vendor,rows:doc.rows.map(({invoiceNumber,amount,type,page})=>({invoiceNumber,amount,type,page})),rawText:doc.rawText});
 try{
+ // System monospace fonts differ across Windows and Ubuntu. Generate the same
+ // synthetic ink with a font from the existing locked PDF.js dependency.
+ const require=createRequire(new URL('../../../app/ap_statements/package.json',import.meta.url));
+ const fixtureFont=await readFile(require.resolve('pdfjs-dist/standard_fonts/LiberationSans-Bold.ttf'));
+ await view.page.evaluate(async encoded=>{
+  const face=new FontFace('APFixtureFont',Uint8Array.from(atob(encoded),c=>c.charCodeAt(0)).buffer);
+  await face.load();document.fonts.add(face);
+ },fixtureFont.toString('base64'));
  const session=await view.browser.newBrowserCDPSession();
  const {arguments:args}=await session.send('Browser.getBrowserCommandLine');
  assert.ok(!args.includes('--no-sandbox'));await session.detach();
@@ -20,7 +29,7 @@ try{
   const jpeg=await view.page.evaluate(({lines,dots})=>{
    const canvas=document.createElement('canvas');canvas.width=1836;canvas.height=2376;
    const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
-   ctx.fillStyle='black';ctx.font='42px monospace';
+   ctx.fillStyle='black';ctx.font='54px APFixtureFont';
    lines.forEach((text,i)=>{
     const y=[.1,.22,.38,.43,.48,.8][i]*canvas.height;
     if(i>=2&&i<=4)text.split(/\s+/).forEach((word,n)=>ctx.fillText(word,[270,510,780,1440][n],y));

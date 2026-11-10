@@ -51,6 +51,8 @@ jobs:
       - name: Prepare the matching Chromium sandbox helper
         run: bash workers/ap_mail/prepare-linux-sandbox.sh
       - run: python -m workers.ap_mail.smoke
+      - name: Check digital and scanned PDF parity before the full suite
+        run: node tests/fixtures/ap_mail/extraction_check.mjs
       - run: python -m compileall -q app streamlit_app.py
       - run: python -m unittest discover -s tests -v
       - run: node --test --test-isolation=none tests/ap_statements*.test.mjs

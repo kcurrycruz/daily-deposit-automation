@@ -24,6 +24,14 @@ _DATED_SHEETS = {
     "bs": "XXXXXX BS",
     "hash": "XXXXXX Hash",
 }
+_HIDDEN_SMS_INPUT_SHEETS = {
+    "sales": "SMS Input - Sales",
+    "coupons": "SMS Input - Coupon",
+    "discounts": "SMS Input - Discounts",
+    "hash": "SMS Input - HASH",
+    "bs": "SMS Input - BS",
+    "milk_bottles": "SMS Input - Milk Bottles",
+}
 
 
 def reporting_workbook_name(deposit_date: date) -> str:
@@ -56,6 +64,10 @@ def build_reporting_workbook(
         sheet.title = f"{date_prefix} {_dated_label(role)}"
 
     _write_report_values(workbook[_REPORT_SHEET], data)
+    for role, sheet_name in _HIDDEN_SMS_INPUT_SHEETS.items():
+        sheet = workbook.create_sheet(sheet_name)
+        _write_source_grid(sheet, bundle.reports[role], literal_text=True)
+        sheet.sheet_state = "hidden"
     workbook.calculation.fullCalcOnLoad = True
 
     output = BytesIO()
@@ -142,13 +154,15 @@ def _subdepartment_columns(report: SmsExport) -> tuple[int, dict[str, int]]:
     raise ValueError(f"{report.role.title()} report has no sub-department data header.")
 
 
-def _write_source_grid(sheet, report: SmsExport) -> None:
+def _write_source_grid(sheet, report: SmsExport, *, literal_text: bool = False) -> None:
     for row in sheet.iter_rows():
         for cell in row:
             cell.value = None
     for row_number, row in enumerate(report.rows, start=1):
         for column_number, value in enumerate(row, start=1):
-            sheet.cell(row=row_number, column=column_number, value=value)
+            cell = sheet.cell(row=row_number, column=column_number, value=value)
+            if literal_text and isinstance(value, str) and value.startswith("="):
+                cell.data_type = "s"
 
 
 def _write_report_values(sheet, data: SmsDepositData) -> None:

@@ -31,6 +31,14 @@ EXPECTED_SHEETS = [
     "XXXXXX BS",
     "XXXXXX Hash",
 ]
+HIDDEN_SMS_SHEETS = {
+    "sales": "SMS Input - Sales",
+    "coupons": "SMS Input - Coupon",
+    "discounts": "SMS Input - Discounts",
+    "hash": "SMS Input - HASH",
+    "bs": "SMS Input - BS",
+    "milk_bottles": "SMS Input - Milk Bottles",
+}
 MONEY_FORMAT = "0.00"
 
 
@@ -83,8 +91,10 @@ class DailyReportingWorkbookTests(unittest.TestCase):
         formula_workbook = load_workbook(BytesIO(output), data_only=False)
 
         self.assertEqual(
-            values_workbook.sheetnames[-3:],
-            ["091426 Discounts", "091426 BS", "091426 Hash"],
+            values_workbook.sheetnames,
+            EXPECTED_SHEETS[:-3]
+            + ["091426 Discounts", "091426 BS", "091426 Hash"]
+            + list(HIDDEN_SMS_SHEETS.values()),
         )
         expected = {"J3": 86502.80, "M1": 74.00, "M2": -1354.18}
         for address, amount in expected.items():
@@ -181,6 +191,45 @@ class DailyReportingWorkbookTests(unittest.TestCase):
                 for cell in row
             )
         )
+
+    def test_all_six_original_sms_grids_are_hidden_supporting_sheets(self):
+        bundle = build_sms_export_bundle(sms_exports_091426())
+        data = build_sms_deposit_data(bundle)
+        template = load_workbook(TEMPLATE)
+        workbook = load_workbook(BytesIO(build_reporting_workbook(TEMPLATE, bundle, data)))
+
+        self.assertEqual(workbook.active.title, template.active.title)
+        self.assertEqual(
+            [sheet.title for sheet in workbook.worksheets if sheet.sheet_state == "visible"],
+            [sheet.title for sheet in template.worksheets if sheet.sheet_state == "visible"],
+        )
+        for role, sheet_name in HIDDEN_SMS_SHEETS.items():
+            with self.subTest(role=role):
+                sheet = workbook[sheet_name]
+                self.assertEqual(sheet.sheet_state, "hidden")
+                for row_number, source_row in enumerate(bundle.reports[role].rows, start=1):
+                    for column_number, source_value in enumerate(source_row, start=1):
+                        saved_value = sheet.cell(row_number, column_number).value
+                        if source_value in (None, ""):
+                            self.assertIn(saved_value, (None, ""))
+                        else:
+                            self.assertEqual(saved_value, source_value)
+        self.assertEqual(workbook["SubDept Sales Report"]["J3"].value, 86502.80)
+
+    def test_hidden_sms_text_resembling_a_formula_is_not_executed(self):
+        original = build_sms_export_bundle(sms_exports_091426())
+        data = build_sms_deposit_data(original)
+        reports = [
+            replace(report, rows=report.rows + (("Audit note", "=A1+1"),))
+            if report.role == "milk_bottles" else report
+            for report in original.reports.values()
+        ]
+        bundle = build_sms_export_bundle(reports)
+        workbook = load_workbook(BytesIO(build_reporting_workbook(TEMPLATE, bundle, data)))
+        cell = workbook["SMS Input - Milk Bottles"]["B10"]
+
+        self.assertEqual(cell.value, "=A1+1")
+        self.assertEqual(cell.data_type, "s")
 
     def test_extended_source_amount_rows_are_numeric_with_two_decimals(self):
         bundle = build_sms_export_bundle(sms_exports_091426())

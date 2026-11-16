@@ -151,6 +151,7 @@ from app.guided_step_ui import (
 from app.inhouse_charges import (
     compose_inhouse_memo,
     describe_inhouse_memo_draft,
+    move_inhouse_row_ids,
     normalize_inhouse_step_payload,
 )
 from app.upload_intake_ui import (
@@ -3739,7 +3740,7 @@ if uploaded and active_step == STEP_INHOUSE:
     memo_error_messages = []
     for row_number, row_id in enumerate(list(st.session_state[inhouse_ids_key]), start=1):
         row_columns = st.columns(
-            [2.5, 1.4, 0.7, 0.9, 0.35],
+            [2.3, 1.3, 0.65, 0.85, 0.27, 0.27, 0.3],
             vertical_alignment="bottom",
         )
         account_key = f"inhouse_account_{closeout_workbook_key}_{row_id}"
@@ -3797,6 +3798,26 @@ if uploaded and active_step == STEP_INHOUSE:
             memo = ""
         inhouse_rows.append({"account": account, "memo": memo, "amount": float(amount)})
         if row_columns[4].button(
+            "↑",
+            key=f"inhouse_up_{closeout_workbook_key}_{row_id}",
+            help=f"Move InHouse charge {row_number} up",
+            disabled=row_number == 1,
+        ):
+            st.session_state[inhouse_ids_key] = move_inhouse_row_ids(
+                st.session_state[inhouse_ids_key], row_id, -1
+            )
+            st.rerun()
+        if row_columns[5].button(
+            "↓",
+            key=f"inhouse_down_{closeout_workbook_key}_{row_id}",
+            help=f"Move InHouse charge {row_number} down",
+            disabled=row_number == len(st.session_state[inhouse_ids_key]),
+        ):
+            st.session_state[inhouse_ids_key] = move_inhouse_row_ids(
+                st.session_state[inhouse_ids_key], row_id, 1
+            )
+            st.rerun()
+        if row_columns[6].button(
             "×",
             key=f"inhouse_remove_{closeout_workbook_key}_{row_id}",
             help=f"Remove InHouse charge {row_number}",

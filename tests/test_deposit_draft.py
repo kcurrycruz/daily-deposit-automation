@@ -87,6 +87,21 @@ class DepositDraftTests(unittest.TestCase):
         self.assertEqual(len(preserved["sms_reports_3"]), 6)
         self.assertEqual(preserved["card_settlement_3"].getvalue(), b"settlement")
 
+    def test_moved_inhouse_order_survives_draft_zip_restore(self):
+        from app.deposit_draft import read_deposit_draft, restore_deposit_draft
+        from app.inhouse_charges import move_inhouse_row_ids
+
+        ids_key = f"inhouse_ids_{self.old_key}"
+        self.state[ids_key] = move_inhouse_row_ids(self.state[ids_key], "row-b", -1)
+        draft = read_deposit_draft(self.make_draft())
+        new_key = "membership_payments_4_0123456789abcdef"
+        session = {}
+
+        restore_deposit_draft(session, draft, uploader_key=4, workbook_key=new_key)
+
+        self.assertEqual(session[f"inhouse_ids_{new_key}"], ["row-b", "row-a"])
+        self.assertEqual(session[f"inhouse_account_{new_key}_row-a"], "8504000 · Education")
+
     def test_corrupt_source_is_rejected_before_restoring_state(self):
         from app.deposit_draft import read_deposit_draft
 

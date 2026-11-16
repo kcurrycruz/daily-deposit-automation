@@ -106,5 +106,43 @@ class InhousePayloadTests(unittest.TestCase):
             normalize_inhouse_step_payload({"actual": 140.82, "rows": []})
 
 
+class InhouseOrderTests(unittest.TestCase):
+    def test_move_reorders_complete_charges_without_changing_signed_total(self):
+        from app.inhouse_charges import move_inhouse_row_ids
+
+        ids = ["first", "credit", "last"]
+        charges = {
+            "first": ("8320000 · Store Supplies", "End of Day", "BS", 20.0),
+            "credit": ("8504000 · Education", "Credit", "KC", -5.0),
+            "last": ("8130400 · HR", "Staff class", "SR", 3.0),
+        }
+        reordered = move_inhouse_row_ids(ids, "credit", -1)
+
+        self.assertEqual(ids, ["first", "credit", "last"])
+        self.assertEqual(reordered, ["credit", "first", "last"])
+        self.assertEqual(
+            [charges[row_id] for row_id in reordered],
+            [charges["credit"], charges["first"], charges["last"]],
+        )
+        self.assertEqual(sum(charges[row_id][3] for row_id in reordered), 18.0)
+        self.assertEqual(move_inhouse_row_ids(reordered, "credit", 1), ids)
+
+    def test_boundary_moves_do_not_change_order(self):
+        from app.inhouse_charges import move_inhouse_row_ids
+
+        ids = ["first", "last"]
+        self.assertEqual(move_inhouse_row_ids(ids, "first", -1), ids)
+        self.assertEqual(move_inhouse_row_ids(ids, "last", 1), ids)
+        self.assertIsNot(move_inhouse_row_ids(ids, "first", -1), ids)
+
+    def test_invalid_move_is_rejected(self):
+        from app.inhouse_charges import move_inhouse_row_ids
+
+        for row_id, offset in (("missing", 1), ("first", 0), ("first", 2)):
+            with self.subTest(row_id=row_id, offset=offset):
+                with self.assertRaises(ValueError):
+                    move_inhouse_row_ids(["first"], row_id, offset)
+
+
 if __name__ == "__main__":
     unittest.main()

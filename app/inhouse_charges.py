@@ -15,6 +15,18 @@ END_OF_DAY_PREFIX = "End of Day - "
 INHOUSE_IIF_PREFIX = "InHouse:"
 
 
+def move_inhouse_row_ids(row_ids: list[str], row_id: str, offset: int) -> list[str]:
+    """Move one charge without disturbing widget values keyed by its stable ID."""
+    if type(offset) is not int or offset not in (-1, 1) or row_id not in row_ids:
+        raise ValueError("Choose an existing InHouse charge and move it up or down")
+    reordered = list(row_ids)
+    index = reordered.index(row_id)
+    destination = index + offset
+    if 0 <= destination < len(reordered):
+        reordered[index], reordered[destination] = reordered[destination], reordered[index]
+    return reordered
+
+
 def describe_inhouse_memo_draft(
     memo_type: str,
     value: str = "",

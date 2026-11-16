@@ -4034,29 +4034,29 @@ if uploaded and active_step == STEP_CLOSEOUT:
                 else {}
             )
             closeout_actuals = {}
-            header_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
+            header_columns = st.columns([1.6, 1.3, 1.1, 1.1, 0.9])
             for column, heading in zip(
                 header_columns,
-                ["Category", "System / BS", "Actual", "Difference", "Status"],
+                ["Category", "Actual", "System / BS", "Difference", "Status"],
             ):
                 column.caption(heading)
             for field in STANDARD_CLOSEOUT_ORDER:
-                row_columns = st.columns([1.6, 1.1, 1.3, 1.1, 0.9])
+                row_columns = st.columns([1.6, 1.3, 1.1, 1.1, 0.9])
                 label = STANDARD_METADATA[field]["label"]
                 baseline = float(closeout_baselines[field])
                 row_columns[0].write(label)
-                row_columns[1].write(f"${baseline:,.2f}")
+                row_columns[2].write(f"${baseline:,.2f}")
                 if field == "vendor_coupons":
                     actual = counted_coupon_total
-                    row_columns[2].write(f"${actual:,.2f} (NCG + MFG)")
+                    row_columns[1].write(f"${actual:,.2f} (NCG + MFG)")
                 elif field == "charge_house":
                     actual = inhouse_payload["actual"]
-                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
+                    row_columns[1].write(f"${actual:,.2f} (breakdown)")
                 elif locked_activity_actuals.get(field) is not None:
                     actual = float(locked_activity_actuals[field])
-                    row_columns[2].write(f"${actual:,.2f} (breakdown)")
+                    row_columns[1].write(f"${actual:,.2f} (breakdown)")
                 else:
-                    actual = row_columns[2].number_input(
+                    actual = row_columns[1].number_input(
                         f"{label} actual",
                         min_value=0.0,
                         value=float(closeout_defaults[field]),
@@ -4329,7 +4329,7 @@ if uploaded and active_step == STEP_CLOSEOUT:
                         }
                     )
                     st.dataframe(
-                        standard_display[["Category", "System / BS", "Actual", "Difference"]],
+                        standard_display[["Category", "Actual", "System / BS", "Difference"]],
                         hide_index=True,
                         use_container_width=True,
                     )
